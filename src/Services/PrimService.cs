@@ -205,6 +205,16 @@ public class PrimService
         input.SerialStart = input.SerialStart?.ToUpperInvariant();
         input.SerialEnd = input.SerialEnd?.ToUpperInvariant();
 
+        // Homing rules (service-level): records home only to containers, locations, users.
+        var homeErr = HomeRules.ValidateHome("Record", input.HomeKind);
+        if (homeErr != null) return (false, homeErr);
+        var assigneeErr = HomeRules.ValidateHome("Record", input.AssigneeKind, "Assignee");
+        if (assigneeErr != null) return (false, assigneeErr);
+
+        // Compressed-record children: only Compressed records may have child records.
+        var childErr = await ValidateRecordParentAsync(db, input);
+        if (childErr != null) return (false, childErr);
+
         if (input.Id == 0)
         {
             input.RecordNumber = NextNumber(db.Records.Select(r => r.RecordNumber), "R-", 6);
@@ -250,6 +260,13 @@ public class PrimService
     {
         using var db = _factory.CreateDbContext();
         input.ContainerName = input.ContainerName.ToUpperInvariant();
+
+        // Homing rules (service-level): containers home only to containers, locations, users.
+        var homeErr = HomeRules.ValidateHome("Container", input.HomeKind);
+        if (homeErr != null) return (false, homeErr);
+        var assigneeErr = HomeRules.ValidateHome("Container", input.AssigneeKind, "Assignee");
+        if (assigneeErr != null) return (false, assigneeErr);
+
         if (input.Id == 0)
         {
             input.Barcode = NextNumber(db.Containers.Select(c => c.Barcode), "CON", 6);
@@ -323,7 +340,11 @@ public class PrimService
         if (cur == null) return (false, "User no longer exists.");
         if (cur.RowVersion != input.RowVersion)
             return (false, "Not the latest version — another user changed this user.");
-        db.Entry(cur).CurrentValues.SetValues(input);
+        // Explicit field copy: never touch PasswordHash/PasswordSalt here
+        // (SetValues would null them because edit models don't carry them).
+        cur.UserId = input.UserId; cur.DisplayName = input.DisplayName;
+        cur.Role = input.Role; cur.Email = input.Email;
+        cur.LocationId = input.LocationId; cur.Active = input.Active;
         cur.RowVersion++;
         await db.SaveChangesAsync();
         await AuditAsync(db, "User", cur.Id, cur.UserId, "Updated", actor);
@@ -332,8 +353,19 @@ public class PrimService
 
     // TIS-2219 Move Items: change Home and/or Assignee, multi-row.
     public async Task<int> MoveItemsAsync(string kind, IEnumerable<int> ids, string? newHome,
-        string? newHomeKind, int? newHomeRefId, string? newAssignee, bool assigneeFollowsHome, string actor)
+        string? newHomeKind, int? newHomeRefId, string? newAssignee, string? newAssigneeKind,
+        bool assigneeFollowsHome, string actor)
     {
+        if (newHome != null)
+        {
+            var homeErr = HomeRules.ValidateHome(kind, newHomeKind);
+            if (homeErr != null) throw new ArgumentException(homeErr, nameof(newHomeKind));
+        }
+        if (newAssignee != null)
+        {
+            var assigneeErr = HomeRules.ValidateHome(kind, newAssigneeKind, "assignee");
+            if (assigneeErr != null) throw new ArgumentException(assigneeErr, nameof(newAssigneeKind));
+        }
         using var db = _factory.CreateDbContext();
         int n = 0;
         if (kind == "Record")
@@ -343,8 +375,12 @@ public class PrimService
             {
                 var o = $"Home={r.Home}, Assignee={r.Assignee}";
                 if (newHome != null) { r.Home = newHome; r.HomeKind = newHomeKind; r.HomeRefId = newHomeRefId; }
-                if (assigneeFollowsHome && newHome != null) r.Assignee = newHomeKind == "User" ? newHome : r.Assignee;
-                else if (newAssignee != null) r.Assignee = newAssignee;
+                if (assigneeFollowsHome && newHome != null)
+                {
+                    r.Assignee = newHome;
+                    r.AssigneeKind = newHomeKind;
+                }
+                else if (newAssignee != null) { r.Assignee = newAssignee; r.AssigneeKind = newAssigneeKind; }
                 r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
                 await AuditAsync(db, "Record", r.Id, r.RecordNumber, "Moved", actor, "Movement", o, $"Home={r.Home}, Assignee={r.Assignee}");
                 n++;
@@ -357,7 +393,7 @@ public class PrimService
             {
                 var o = $"Home={c.Home}, Assignee={c.Assignee}";
                 if (newHome != null) { c.Home = newHome; c.HomeKind = newHomeKind; c.HomeRefId = newHomeRefId; }
-                if (newAssignee != null) c.Assignee = newAssignee;
+                if (newAssignee != null) { c.Assignee = newAssignee; c.AssigneeKind = newAssigneeKind; }
                 c.LastUpdatedUtc = DateTime.UtcNow; c.LastUpdatedBy = actor; c.RowVersion++;
                 await AuditAsync(db, "Container", c.Id, c.ContainerName, "Moved", actor, "Movement", o, $"Home={c.Home}, Assignee={c.Assignee}");
                 n++;
@@ -429,6 +465,83 @@ public class PrimService
         db.Containers.RemoveRange(items);
         await db.SaveChangesAsync();
         return items.Count;
+    }
+
+    // ---------------- homing rules / compressed children / grid layouts / passwords ----------------
+
+    /// <summary>
+    /// A record may only be a child of a Compressed record; rejects missing
+    /// parents, non-compressed parents, self-parenting, and cycles.
+    /// </summary>
+    private static async Task<string?> ValidateRecordParentAsync(PrimDbContext db, RecordItem input)
+    {
+        if (input.ParentRecordId == null) return null;
+        var pid = input.ParentRecordId.Value;
+        if (input.Id != 0 && pid == input.Id) return "A record cannot be its own parent.";
+        var parent = await db.Records.FindAsync(pid);
+        if (parent == null) return "The parent record does not exist.";
+        if (parent.RecordType != "Compressed")
+            return "Only compressed records can have child records.";
+        // Cycle check: walk the ancestor chain.
+        var seen = new HashSet<int> { input.Id };
+        var cur = parent;
+        while (cur != null)
+        {
+            if (!seen.Add(cur.Id)) return "This would create a circular parent chain.";
+            cur = cur.ParentRecordId == null ? null : await db.Records.FindAsync(cur.ParentRecordId.Value);
+        }
+        return null;
+    }
+
+    public async Task<List<RecordItem>> GetChildRecordsAsync(int parentId)
+    {
+        using var db = _factory.CreateDbContext();
+        return await db.Records.Where(r => !r.Deleted && r.ParentRecordId == parentId)
+            .OrderBy(r => r.RecordNumber).ToListAsync();
+    }
+
+    // ---------------- per-user grid column layouts ----------------
+    public async Task<List<string>?> GetGridLayoutAsync(string userId, string gridId)
+    {
+        using var db = _factory.CreateDbContext();
+        var row = await db.UserGridLayouts
+            .FirstOrDefaultAsync(g => g.UserId == userId && g.GridId == gridId);
+        return row == null ? null :
+            row.ColumnsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+    }
+
+    public async Task SaveGridLayoutAsync(string userId, string gridId, List<string> columns)
+    {
+        using var db = _factory.CreateDbContext();
+        var row = await db.UserGridLayouts
+            .FirstOrDefaultAsync(g => g.UserId == userId && g.GridId == gridId)
+            ?? new UserGridLayout { UserId = userId, GridId = gridId };
+        if (row.Id == 0) db.UserGridLayouts.Add(row);
+        row.ColumnsCsv = string.Join(",", columns);
+        row.UpdatedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    // ---------------- dev passwords (DevPasswordAuthProvider) ----------------
+    public async Task<(bool Ok, string? Error)> SetUserPasswordAsync(string userId, string password, string actor)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 4)
+            return (false, "Password must be at least 4 characters.");
+        using var db = _factory.CreateDbContext();
+        var u = await db.Users.FirstOrDefaultAsync(x => x.UserId == userId);
+        if (u == null) return (false, "User not found.");
+        var (hash, salt) = PasswordHasher.Hash(password);
+        u.PasswordHash = hash; u.PasswordSalt = salt; u.RowVersion++;
+        await db.SaveChangesAsync();
+        await AuditAsync(db, "User", u.Id, u.UserId, "Updated", actor, "Password", null, "(changed)");
+        return (true, null);
+    }
+
+    public async Task<string?> GetUserLocationNameAsync(int? locationId)
+    {
+        if (locationId == null) return null;
+        using var db = _factory.CreateDbContext();
+        return (await db.Locations.FindAsync(locationId.Value))?.LocationName;
     }
 
     // ---------------- workspaces / favorites (TIS-1411/351) ----------------

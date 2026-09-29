@@ -3,19 +3,34 @@ namespace Prim.Services;
 /// <summary>Per-circuit UI state: current user, recent items, activity log (TIS-349).</summary>
 public class AppState
 {
-    public string CurrentUserId { get; private set; } = "admin";
-    public string CurrentDisplayName { get; private set; } = "PRIM Administrator";
-    public string CurrentRole { get; private set; } = "Admin";
+    public string CurrentUserId { get; private set; } = "";
+    public string CurrentDisplayName { get; private set; } = "";
+    public string CurrentRole { get; private set; } = "";
+
+    /// <summary>True after a successful login via IAuthProvider. Production uses OAuth/SSO.</summary>
+    public bool IsAuthenticated { get; private set; }
 
     public event Action? Changed;
     private void Notify() => Changed?.Invoke();
 
-    public void SetUser(string userId, string displayName, string role)
+    public void SignIn(string userId, string displayName, string role)
     {
         CurrentUserId = userId; CurrentDisplayName = displayName; CurrentRole = role;
+        IsAuthenticated = true;
         Log("Signed in", $"{displayName} ({role})");
         Notify();
     }
+
+    public void SignOut()
+    {
+        Log("Signed out", CurrentDisplayName);
+        CurrentUserId = ""; CurrentDisplayName = ""; CurrentRole = "";
+        IsAuthenticated = false;
+        Recent.Clear(); ActivityLog.Clear(); ViewPaneSelection = null;
+        Notify();
+    }
+
+
 
     public bool IsAdmin => CurrentRole == "Admin";
     public bool IsRecordsManager => CurrentRole is "Admin" or "Records Manager";

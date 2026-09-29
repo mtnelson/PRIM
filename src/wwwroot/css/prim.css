@@ -10,12 +10,34 @@ body {
 .log-row { display: flex; gap: 8px; padding: 2px 0; border-bottom: 1px dotted #eee; }
 .log-time { color: #888; font-family: monospace; }
 .label-sheet { width: 4in; height: 2in; border: 1px dashed #999; padding: 12px; font-family: monospace; }
-@media print {
-    body * { visibility: hidden; }
-    .label-sheet, .label-sheet * { visibility: visible; }
-    .label-sheet { position: absolute; left: 0; top: 0; border: none; }
-}
 @media (max-width: 1280px) {
     .activity-log { left: 0; right: 0; }
     .activity-fab { right: 16px; }
+}
+
+/* Selected grid rows: obvious highlight (selection) */
+.mud-table-row.prim-row-selected,
+tr.prim-row-selected {
+    background-color: rgba(25, 118, 210, 0.16) !important;
+}
+.mud-table-row.prim-row-selected:hover,
+tr.prim-row-selected:hover {
+    background-color: rgba(25, 118, 210, 0.26) !important;
+}
+
+/* Login screen */
+.login-wrap {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #eceff1;
+}
+.login-card { width: 380px; max-width: 92vw; }
+
+@media print {
+    body * { visibility: hidden; }
+    .label-sheet, .label-sheet * { visibility: visible; }
+    .label-sheet {
+        position: relative; left: 0; top: 0; border: none;
+        page-break-after: always;
+    }
+    .label-sheet:last-child { page-break-after: auto; }
 }

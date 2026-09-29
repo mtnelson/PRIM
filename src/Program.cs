@@ -23,6 +23,11 @@ builder.Services.AddDbContextFactory<PrimDbContext>(opt =>
 
 builder.Services.AddScoped<PrimService>();
 builder.Services.AddScoped<AppState>();
+builder.Services.AddScoped<HotkeyManager>();
+// Authentication is always behind IAuthProvider: DevPasswordAuthProvider for the
+// prototype (temporary username/password logins), OAuth/SSO later. Never read
+// AppUser.PasswordHash/PasswordSalt directly from UI code.
+builder.Services.AddScoped<IAuthProvider, DevPasswordAuthProvider>();
 
 // Port is configurable via appsettings.json (Prim:HttpPort); defaults to 5000.
 // An explicit --urls argument (or ASPNETCORE_URLS) still takes precedence.
@@ -34,13 +39,17 @@ if (string.IsNullOrEmpty(builder.Configuration["urls"]))
 
 var app = builder.Build();
 
-// Seed on startup
+// Seed on startup. EnsureCreated does NOT add new columns/tables to an
+// existing database, so SchemaUpgrader backfills anything the old file lacks
+// (new dev fields are added in this revision) before seeding.
 using (var scope = app.Services.CreateScope())
 {
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<PrimDbContext>>();
     using var db = factory.CreateDbContext();
     db.Database.EnsureCreated();
+    SeedData.UpgradeSchema(db);
     SeedData.EnsureSeeded(db);
+    SeedData.BackfillDevCredentials(db);
 }
 
 app.UseStaticFiles();

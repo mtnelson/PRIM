@@ -54,13 +54,25 @@ public static class GridColumns
     public static List<(string Key, string Label)> UserColumns() => new()
     {
         ("UserId","User ID"), ("DisplayName","Display Name"), ("Role","Role"),
-        ("Email","Email"), ("Active","Active"),
+        ("Email","Email"), ("LocationId","Location ID"), ("Active","Active"),
     };
 
     public static Dictionary<string,string> UserRow(AppUser u) => new()
     {
         ["UserId"] = u.UserId, ["DisplayName"] = u.DisplayName, ["Role"] = u.Role,
-        ["Email"] = u.Email ?? "", ["Active"] = u.Active ? "Yes" : "No",
+        ["Email"] = u.Email ?? "", ["LocationId"] = u.LocationId?.ToString() ?? "",
+        ["Active"] = u.Active ? "Yes" : "No",
+    };
+
+    public static List<(string Key, string Label)> WorkspaceColumns() => new()
+    {
+        ("Label","Item"), ("ObjectKind","Kind"), ("AddedUtc","Added"),
+    };
+
+    public static Dictionary<string,string> WorkspaceRow(WorkspaceItem w) => new()
+    {
+        ["Label"] = w.Label, ["ObjectKind"] = w.ObjectKind,
+        ["AddedUtc"] = w.AddedUtc.ToLocalTime().ToString("g"),
     };
 }
 

@@ -1,20 +1,39 @@
 @page "/records"
 @inject PrimService Prim
 @inject AppState App
+@inject HotkeyManager Hotkeys
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>PRIM — Records</PageTitle>
 
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Records</MudText>
     <MudSpacer />
-    <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…" Margin="Margin.Dense" Immediate="true"
-                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:260px" Class="mr-2" />
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewRecord">New Record</MudButton>
+    <div id="records-filter">
+        <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…  (Ctrl+F)" Margin="Margin.Dense" Immediate="true"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:260px" Class="mr-2" />
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewRecord">New Record (Ctrl+N)</MudButton>
 </div>
 
-<ObjectGrid @ref="_grid" Items="Filtered" Kind="Record"
+@if (_compressedRoots.Count > 0)
+{
+    <MudExpansionPanel Text="@($"Compressed record contents ({_compressedChildCount} child record(s))")" Dense="true" Class="mb-2">
+        <MudTreeView T="RecordItem" Items="_compressedRoots" Dense="true" Hover="true" ExpandOnClick="true"
+                     Style="max-height:240px;overflow-y:auto">
+            <ItemTemplate>
+                <MudTreeViewItem T="RecordItem" Value="@context.Value" Items="@context.Children"
+                                 Text="@context.Value!.RecordNumber" EndText="@(context.Value.RecordType)"
+                                 OnClick="() => SelectFromTree(context.Value)" />
+            </ItemTemplate>
+        </MudTreeView>
+    </MudExpansionPanel>
+}
+
+<ObjectGrid @ref="_grid" Items="Filtered" Kind="Record" GridId="records" Scope="records"
             GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
             GetBarcode="r => r.Barcode"
             EditItem="EditRecord" DeleteItems="DeleteRecords"
@@ -26,6 +45,8 @@
     private ObjectGrid<RecordItem>? _grid;
     private List<RecordItem> _items = new();
     private string _filter = "";
+    private List<TreeItemData<RecordItem>> _compressedRoots = new();
+    private int _compressedChildCount;
 
     private IEnumerable<RecordItem> Filtered => string.IsNullOrWhiteSpace(_filter) ? _items
         : _items.Where(r =>
@@ -34,14 +55,45 @@
             r.Barcode.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
             (r.Subject ?? "").Contains(_filter, StringComparison.OrdinalIgnoreCase));
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        Hotkeys.PushScope("records");
+        Hotkeys.Register("records", "Ctrl+N", NewRecord);
+        Hotkeys.Register("records", "F9", Refresh);
+        Hotkeys.Register("records", "Ctrl+F", async () => await JS.InvokeVoidAsync("prim.focus", "#records-filter input"));
+        await Load();
+    }
+
+    public void Dispose() => Hotkeys.UnregisterScope("records");
+
+    private async Task Refresh() { await Load(); Snackbar.Add("Records refreshed.", Severity.Info); }
 
     private async Task Load()
     {
         _items = await Prim.GetRecordsAsync(includeDeleted: false);
+        BuildCompressedTree();
         _grid?.ClearSelection();
         StateHasChanged();
     }
+
+    private void BuildCompressedTree()
+    {
+        var byParent = _items.Where(r => r.ParentRecordId != null)
+            .GroupBy(r => r.ParentRecordId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        TreeItemData<RecordItem> Build(RecordItem r) => new()
+        {
+            Value = r,
+            Children = byParent.TryGetValue(r.Id, out var kids)
+                ? kids.Select(Build).ToList() : new()
+        };
+        _compressedRoots = _items
+            .Where(r => r.RecordType == "Compressed" && byParent.ContainsKey(r.Id))
+            .Select(Build).ToList();
+        _compressedChildCount = byParent.Values.Sum(k => k.Count);
+    }
+
+    private void SelectFromTree(RecordItem r) => App.SetViewPane("Record", r.Id, r.RecordNumber);
 
     private async Task NewRecord()
     {

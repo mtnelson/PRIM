@@ -1,6 +1,10 @@
 @inherits LayoutComponentBase
 @inject AppState App
 @inject PrimService Prim
+@inject HotkeyManager Hotkeys
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject IJSRuntime JS
 @implements IDisposable
 
 <MudThemeProvider />
@@ -8,19 +12,25 @@
 <MudSnackbarProvider />
 <MudPopoverProvider />
 
+@if (!App.IsAuthenticated)
+{
+    <LoginScreen />
+}
+else
+{
 <MudLayout>
     <MudAppBar Elevation="1" Dense="true">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleLeft" />
         <MudText Typo="Typo.h6" Class="ml-2">PRIM</MudText>
         <MudText Typo="Typo.caption" Class="ml-2" Style="opacity:0.7">Physical Records Inventory Manager</MudText>
         <MudSpacer />
-        <MudSelect T="AppUser" Value="_me" ValueChanged="OnUserChanged" Dense="true" Variant="Variant.Outlined"
-                   Style="min-width:220px;background:white" Label="Signed in as" ToStringFunc="@(u => u == null ? "" : $"{u.DisplayName} ({u.Role})")">
-            @foreach (var u in _users)
-            {
-                <MudSelectItem Value="u" />
-            }
-        </MudSelect>
+        <MudTooltip Text="Help — shortcuts and how PRIM works (F1)">
+            <MudIconButton Icon="@Icons.Material.Filled.HelpOutline" Color="Color.Inherit" OnClick="ShowHelp" />
+        </MudTooltip>
+        <MudText Typo="Typo.body2" Class="mr-2">@App.CurrentDisplayName (@App.CurrentRole)</MudText>
+        <MudTooltip Text="Sign out">
+            <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="SignOut" />
+        </MudTooltip>
         <MudTooltip Text="Toggle view pane">
             <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Inherit" OnClick="ToggleView" />
         </MudTooltip>
@@ -108,31 +118,59 @@
         }
     </MudMainContent>
 </MudLayout>
+}
 
 @code {
     private bool _leftOpen = true;
     private bool _viewOpen = true;
     private bool _logOpen = false;
-    private List<AppUser> _users = new();
-    private AppUser? _me;
+    private DotNetObjectReference<MainLayout>? _self;
 
     protected override async Task OnInitializedAsync()
     {
         App.Changed += OnAppChanged;
-        _users = await Prim.GetUsersAsync();
-        _me = _users.FirstOrDefault(u => u.UserId == App.CurrentUserId) ?? _users.FirstOrDefault();
         App.ActiveAnnouncement = await Prim.GetAnnouncementAsync();
+        Hotkeys.PushScope("shell");
+        Hotkeys.Register("shell", "Alt+1", () => Nav.NavigateTo(""));
+        Hotkeys.Register("shell", "Alt+2", () => Nav.NavigateTo("advanced"));
+        Hotkeys.Register("shell", "Alt+3", () => Nav.NavigateTo("records"));
+        Hotkeys.Register("shell", "Alt+4", () => Nav.NavigateTo("containers"));
+        Hotkeys.Register("shell", "Alt+5", () => Nav.NavigateTo("locations"));
+        Hotkeys.Register("shell", "Alt+6", () => Nav.NavigateTo("users"));
+        Hotkeys.Register("shell", "Alt+7", () => Nav.NavigateTo("workspaces"));
+        Hotkeys.Register("shell", "Alt+8", () => Nav.NavigateTo("reports"));
+        Hotkeys.Register("shell", "F1", ShowHelp);
     }
 
-    private void OnUserChanged(AppUser? u)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (u == null) return;
-        _me = u;
-        App.SetUser(u.UserId, u.DisplayName, u.Role);
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("prim.hotkeys.init", _self);
+        }
     }
+
+    [JSInvokable]
+    public Task<bool> OnHotkey(string combo) => Hotkeys.Handle(combo);
+
+    private async Task ShowHelp()
+    {
+        await DialogService.ShowAsync<HelpDialog>("Help",
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        await Task.CompletedTask;
+    }
+
+    private void SignOut() => App.SignOut();
 
     private void OnAppChanged() => InvokeAsync(StateHasChanged);
-    public void Dispose() => App.Changed -= OnAppChanged;
+
+    public void Dispose()
+    {
+        App.Changed -= OnAppChanged;
+        Hotkeys.UnregisterScope("shell");
+        _self?.Dispose();
+    }
 
     private void ToggleLeft() => _leftOpen = !_leftOpen;
     private void ToggleView() => _viewOpen = !_viewOpen;

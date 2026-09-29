@@ -1,15 +1,17 @@
 @page "/locations"
 @inject PrimService Prim
 @inject AppState App
+@inject HotkeyManager Hotkeys
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@implements IDisposable
 
 <PageTitle>PRIM — Locations</PageTitle>
 
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Locations</MudText>
     <MudSpacer />
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewLocation">New Location</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewLocation">New Location (Ctrl+N)</MudButton>
 </div>
 
 <MudGrid>
@@ -26,7 +28,7 @@
         </MudPaper>
     </MudItem>
     <MudItem xs="12" md="8">
-        <ObjectGrid @ref="_grid" Items="_items" Kind="Location"
+        <ObjectGrid @ref="_grid" Items="_items" Kind="Location" GridId="locations" Scope="locations"
                     GetInfo="@(l => ("Location", l.Id, l.LocationName))"
                     GetBarcode="l => l.Barcode"
                     EditItem="EditLocation"
@@ -42,7 +44,17 @@
     private List<Location> _items = new();
     private List<TreeItemData<Location>> _roots = new();
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        Hotkeys.PushScope("locations");
+        Hotkeys.Register("locations", "Ctrl+N", NewLocation);
+        Hotkeys.Register("locations", "F9", Refresh);
+        await Load();
+    }
+
+    public void Dispose() => Hotkeys.UnregisterScope("locations");
+
+    private async Task Refresh() { await Load(); Snackbar.Add("Locations refreshed.", Severity.Info); }
 
     private async Task Load()
     {

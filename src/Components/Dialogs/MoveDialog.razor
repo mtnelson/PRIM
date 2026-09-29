@@ -18,15 +18,15 @@
         <MudCheckBox T="bool" Label="Change Assignee" @bind-Value="_changeAssignee" Class="mt-2" />
         @if (_changeAssignee)
         {
-            <MudSelect T="string" Label="New Assignee" @bind-Value="_newAssignee">
-                @foreach (var u in _users) { <MudSelectItem Value="u.UserId">@u.DisplayName</MudSelectItem> }
-            </MudSelect>
+            <MudTextField T="string" Label="New Assignee" Value="_newAssignee" ReadOnly="true"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickAssignee" />
+            <MudText Typo="Typo.caption">@_newAssigneeKind</MudText>
         }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save"
-                   Disabled="!((_changeHome && _newHome != null) || _changeAssignee)">Move</MudButton>
+                   Disabled="!((_changeHome && _newHome != null) || (_changeAssignee && _newAssignee != null))">Move</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -37,11 +37,8 @@
     private int Count => Ids.Count;
 
     private bool _changeHome, _changeAssignee, _assigneeFollowsHome = true;
-    private string? _newHome, _newHomeKind, _newAssignee;
+    private string? _newHome, _newHomeKind, _newAssignee, _newAssigneeKind;
     private int? _newHomeRefId;
-    private List<AppUser> _users = new();
-
-    protected override async Task OnInitializedAsync() => _users = await Prim.GetUsersAsync();
 
     private async Task PickHome()
     {
@@ -54,13 +51,28 @@
         }
     }
 
+    private async Task PickAssignee()
+    {
+        var p = new DialogParameters { ["Title"] = "Select Assignee" };
+        var d = await DialogService.ShowAsync<HomePickerDialog>("Select Assignee", p,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
+        {
+            _newAssigneeKind = pick.Item1; _newAssignee = pick.Item3;
+        }
+    }
+
     private async Task Save()
     {
         var n = await Prim.MoveItemsAsync(Kind, Ids,
             _changeHome ? _newHome : null, _newHomeKind, _newHomeRefId,
-            _changeAssignee ? _newAssignee : null, _assigneeFollowsHome, App.CurrentUserId);
+            _changeAssignee ? _newAssignee : null, _newAssigneeKind, _assigneeFollowsHome, App.CurrentUserId);
         Snackbar.Add($"Moved {n} item(s).", Severity.Success);
         App.Log("Moved items", $"{n} {Kind.ToLower()}(s)");
         MudDialog.Close(DialogResult.Ok(true));
     }
 }
+
+@* Pickers are shared: Home and Assignee may both be containers, locations, or users (never compressed records). *@
+<DialogHotkeys OnSave="Save" OnCancel="() => MudDialog.Cancel()" />

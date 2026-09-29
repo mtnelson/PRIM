@@ -3,6 +3,8 @@
 @inject AppState App
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject HotkeyManager Hotkeys
+@implements IDisposable
 
 <PageTitle>PRIM — Dashboard</PageTitle>
 
@@ -60,7 +62,7 @@
 
     @if (_objectType == "Record")
     {
-        <ObjectGrid @ref="_recordGrid" Items="_records" Kind="Record"
+        <ObjectGrid @ref="_recordGrid" Items="_records" Kind="Record" GridId="dashboard-records" Scope="dashboard"
                     GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
                     GetBarcode="r => r.Barcode"
                     EditItem="EditRecord" DeleteItems="DeleteRecords"
@@ -70,7 +72,7 @@
     }
     else if (_objectType == "Container")
     {
-        <ObjectGrid @ref="_containerGrid" Items="_containers" Kind="Container"
+        <ObjectGrid @ref="_containerGrid" Items="_containers" Kind="Container" GridId="dashboard-containers" Scope="dashboard"
                     GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
                     GetBarcode="c => c.Barcode"
                     EditItem="EditContainer" DeleteItems="DeleteContainers"
@@ -80,7 +82,7 @@
     }
     else
     {
-        <ObjectGrid @ref="_locationGrid" Items="_locations" Kind="Location"
+        <ObjectGrid @ref="_locationGrid" Items="_locations" Kind="Location" GridId="dashboard-locations" Scope="dashboard"
                     GetInfo="@(l => ("Location", l.Id, l.LocationName))"
                     GetBarcode="l => l.Barcode"
                     EditItem="EditLocation"
@@ -107,6 +109,14 @@
     private List<RecordItem> _records = new();
     private List<Container> _containers = new();
     private List<Location> _locations = new();
+
+    protected override void OnInitialized()
+    {
+        Hotkeys.PushScope("dashboard");
+        Hotkeys.Register("dashboard", "F9", Refresh);
+    }
+
+    public void Dispose() => Hotkeys.UnregisterScope("dashboard");
 
     protected override async Task OnInitializedAsync()
     {
@@ -147,6 +157,12 @@
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Enter") await RunSearch();
+    }
+
+    private async Task Refresh()
+    {
+        await RunSearch();
+        Snackbar.Add("Search refreshed.", Severity.Info);
     }
 
     private async Task RunSearch()

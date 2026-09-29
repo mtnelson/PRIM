@@ -2,6 +2,8 @@
 @inject PrimService Prim
 @inject AppState App
 @inject ISnackbar Snackbar
+@inject HotkeyManager Hotkeys
+@implements IDisposable
 
 <PageTitle>PRIM — Admin</PageTitle>
 
@@ -70,6 +72,16 @@
     private List<RecordItem> _deleted = new();
     private string _announcement = "";
     private List<SavedSearch> _searches = new();
+
+    protected override void OnInitialized()
+    {
+        Hotkeys.PushScope("admin");
+        Hotkeys.Register("admin", "F9", Refresh);
+    }
+
+    public void Dispose() => Hotkeys.UnregisterScope("admin");
+
+    private async Task Refresh() { await Load(); Snackbar.Add("Admin data refreshed.", Severity.Info); }
 
     protected override async Task OnInitializedAsync() => await Load();
 

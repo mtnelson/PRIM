@@ -5,6 +5,7 @@
 <MudDialog>
     <TitleContent><MudText Typo="Typo.h6">@(_model.Id == 0 ? "New User" : $"Edit User {_model.UserId}")</MudText></TitleContent>
     <DialogContent>
+        <DialogHotkeys OnSave="Save" OnCancel="() => MudDialog.Cancel()" />
         <MudForm @ref="_form" Model="_model">
             <MudGrid>
                 <MudItem xs="12" md="6">
@@ -20,6 +21,16 @@
                 </MudItem>
                 <MudItem xs="12" md="6">
                     <MudTextField T="string" Label="Email" @bind-Value="_model.Email" InputType="InputType.Email" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="int?" Label="Location membership" @bind-Value="_model.LocationId" Clearable="true"
+                               HelperText="Optional location this user belongs to.">
+                        @foreach (var l in _locations) { <MudSelectItem Value="@((int?)l.Id)">@l.LocationName (@l.LocationType)</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="New password" @bind-Value="_password" InputType="InputType.Password"
+                                  HelperText="Dev only — production uses OAuth/SSO. Leave blank to keep the current password." />
                 </MudItem>
                 <MudItem xs="12">
                     <MudCheckBox T="bool" Label="Active" @bind-Value="_model.Active" />
@@ -40,14 +51,18 @@
 
     private MudForm _form = null!;
     private AppUser _model = new();
+    private List<Location> _locations = new();
+    private string _password = "";
     private string? _error;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        _locations = await Prim.GetLocationsAsync();
         _model = Model.Id == 0 ? new AppUser() : new AppUser
         {
             Id = Model.Id, UserId = Model.UserId, DisplayName = Model.DisplayName,
-            Role = Model.Role, Email = Model.Email, Active = Model.Active, RowVersion = Model.RowVersion
+            Role = Model.Role, Email = Model.Email, LocationId = Model.LocationId,
+            Active = Model.Active, RowVersion = Model.RowVersion
         };
     }
 
@@ -59,6 +74,11 @@
         var isNew = _model.Id == 0;
         var (ok, err) = await Prim.SaveUserAsync(_model, App.CurrentUserId);
         if (!ok) { _error = err; return; }
+        if (!string.IsNullOrEmpty(_password))
+        {
+            var (pok, perr) = await Prim.SetUserPasswordAsync(_model.UserId, _password, App.CurrentUserId);
+            if (!pok) { _error = perr; return; }
+        }
         Snackbar.Add(isNew ? "User created." : "User updated.", Severity.Success);
         App.Log(isNew ? "Created user" : "Updated user", _model.UserId);
         MudDialog.Close(DialogResult.Ok(true));

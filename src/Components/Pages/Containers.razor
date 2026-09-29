@@ -1,20 +1,25 @@
 @page "/containers"
 @inject PrimService Prim
 @inject AppState App
+@inject HotkeyManager Hotkeys
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>PRIM — Containers</PageTitle>
 
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Containers</MudText>
     <MudSpacer />
-    <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…" Margin="Margin.Dense" Immediate="true"
-                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:260px" Class="mr-2" />
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewContainer">New Container</MudButton>
+    <div id="containers-filter">
+        <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…  (Ctrl+F)" Margin="Margin.Dense" Immediate="true"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:260px" Class="mr-2" />
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewContainer">New Container (Ctrl+N)</MudButton>
 </div>
 
-<ObjectGrid @ref="_grid" Items="Filtered" Kind="Container"
+<ObjectGrid @ref="_grid" Items="Filtered" Kind="Container" GridId="containers" Scope="containers"
             GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
             GetBarcode="c => c.Barcode"
             EditItem="EditContainer" DeleteItems="DeleteContainers"
@@ -33,7 +38,18 @@
             c.Barcode.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
             (c.Description ?? "").Contains(_filter, StringComparison.OrdinalIgnoreCase));
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        Hotkeys.PushScope("containers");
+        Hotkeys.Register("containers", "Ctrl+N", NewContainer);
+        Hotkeys.Register("containers", "F9", Refresh);
+        Hotkeys.Register("containers", "Ctrl+F", async () => await JS.InvokeVoidAsync("prim.focus", "#containers-filter input"));
+        await Load();
+    }
+
+    public void Dispose() => Hotkeys.UnregisterScope("containers");
+
+    private async Task Refresh() { await Load(); Snackbar.Add("Containers refreshed.", Severity.Info); }
 
     private async Task Load()
     {

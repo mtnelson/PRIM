@@ -3,6 +3,8 @@
 @inject AppState App
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject HotkeyManager Hotkeys
+@implements IDisposable
 
 <PageTitle>PRIM — Advanced Search</PageTitle>
 
@@ -44,7 +46,7 @@
 @if (_searched)
 {
     <MudText Typo="Typo.subtitle1" Class="mb-2">@_resultsTitle</MudText>
-    <ObjectGrid @ref="_grid" Items="_records" Kind="Record"
+    <ObjectGrid @ref="_grid" Items="_records" Kind="Record" GridId="advanced" Scope="advanced"
                 GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
                 GetBarcode="r => r.Barcode"
                 EditItem="EditRecord" DeleteItems="DeleteRecords"
@@ -60,6 +62,14 @@
         public string Op { get; set; } = "Contains";
         public string Value { get; set; } = "";
     }
+
+    protected override void OnInitialized()
+    {
+        Hotkeys.PushScope("advanced");
+        Hotkeys.Register("advanced", "F9", RunSearch);
+    }
+
+    public void Dispose() => Hotkeys.UnregisterScope("advanced");
 
     private List<AdvRow> _rows = new() { new AdvRow() };
     private string _logic = "AND";

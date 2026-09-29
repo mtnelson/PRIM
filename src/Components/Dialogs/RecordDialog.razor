@@ -7,6 +7,7 @@
         <MudText Typo="Typo.h6">@(_model.Id == 0 ? "New Record" : $"Edit Record {_model.RecordNumber}")</MudText>
     </TitleContent>
     <DialogContent>
+        <DialogHotkeys OnSave="Save" OnCancel="Cancel" />
         <MudForm @ref="_form" Model="_model">
             <MudGrid>
                 <MudItem xs="12" md="6">
@@ -26,7 +27,7 @@
                 </MudItem>
                 <MudItem xs="12" md="4">
                     <MudSelect T="string" Label="Field Office *" @bind-Value="_model.FieldOffice" Required="true">
-                        @foreach (var fo in SeedData.FieldOffices) { <MudSelectItem Value="@fo[..2]">@fo</MudSelectItem> }
+                        @foreach (var fo in SeedData.FieldOffices) { <MudSelectItem Value="@fo.Code">@($"{fo.Code} - {fo.Name}")</MudSelectItem> }
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" md="4">
@@ -46,7 +47,9 @@
                     <MudTextField T="string" Label="Serial End" @bind-Value="_model.SerialEnd" Immediate="true" TextChanged="UpperSerialEnd" />
                 </MudItem>
                 <MudItem xs="12" md="6">
-                    <MudTextField T="string" Label="Auxiliary Office" @bind-Value="_model.AuxiliaryOffice" />
+                    <MudSelect T="string" Label="Auxiliary Office" @bind-Value="_model.AuxiliaryOffice" Clearable="true">
+                        @foreach (var fo in SeedData.FieldOffices) { <MudSelectItem Value="@fo.Code">@($"{fo.Code} - {fo.Name}")</MudSelectItem> }
+                    </MudSelect>
                 </MudItem>
                 <MudItem xs="12" md="6" Class="d-flex align-center gap-4">
                     <MudCheckBox T="bool" Label="Is Bulky?" @bind-Value="_model.IsBulky" />
@@ -74,13 +77,20 @@
                 </MudItem>
                 <MudItem xs="12" md="6">
                     <div class="d-flex gap-2 align-center">
-                        <MudSelect T="string" Label="Assignee *" @bind-Value="_model.Assignee" Required="true" Style="flex:1">
-                            @foreach (var u in _users) { <MudSelectItem Value="u.UserId">@u.DisplayName</MudSelectItem> }
-                        </MudSelect>
+                        <MudTextField T="string" Label="Assignee *" Value="_model.Assignee" Required="true" ReadOnly="true"
+                                      Style="flex:1" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                                      OnAdornmentClick="PickAssignee" />
                         <MudTooltip Text="Default assignee to home (TIS-2201)">
                             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="MatchHome">Match Home</MudButton>
                         </MudTooltip>
                     </div>
+                    <MudText Typo="Typo.caption">@_model.AssigneeKind</MudText>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="int?" Label="Parent Record (compressed children)" @bind-Value="_model.ParentRecordId"
+                               Clearable="true" HelperText="Only compressed records can have child records.">
+                        @foreach (var p in _compressed) { <MudSelectItem Value="@((int?)p.Id)">@p.RecordNumber</MudSelectItem> }
+                    </MudSelect>
                 </MudItem>
             </MudGrid>
             @if (!string.IsNullOrEmpty(_error))
@@ -101,16 +111,16 @@
 
     private MudForm _form = null!;
     private RecordItem _model = new();
-    private List<AppUser> _users = new();
+    private List<RecordItem> _compressed = new();
     private string? _error;
     private string _originalType = "";
     private bool _typeLocked => _model.Id != 0 && !App.IsRecordsManager;
 
     protected override async Task OnInitializedAsync()
     {
-        _users = await Prim.GetUsersAsync();
+        _compressed = (await Prim.GetRecordsAsync()).Where(r => r.RecordType == "Compressed").ToList();
         _model = Model.Id == 0
-            ? new RecordItem { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentUserId }
+            ? new RecordItem { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : Clone(Model);
         _originalType = _model.RecordType;
     }
@@ -122,8 +132,9 @@
         SubfileId = r.SubfileId, Volume = r.Volume, SerialStart = r.SerialStart, SerialEnd = r.SerialEnd,
         AuxiliaryOffice = r.AuxiliaryOffice, IsBulky = r.IsBulky, IsAdmin = r.IsAdmin, IsControlFile = r.IsControlFile,
         Labels = r.Labels, SecurityClassification = r.SecurityClassification, Subject = r.Subject, Notes = r.Notes,
-        Home = r.Home, HomeKind = r.HomeKind, HomeRefId = r.HomeRefId, Assignee = r.Assignee, State = r.State,
-        RowVersion = r.RowVersion
+        Home = r.Home, HomeKind = r.HomeKind, HomeRefId = r.HomeRefId,
+        Assignee = r.Assignee, AssigneeKind = r.AssigneeKind,
+        ParentRecordId = r.ParentRecordId, State = r.State, RowVersion = r.RowVersion
     };
 
     private void UpperClass(string v) => _model.CaseClassification = v.ToUpperInvariant();
@@ -133,11 +144,8 @@
     private void UpperSerialEnd(string v) => _model.SerialEnd = v.ToUpperInvariant();
     private void MatchHome()
     {
-        if (_model.HomeKind == "User")
-        {
-            var u = _users.FirstOrDefault(x => x.DisplayName == _model.Home || x.UserId == _model.Home);
-            _model.Assignee = u?.UserId ?? _model.Assignee;
-        }
+        _model.Assignee = _model.Home;
+        _model.AssigneeKind = _model.HomeKind;
     }
 
     private async Task PickHome()
@@ -148,6 +156,18 @@
         if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
         {
             _model.Home = pick.Item3; _model.HomeKind = pick.Item1; _model.HomeRefId = pick.Item2;
+        }
+    }
+
+    private async Task PickAssignee()
+    {
+        var p = new DialogParameters { ["Title"] = "Select Assignee" };
+        var opts = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var d = await DialogService.ShowAsync<HomePickerDialog>("Select Assignee", p, opts);
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
+        {
+            _model.Assignee = pick.Item3; _model.AssigneeKind = pick.Item1;
         }
     }
     [Inject] IDialogService DialogService { get; set; } = null!;

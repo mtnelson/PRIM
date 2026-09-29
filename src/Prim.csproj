@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Prim</RootNamespace>
+    <!-- Self-contained win-x64 publish: dotnet publish -c Release -r win-x64 (self-contained) -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" Version="8.15.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.31" />
+    <!-- MSSQL target (TIS-2456..2458 direction). Reference only: switch the provider in Program.cs. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.31" />
+  </ItemGroup>
+
+</Project>

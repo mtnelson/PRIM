@@ -1,0 +1,73 @@
+using Microsoft.JSInterop;
+using Prim.Data;
+
+namespace Prim.Services;
+
+public static class GridColumns
+{
+    public static List<(string Key, string Label)> RecordColumns() => new()
+    {
+        ("RecordNumber","Record Number"), ("RecordType","Record Type"), ("CaseClassification","Case Classification"),
+        ("FieldOffice","Field Office"), ("CaseNumber","Case Number"), ("SubfileId","Subfile ID"),
+        ("Volume","Volume"), ("SerialStart","Serial Start"), ("SerialEnd","Serial End"),
+        ("AuxiliaryOffice","Auxiliary Office"), ("Home","Home"), ("Assignee","Assignee"),
+        ("Barcode","Barcode"), ("State","State"), ("Subject","Subject"), ("Notes","Notes"),
+    };
+
+    public static Dictionary<string,string> RecordRow(RecordItem r) => new()
+    {
+        ["RecordNumber"] = r.RecordNumber, ["RecordType"] = r.RecordType,
+        ["CaseClassification"] = r.CaseClassification, ["FieldOffice"] = r.FieldOffice,
+        ["CaseNumber"] = r.CaseNumber, ["SubfileId"] = r.SubfileId ?? "",
+        ["Volume"] = r.Volume, ["SerialStart"] = r.SerialStart ?? "", ["SerialEnd"] = r.SerialEnd ?? "",
+        ["AuxiliaryOffice"] = r.AuxiliaryOffice ?? "", ["Home"] = r.Home, ["Assignee"] = r.Assignee,
+        ["Barcode"] = r.Barcode, ["State"] = r.State, ["Subject"] = r.Subject ?? "", ["Notes"] = r.Notes ?? "",
+    };
+
+    public static List<(string Key, string Label)> ContainerColumns() => new()
+    {
+        ("ContainerName","Container Name"), ("ContainerType","Container Type"), ("FieldOffice","Field Office"),
+        ("ContainerCode","Container Code"), ("FormattedNumber","Formatted Number"),
+        ("Description","Description"), ("Home","Home"), ("Assignee","Assignee"), ("Barcode","Barcode"),
+    };
+
+    public static Dictionary<string,string> ContainerRow(Container c) => new()
+    {
+        ["ContainerName"] = c.ContainerName, ["ContainerType"] = c.ContainerType,
+        ["FieldOffice"] = c.FieldOffice, ["ContainerCode"] = c.ContainerCode,
+        ["FormattedNumber"] = c.FormattedNumber, ["Description"] = c.Description ?? "",
+        ["Home"] = c.Home, ["Assignee"] = c.Assignee, ["Barcode"] = c.Barcode,
+    };
+
+    public static List<(string Key, string Label)> LocationColumns() => new()
+    {
+        ("LocationName","Location Name"), ("LocationType","Location Type"),
+        ("Description","Description"), ("Barcode","Barcode"),
+    };
+
+    public static Dictionary<string,string> LocationRow(Location l) => new()
+    {
+        ["LocationName"] = l.LocationName, ["LocationType"] = l.LocationType,
+        ["Description"] = l.Description ?? "", ["Barcode"] = l.Barcode,
+    };
+
+    public static List<(string Key, string Label)> UserColumns() => new()
+    {
+        ("UserId","User ID"), ("DisplayName","Display Name"), ("Role","Role"),
+        ("Email","Email"), ("Active","Active"),
+    };
+
+    public static Dictionary<string,string> UserRow(AppUser u) => new()
+    {
+        ["UserId"] = u.UserId, ["DisplayName"] = u.DisplayName, ["Role"] = u.Role,
+        ["Email"] = u.Email ?? "", ["Active"] = u.Active ? "Yes" : "No",
+    };
+}
+
+public static class Csv
+{
+    public static string Escape(string s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
+
+    public static async Task DownloadAsync(Microsoft.JSInterop.IJSRuntime js, string fileName, string content)
+        => await js.InvokeVoidAsync("prim.download", fileName, content, "text/csv");
+}

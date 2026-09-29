@@ -1,0 +1,192 @@
+@typeparam T
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<GridContextMenu HeaderText="@_menuHeader" NoTarget="@NoTarget"
+                 CanMove="CanMove" CanDelete="CanDelete"
+                 OnView="MenuView" OnEdit="MenuEdit" OnMove="MenuMove" OnDelete="MenuDelete" OnAudit="MenuAudit"
+                 OnAddToSlot="MenuAddToSlot" OnRemoveFromSlot="RemoveCallback" OnPrint="MenuPrint"
+                 OnExport="MenuExport" OnCopy="MenuCopy" OnSelectAll="SelectAll" OnUnselectAll="UnselectAll">
+    <Activator>
+        <MudDataGrid Items="Items" Dense="true" Hover="true" MultiSelection="true" Striped="false"
+                     SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))" RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))">
+            <Columns>
+                @foreach (var col in ExportCols)
+                {
+                    var c = col;
+                    <TemplateColumn T="T" Title="@c.Label" Sortable="true" SortBy="@(x => CellVal(x, c.Key))">
+                        <CellTemplate>@CellVal(context.Item, c.Key)</CellTemplate>
+                    </TemplateColumn>
+                }
+            </Columns>
+        </MudDataGrid>
+    </Activator>
+</GridContextMenu>
+
+@code {
+    [Parameter] public IEnumerable<T> Items { get; set; } = Enumerable.Empty<T>();
+    [Parameter] public string Kind { get; set; } = "";
+    [Parameter] public Func<T, (string Kind, int Id, string Label)> GetInfo { get; set; } = _ => ("", 0, "");
+    [Parameter] public Func<T, string> GetBarcode { get; set; } = _ => "";
+    [Parameter] public Func<T, Task<bool>>? EditItem { get; set; }
+    [Parameter] public Func<List<int>, Task<bool>>? DeleteItems { get; set; }
+    [Parameter] public List<(string Key, string Label)> ExportCols { get; set; } = new();
+    [Parameter] public Func<T, Dictionary<string, string>>? RowToDict { get; set; }
+    [Parameter] public bool CanMove { get; set; } = true;
+    [Parameter] public bool CanDelete { get; set; } = true;
+    [Parameter] public bool ShowRemoveFromSlot { get; set; } = false;
+    [Parameter] public EventCallback<string> RemoveFromSlot { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private HashSet<T> _selected = new();
+    private T? _active;
+    private bool _hasActive;
+    private string _menuHeader = "No selection";
+
+    private bool NoTarget => _selected.Count == 0 && !_hasActive;
+
+    public void ClearSelection()
+    {
+        _selected.Clear(); _active = default; _hasActive = false;
+        UpdateMenuHeader(); StateHasChanged();
+    }
+
+    private void OnSelChanged(HashSet<T> v) { _selected = v; UpdateMenuHeader(); }
+
+    private string CellVal(T x, string key)
+        => RowToDict is null ? "" : RowToDict(x).GetValueOrDefault(key, "");
+
+    private void OnRowClick(DataGridRowClickEventArgs<T> e)
+    {
+        _active = e.Item; _hasActive = true;
+        var (kind, id, label) = GetInfo(e.Item);
+        App.SetViewPane(kind, id, label);
+        UpdateMenuHeader();
+    }
+
+    private List<T> Targets()
+        => _selected.Count > 0 ? _selected.ToList()
+           : (_hasActive && _active is not null ? new() { _active } : new());
+
+    private void UpdateMenuHeader()
+    {
+        var t = Targets();
+        _menuHeader = t.Count switch
+        {
+            0 => "No selection",
+            1 => GetInfo(t[0]).Label,
+            _ => $"{t.Count} {Kind.ToLower()}s selected"
+        };
+    }
+
+    private void SelectAll() { _selected = Items.ToHashSet(); UpdateMenuHeader(); }
+    private void UnselectAll() { _selected.Clear(); UpdateMenuHeader(); }
+
+    private void MenuView()
+    {
+        var t = Targets(); if (t.Count == 0) return;
+        var (kind, id, label) = GetInfo(t[0]);
+        App.SetViewPane(kind, id, label);
+    }
+
+    private async Task MenuEdit()
+    {
+        var t = Targets();
+        if (t.Count != 1) { Snackbar.Add("Select exactly one row to edit.", Severity.Info); return; }
+        if (EditItem is null) return;
+        if (await EditItem(t[0])) await OnChanged.InvokeAsync();
+    }
+
+    private async Task MenuMove()
+    {
+        var t = Targets(); if (t.Count == 0) return;
+        var (kind, _, _) = GetInfo(t[0]);
+        var p = new DialogParameters { ["Kind"] = kind, ["Ids"] = t.Select(x => GetInfo(x).Id).ToList() };
+        var d = await DialogService.ShowAsync<MoveDialog>("Move Items", p,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false }) await OnChanged.InvokeAsync();
+    }
+
+    private async Task MenuDelete()
+    {
+        var t = Targets(); if (t.Count == 0) return;
+        if (DeleteItems is null) { Snackbar.Add("Delete is not available here.", Severity.Info); return; }
+        if (await DeleteItems(t.Select(x => GetInfo(x).Id).ToList())) await OnChanged.InvokeAsync();
+    }
+
+    private async Task MenuAudit()
+    {
+        var t = Targets(); if (t.Count != 1) { Snackbar.Add("Select exactly one row.", Severity.Info); return; }
+        var (kind, id, label) = GetInfo(t[0]);
+        var p = new DialogParameters { ["Kind"] = kind, ["Id"] = id, ["Label"] = label };
+        await DialogService.ShowAsync<AuditDialog>("Audit Log", p,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+    }
+
+    private async Task MenuAddToSlot(string slot)
+    {
+        var t = Targets(); if (t.Count == 0) return;
+        int n = 0;
+        foreach (var x in t)
+        {
+            var (kind, id, label) = GetInfo(x);
+            if (await Prim.AddToWorkspaceAsync(App.CurrentUserId, slot, kind, id, label)) n++;
+        }
+        Snackbar.Add($"Added {n} item(s) to {slot}.", Severity.Success);
+        App.Log("Added to " + slot, $"{n} item(s)");
+    }
+
+    private async Task MenuRemoveFromSlot()
+    {
+        if (RemoveFromSlot.HasDelegate) await RemoveFromSlot.InvokeAsync("");
+    }
+
+    private EventCallback RemoveCallback => ShowRemoveFromSlot
+        ? EventCallback.Factory.Create(this, (Func<Task>)(() => RemoveFromSlot.InvokeAsync("")))
+        : default;
+
+    private async Task MenuPrint()
+    {
+        var t = Targets(); if (t.Count != 1) { Snackbar.Add("Select exactly one row.", Severity.Info); return; }
+        var (kind, _, label) = GetInfo(t[0]);
+        var p = new DialogParameters { ["Title"] = label, ["Line2"] = kind, ["Barcode"] = GetBarcode(t[0]) };
+        await DialogService.ShowAsync<LabelDialog>("Inventory Label", p, new DialogOptions { MaxWidth = MaxWidth.Small });
+    }
+
+    private async Task MenuExport()
+    {
+        var t = Targets(); if (t.Count == 0) return;
+        if (RowToDict is null || ExportCols.Count == 0) return;
+        var rows = t.Select(RowToDict).ToList();
+        var cols = ExportCols;
+        var p = new DialogParameters
+        {
+            ["Columns"] = cols,
+            ["OnExport"] = (Func<List<string>, Task>)(async keys =>
+            {
+                var sel = cols.Where(c => keys.Contains(c.Key)).ToList();
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine(string.Join(",", sel.Select(c => Csv(c.Label))));
+                foreach (var row in rows)
+                    sb.AppendLine(string.Join(",", sel.Select(c => Csv(row.GetValueOrDefault(c.Key, "")))));
+                await JS.InvokeVoidAsync("prim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
+                App.Log("Exported CSV", $"{Kind}: {rows.Count} row(s)");
+                Snackbar.Add($"Exported {rows.Count} row(s).", Severity.Success);
+            })
+        };
+        await DialogService.ShowAsync<ExportDialog>("Export to CSV", p, new DialogOptions { MaxWidth = MaxWidth.Small });
+    }
+
+    private static string Csv(string s) => "\"" + s.Replace("\"", "\"\"") + "\"";
+
+    private async Task MenuCopy()
+    {
+        var t = Targets(); if (t.Count == 0) return;
+        var ok = await JS.InvokeAsync<bool>("prim.copyText", string.Join("\n", t.Select(x => GetInfo(x).Label)));
+        Snackbar.Add(ok ? $"Copied {t.Count} item(s)." : "Clipboard unavailable.", ok ? Severity.Success : Severity.Warning);
+    }
+}

@@ -1,0 +1,124 @@
+@inject PrimService Prim
+@inject AppState App
+@implements IDisposable
+
+@if (App.ViewPaneSelection is { } sel)
+{
+    <MudTabs Rounded="true">
+        <MudTabPanel Text="Properties">
+            <MudSimpleTable Dense="true" Hover="false" Striped="false">
+                <tbody>
+                    @foreach (var (k, v) in _props)
+                    {
+                        <tr><td style="font-weight:600;white-space:nowrap">@k</td><td>@v</td></tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudTabPanel>
+        <MudTabPanel Text="Notes">
+            @if (string.IsNullOrWhiteSpace(_notes))
+            {
+                <MudText Typo="Typo.body2" Class="pa-2">No notes.</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Class="pa-2" Style="white-space:pre-wrap">@_notes</MudText>
+            }
+        </MudTabPanel>
+        <MudTabPanel Text="Audit">
+            @if (_audit.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="pa-2">No audit events.</MudText>
+            }
+            else
+            {
+                <MudTimeline TimelinePosition="TimelinePosition.Start" TimelineAlign="TimelineAlign.Start">
+                    @foreach (var a in _audit)
+                    {
+                        <MudTimelineItem Size="Size.Small" Color="Color.Info">
+                            <MudText Typo="Typo.caption">@a.TimestampUtc.ToLocalTime().ToString("g") — @a.Actor</MudText>
+                            <MudText Typo="Typo.body2"><b>@a.Action</b>@(a.FieldName != null ? $" · {a.FieldName}" : "")</MudText>
+                            @if (a.OldValue != null || a.NewValue != null)
+                            {
+                                <MudText Typo="Typo.caption">@a.OldValue → @a.NewValue</MudText>
+                            }
+                        </MudTimelineItem>
+                    }
+                </MudTimeline>
+            }
+        </MudTabPanel>
+    </MudTabs>
+}
+
+@code {
+    [Parameter] public string Kind { get; set; } = "";
+    [Parameter] public int Id { get; set; }
+
+    private List<(string K, string V)> _props = new();
+    private string? _notes;
+    private List<AuditEvent> _audit = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _props.Clear(); _notes = null; _audit = new();
+        if (Kind == "Record")
+        {
+            var r = await Prim.GetRecordAsync(Id);
+            if (r == null) return;
+            _props = new()
+            {
+                ("Record Number", r.RecordNumber), ("Barcode", r.Barcode), ("Record Type", r.RecordType),
+                ("Case Classification", r.CaseClassification), ("Field Office", r.FieldOffice),
+                ("Case Number", r.CaseNumber), ("Subfile ID", r.SubfileId ?? "—"), ("Volume", r.Volume),
+                ("Serial Start", r.SerialStart ?? "—"), ("Serial End", r.SerialEnd ?? "—"),
+                ("Auxiliary Office", r.AuxiliaryOffice ?? "—"),
+                ("Flags", string.Join(", ", new[] { r.IsBulky ? "Bulky" : null, r.IsAdmin ? "Admin" : null, r.IsControlFile ? "Control File" : null }.Where(x => x != null))),
+                ("Labels", r.Labels ?? "—"), ("Security Classification", r.SecurityClassification ?? "—"),
+                ("Subject", r.Subject ?? "—"), ("Home", $"{r.Home} ({r.HomeKind})"), ("Assignee", r.Assignee),
+                ("State", r.State), ("Created", $"{r.CreatedBy} · {r.CreatedUtc.ToLocalTime():g}"),
+                ("Last Updated", $"{r.LastUpdatedBy} · {r.LastUpdatedUtc.ToLocalTime():g}"),
+            };
+            _notes = r.Notes;
+        }
+        else if (Kind == "Container")
+        {
+            var c = await Prim.GetContainerAsync(Id);
+            if (c == null) return;
+            _props = new()
+            {
+                ("Container Name", c.ContainerName), ("Barcode", c.Barcode), ("Container Type", c.ContainerType),
+                ("Field Office", c.FieldOffice), ("Container Code", c.ContainerCode), ("Formatted Number", c.FormattedNumber),
+                ("Description", c.Description ?? "—"), ("Home", $"{c.Home} ({c.HomeKind})"), ("Assignee", c.Assignee),
+                ("Created", $"{c.CreatedBy} · {c.CreatedUtc.ToLocalTime():g}"),
+                ("Last Updated", $"{c.LastUpdatedBy} · {c.LastUpdatedUtc.ToLocalTime():g}"),
+            };
+        }
+        else if (Kind == "Location")
+        {
+            var l = await Prim.GetLocationAsync(Id);
+            if (l == null) return;
+            string? parent = null;
+            if (l.ParentId is int pid) parent = (await Prim.GetLocationAsync(pid))?.LocationName;
+            _props = new()
+            {
+                ("Location Name", l.LocationName), ("Barcode", l.Barcode), ("Location Type", l.LocationType),
+                ("Parent", parent ?? "—"), ("Description", l.Description ?? "—"),
+                ("Created", $"{l.CreatedBy} · {l.CreatedUtc.ToLocalTime():g}"),
+                ("Last Updated", $"{l.LastUpdatedBy} · {l.LastUpdatedUtc.ToLocalTime():g}"),
+            };
+        }
+        else if (Kind == "User")
+        {
+            var u = await Prim.GetUserAsync(Id);
+            if (u == null) return;
+            _props = new()
+            {
+                ("User ID", u.UserId), ("Display Name", u.DisplayName), ("Role", u.Role),
+                ("Email", u.Email ?? "—"), ("Active", u.Active ? "Yes" : "No"),
+            };
+        }
+        _audit = await Prim.GetAuditAsync(Kind, Id);
+    }
+
+    public void Dispose() { }
+}

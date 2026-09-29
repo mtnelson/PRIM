@@ -1,37 +1,51 @@
+@* Home / Assignee picker. Lists every object type that can serve as a Home:
+   containers, locations, and users (HomeRules.EligibleHomeKinds). Compressed
+   records are never offered — nothing may be homed or assigned to them.
+   Trees are expandable: location hierarchy, container nesting, users by member location. *@
 @inject PrimService Prim
-@inject AppState App
-@inject ISnackbar Snackbar
-@inject IDialogService DialogService
 
 <MudDialog>
-    <TitleContent><MudText Typo="Typo.h6">Select Home</MudText></TitleContent>
+    <TitleContent><MudText Typo="Typo.h6">@Title</MudText></TitleContent>
     <DialogContent>
-        <MudTextField T="string" Label="Search" @bind-Value="_q" Immediate="true" Adornment="Adornment.Start"
+        <DialogHotkeys OnCancel="() => MudDialog.Cancel()" />
+        <MudText Typo="Typo.caption" Class="mb-2" Style="opacity:0.7">
+            Homes and assignees can be containers, locations, or users. Compressed records cannot be homes.
+        </MudText>
+        <MudTextField T="string" Label="Search" Value="_q" ValueChanged="OnSearchChanged" Immediate="true" Adornment="Adornment.Start"
                       AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-2" />
         <MudTabs Rounded="true">
             <MudTabPanel Text="Locations">
-                <MudList T="string" Dense="true" Style="max-height:300px;overflow-y:auto">
-                    @foreach (var l in _locs.Where(x => Match(x.LocationName)))
-                    {
-                        <MudListItem Text="@l.LocationName" SecondaryText="@l.LocationType" OnClick="@(() => Choose("Location", l.Id, l.LocationName))" />
-                    }
-                </MudList>
+                <MudTreeView T="Location" Items="_locRoots" Dense="true" Hover="true" ExpandOnClick="true"
+                             Style="max-height:300px;overflow-y:auto">
+                    <ItemTemplate>
+                        <MudTreeViewItem T="Location" Value="@context.Value" Items="@context.Children"
+                                         Text="@context.Value!.LocationName" EndText="@context.Value.LocationType"
+                                         OnClick="() => ChooseLocation(context.Value)" />
+                    </ItemTemplate>
+                </MudTreeView>
             </MudTabPanel>
             <MudTabPanel Text="Containers">
-                <MudList T="string" Dense="true" Style="max-height:300px;overflow-y:auto">
-                    @foreach (var c in _containers.Where(x => Match(x.ContainerName)))
-                    {
-                        <MudListItem Text="@c.ContainerName" SecondaryText="@c.ContainerType" OnClick="@(() => Choose("Container", c.Id, c.ContainerName))" />
-                    }
-                </MudList>
+                <MudTreeView T="Container" Items="_conRoots" Dense="true" Hover="true" ExpandOnClick="true"
+                             Style="max-height:300px;overflow-y:auto">
+                    <ItemTemplate>
+                        <MudTreeViewItem T="Container" Value="@context.Value" Items="@context.Children"
+                                         Text="@context.Value!.ContainerName" EndText="@context.Value.ContainerType"
+                                         OnClick="() => ChooseContainer(context.Value)" />
+                    </ItemTemplate>
+                </MudTreeView>
             </MudTabPanel>
             <MudTabPanel Text="Users">
-                <MudList T="string" Dense="true" Style="max-height:300px;overflow-y:auto">
-                    @foreach (var u in _users.Where(x => Match(x.DisplayName) || Match(x.UserId)))
-                    {
-                        <MudListItem Text="@u.DisplayName" SecondaryText="@u.Role" OnClick="@(() => Choose("User", u.Id, u.DisplayName))" />
-                    }
-                </MudList>
+                @foreach (var g in _userGroups)
+                {
+                    <MudExpansionPanel Text="@g.Name" Dense="true">
+                        <MudList T="string" Dense="true">
+                            @foreach (var u in g.Users.Where(x => Match(x.DisplayName) || Match(x.UserId)))
+                            {
+                                <MudListItem Text="@u.DisplayName" SecondaryText="@u.Role" OnClick="@(() => Choose("User", u.Id, u.DisplayName))" />
+                            }
+                        </MudList>
+                    </MudExpansionPanel>
+                }
             </MudTabPanel>
         </MudTabs>
     </DialogContent>
@@ -40,17 +54,65 @@
 
 @code {
     [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string Title { get; set; } = "Select Home";
+
     private string _q = "";
-    private List<Location> _locs = new();
-    private List<Container> _containers = new();
-    private List<AppUser> _users = new();
+    private List<Location> _allLocs = new();
+    private List<Container> _allCons = new();
+    private List<AppUser> _allUsers = new();
+    private Dictionary<int, string> _locNames = new();
+    private List<TreeItemData<Location>> _locRoots = new();
+    private List<TreeItemData<Container>> _conRoots = new();
+    private List<(string Name, List<AppUser> Users)> _userGroups = new();
 
     protected override async Task OnInitializedAsync()
     {
-        _locs = await Prim.GetLocationsAsync();
-        _containers = await Prim.GetContainersAsync();
-        _users = await Prim.GetUsersAsync();
+        _allLocs = await Prim.GetLocationsAsync();
+        _allCons = await Prim.GetContainersAsync();
+        _allUsers = await Prim.GetUsersAsync();
+        _locNames = _allLocs.ToDictionary(l => l.Id, l => l.LocationName);
+        BuildTrees();
     }
+
+    private void OnSearchChanged(string q) { _q = q; BuildTrees(); }
+
+    private void BuildTrees()
+    {
+        var byParent = _allLocs.ToLookup(l => l.ParentId);
+        TreeItemData<Location> BuildLoc(Location l) => new()
+        {
+            Value = l,
+            Children = byParent[l.Id].Where(x => Match(x.LocationName)).Select(BuildLoc).ToList()
+        };
+        _locRoots = byParent[null].Where(x => Match(x.LocationName)).Select(BuildLoc).ToList();
+
+        var byConParent = _allCons.ToLookup(c => c.ParentContainerId);
+        TreeItemData<Container> BuildCon(Container c) => new()
+        {
+            Value = c,
+            Children = byConParent[c.Id].Where(x => Match(x.ContainerName)).Select(BuildCon).ToList()
+        };
+        _conRoots = byConParent[null].Where(x => Match(x.ContainerName)).Select(BuildCon).ToList();
+
+        _userGroups = _allUsers
+            .GroupBy(u => u.LocationId is int id && _locNames.TryGetValue(id, out var n) ? n : "No location")
+            .OrderBy(g => g.Key)
+            .Select(g => (g.Key, g.OrderBy(u => u.DisplayName).ToList()))
+            .ToList();
+    }
+
     private bool Match(string s) => string.IsNullOrWhiteSpace(_q) || s.Contains(_q, StringComparison.OrdinalIgnoreCase);
+
+    // Only choose on click when the node itself matches the search; expanding still works.
+    private void ChooseLocation(Location? l)
+    {
+        if (l != null && Match(l.LocationName)) Choose("Location", l.Id, l.LocationName);
+    }
+
+    private void ChooseContainer(Container? c)
+    {
+        if (c != null && Match(c.ContainerName)) Choose("Container", c.Id, c.ContainerName);
+    }
+
     private void Choose(string kind, int id, string label) => MudDialog.Close(DialogResult.Ok((kind, id, label)));
 }

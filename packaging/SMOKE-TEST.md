@@ -8,6 +8,13 @@ Takes about 5 minutes.
 Preconditions: PRIM installed per `README.md`, server started via
 `Start PRIM.bat`, browser open at `http://localhost:5000/`.
 
+## 0. Login
+
+- [ ] A login screen appears (username + password).
+- [ ] Sign in as **admin01** / **admin01** (dev credentials; each access
+      level has its own account: `admin01` Admin, `recordsmgr01`
+      Records Manager, `mtnelson` Staff — password equals username).
+
 ## 1. Startup
 
 - [ ] Page loads with no "couldn't connect" / error banner.

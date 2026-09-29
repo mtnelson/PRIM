@@ -1,0 +1,75 @@
+@* Customize grid columns: add, remove, and reorder. The ordered key list is
+   returned; the caller persists it per user via PrimService grid layouts. *@
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Customize Columns</MudText></TitleContent>
+    <DialogContent>
+        <DialogHotkeys OnSave="@(() => { Save(); return Task.CompletedTask; })" OnCancel="() => MudDialog.Cancel()" />
+        <MudText Typo="Typo.caption" Class="mb-2" Style="opacity:0.7">
+            Check the columns to show. Use the arrows to reorder — the order here is the grid order.
+        </MudText>
+        <MudList T="string" Dense="true" Style="max-height:380px;overflow-y:auto">
+            @foreach (var c in _ordered)
+            {
+                var col = c;
+                <MudListItem>
+                    <div class="d-flex align-center gap-2">
+                        <MudCheckBox T="bool" Value="_visible.Contains(col.Key)"
+                                     ValueChanged="@(v => Toggle(col.Key, v))" Dense="true" />
+                        <div class="flex-grow-1"><MudText Typo="Typo.body2">@col.Label</MudText></div>
+                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small"
+                                       Disabled="@(_ordered.IndexOf(col) == 0)" OnClick="@(() => Move(col, -1))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small"
+                                       Disabled="@(_ordered.IndexOf(col) == _ordered.Count - 1)" OnClick="@(() => Move(col, 1))" />
+                    </div>
+                </MudListItem>
+            }
+        </MudList>
+        @if (_visible.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">Select at least one column.</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save"
+                   Disabled="@(_visible.Count == 0)">Apply</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public List<(string Key, string Label)> Available { get; set; } = new();
+    [Parameter] public List<string> Current { get; set; } = new();
+
+    private List<(string Key, string Label)> _ordered = new();
+    private HashSet<string> _visible = new();
+
+    protected override void OnInitialized()
+    {
+        var byKey = Available.ToDictionary(c => c.Key, c => c.Label);
+        // Current order first, then any remaining available columns.
+        _ordered = Current.Where(k => byKey.ContainsKey(k)).Select(k => (k, byKey[k])).ToList();
+        _ordered.AddRange(Available.Where(c => !_ordered.Any(o => o.Key == c.Key)));
+        _visible = Current.Where(k => byKey.ContainsKey(k)).ToHashSet();
+        if (_visible.Count == 0) _visible = Available.Select(c => c.Key).ToHashSet();
+    }
+
+    private void Toggle(string key, bool v)
+    {
+        if (v) _visible.Add(key); else _visible.Remove(key);
+    }
+
+    private void Move((string Key, string Label) col, int dir)
+    {
+        var i = _ordered.IndexOf(col);
+        var j = i + dir;
+        if (j < 0 || j >= _ordered.Count) return;
+        (_ordered[i], _ordered[j]) = (_ordered[j], _ordered[i]);
+    }
+
+    private void Save()
+    {
+        var keys = _ordered.Where(c => _visible.Contains(c.Key)).Select(c => c.Key).ToList();
+        MudDialog.Close(DialogResult.Ok(keys));
+    }
+}

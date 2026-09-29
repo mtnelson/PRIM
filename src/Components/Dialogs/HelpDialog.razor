@@ -1,0 +1,102 @@
+@* Help: every hotkey (generated from HotkeyCatalog — the single source of
+   truth) plus how each screen and action works. *@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">PRIM Help</MudText>
+    </TitleContent>
+    <DialogContent>
+        <DialogHotkeys OnCancel="() => MudDialog.Close()" />
+        <MudTabs Rounded="true">
+            <MudTabPanel Text="Keyboard shortcuts">
+                @foreach (var group in HotkeyCatalog.ByCategory())
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">@group.Key</MudText>
+                    <MudSimpleTable Dense="true" Hover="false">
+                        <tbody>
+                            @foreach (var h in group)
+                            {
+                                <tr>
+                                    <td style="white-space:nowrap"><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@h.Combo</MudChip></td>
+                                    <td><b>@h.Title</b> — @h.Description</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+                <MudText Typo="Typo.caption" Class="mt-2" Style="opacity:0.7">
+                    Shortcuts never fire while you are typing in a text box — the browser keeps those.
+                </MudText>
+            </MudTabPanel>
+            <MudTabPanel Text="Screens">
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Records</MudText>
+                <MudText Typo="Typo.body2">
+                    The records inventory grid. Click a row to select it and preview it in the view pane;
+                    Ctrl+click toggles rows without clearing the selection; Ctrl+A selects all;
+                    double-click a row to edit it immediately. Right-click for View, Edit, Move Items,
+                    Audit Log, Add to Workspace, Print Label, Export to CSV, Copy, and Delete.
+                    The filter box narrows the list (Ctrl+F focuses it). Compressed records expand
+                    in the tree to show their child records.
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Containers</MudText>
+                <MudText Typo="Typo.body2">
+                    Containers nest inside each other — the hierarchy panel expands to show child
+                    containers. Containers can be homed to containers, locations, or users.
+                    Deleting a container with children is refused.
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Locations</MudText>
+                <MudText Typo="Typo.body2">
+                    N-level location hierarchy (building → room → row → compartment → shelf).
+                    Expand nodes in the hierarchy panel; click a node to preview it.
+                    Location names are unique per type and parent.
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Users</MudText>
+                <MudText Typo="Typo.body2">
+                    Users have a role (Admin, Records Manager, Staff) and may belong to a location.
+                    Users are deactivated, not deleted. Dev passwords are set on the user screen.
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Workspaces</MudText>
+                <MudText Typo="Typo.body2">
+                    Five personal workspaces plus Favorites. Right-click items on any other screen
+                    and choose Add to Workspace. Each tab is a full grid: select rows, double-click
+                    to preview the item, Delete removes it from the workspace (the item itself is kept).
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Advanced Search</MudText>
+                <MudText Typo="Typo.body2">
+                    Build AND/OR criteria rows with * and ? wildcards. Save useful searches for reuse.
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Reports</MudText>
+                <MudText Typo="Typo.body2">
+                    Object counts and group-by breakdowns (state, record type, field office).
+                </MudText>
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Admin</MudText>
+                <MudText Typo="Typo.body2">
+                    Announcement banner control (Admin role).
+                </MudText>
+            </MudTabPanel>
+            <MudTabPanel Text="Actions">
+                <MudText Typo="Typo.body2" Class="mt-2">
+                    <b>Move Items</b> — change Home and/or Assignee for the selected rows. Homes and
+                    assignees may be containers, locations, or users; compressed records can never
+                    be a home.<br />
+                    <b>Print Label</b> — prints an inventory label per selected row; select several
+                    rows to print them all at once.<br />
+                    <b>Export to CSV</b> — downloads the selected rows; choose which columns to include.<br />
+                    <b>Copy to Clipboard</b> — copies the selected rows with column headers,
+                    tab-separated, ready to paste into a spreadsheet.<br />
+                    <b>Columns</b> — the grid toolbar button lets you add, remove, and reorder
+                    columns; your layout is saved to your profile and restored next sign-in.<br />
+                    <b>Delete (records)</b> — requires a reason; "Merged with case file" needs the
+                    target barcode and "Other" needs explanatory text. Deleted records leave search
+                    immediately and can be restored from the delete dialog history.
+                </MudText>
+            </MudTabPanel>
+        </MudTabs>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => MudDialog.Close()">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+}

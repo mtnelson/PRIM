@@ -3,6 +3,7 @@
 <MudDialog>
     <TitleContent><MudText Typo="Typo.h6">Audit Log — @Label</MudText></TitleContent>
     <DialogContent>
+        <DialogHotkeys OnCancel="() => MudDialog.Cancel()" />
         @if (_events.Count == 0)
         {
             <MudText Typo="Typo.body2">No audit events for this item.</MudText>

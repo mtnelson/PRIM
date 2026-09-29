@@ -8,6 +8,7 @@
         <MudText Typo="Typo.h6">@(_model.Id == 0 ? "New Container" : $"Edit Container {_model.ContainerName}")</MudText>
     </TitleContent>
     <DialogContent>
+        <DialogHotkeys OnSave="Save" OnCancel="() => MudDialog.Cancel()" />
         <MudForm @ref="_form" Model="_model">
             <MudGrid>
                 <MudItem xs="12" md="6">
@@ -17,7 +18,7 @@
                 </MudItem>
                 <MudItem xs="12" md="6">
                     <MudSelect T="string" Label="Field Office *" @bind-Value="_model.FieldOffice" Required="true">
-                        @foreach (var fo in SeedData.FieldOffices) { <MudSelectItem Value="@fo[..2]">@fo</MudSelectItem> }
+                        @foreach (var fo in SeedData.FieldOffices) { <MudSelectItem Value="@fo.Code">@($"{fo.Code} - {fo.Name}")</MudSelectItem> }
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" md="6">
@@ -46,9 +47,9 @@
                     <MudText Typo="Typo.caption">@_model.HomeKind</MudText>
                 </MudItem>
                 <MudItem xs="12" md="6">
-                    <MudSelect T="string" Label="Assignee *" @bind-Value="_model.Assignee" Required="true">
-                        @foreach (var u in _users) { <MudSelectItem Value="u.UserId">@u.DisplayName</MudSelectItem> }
-                    </MudSelect>
+                    <MudTextField T="string" Label="Assignee *" Value="_model.Assignee" Required="true" ReadOnly="true"
+                                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickAssignee" />
+                    <MudText Typo="Typo.caption">@_model.AssigneeKind</MudText>
                 </MudItem>
             </MudGrid>
             @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
@@ -66,20 +67,19 @@
 
     private MudForm _form = null!;
     private Container _model = new();
-    private List<AppUser> _users = new();
     private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
-        _users = await Prim.GetUsersAsync();
         _model = Model.Id == 0
-            ? new Container { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentUserId }
+            ? new Container { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : new Container
             {
                 Id = Model.Id, ContainerName = Model.ContainerName, ContainerType = Model.ContainerType,
                 FieldOffice = Model.FieldOffice, ContainerCode = Model.ContainerCode, FormattedNumber = Model.FormattedNumber,
                 Description = Model.Description, Barcode = Model.Barcode, Home = Model.Home, HomeKind = Model.HomeKind,
-                HomeRefId = Model.HomeRefId, Assignee = Model.Assignee, ParentContainerId = Model.ParentContainerId,
+                HomeRefId = Model.HomeRefId, Assignee = Model.Assignee, AssigneeKind = Model.AssigneeKind,
+                ParentContainerId = Model.ParentContainerId,
                 LocationId = Model.LocationId, RowVersion = Model.RowVersion
             };
         if (_model.Id == 0) await GenerateName();
@@ -104,6 +104,18 @@
         {
             _model.Home = pick.Item3; _model.HomeKind = pick.Item1; _model.HomeRefId = pick.Item2;
             if (pick.Item1 == "Location") _model.LocationId = pick.Item2;
+        }
+    }
+
+    private async Task PickAssignee()
+    {
+        var p = new DialogParameters { ["Title"] = "Select Assignee" };
+        var d = await DialogService.ShowAsync<HomePickerDialog>("Select Assignee", p,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
+        {
+            _model.Assignee = pick.Item3; _model.AssigneeKind = pick.Item1;
         }
     }
 

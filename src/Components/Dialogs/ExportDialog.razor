@@ -3,6 +3,7 @@
 <MudDialog>
     <TitleContent><MudText Typo="Typo.h6">Export to CSV</MudText></TitleContent>
     <DialogContent>
+        <DialogHotkeys OnSave="DoExport" OnCancel="() => MudDialog.Cancel()" />
         <MudText Typo="Typo.body2" Class="mb-2">Choose fields (defaults to the current grid columns). Includes print-merge style flat rows.</MudText>
         @foreach (var c in Columns)
         {

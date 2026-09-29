@@ -5,6 +5,7 @@
 <MudDialog>
     <TitleContent><MudText Typo="Typo.h6">Delete @Ids.Count record(s)</MudText></TitleContent>
     <DialogContent>
+        <DialogHotkeys OnSave="Submit" OnCancel="() => MudDialog.Cancel()" />
         <MudText Typo="Typo.body2" Class="mb-3">
             Deleted records are immediately excluded from search and moved to a deletion state.
             A reason is required (TIS-370).

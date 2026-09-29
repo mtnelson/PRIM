@@ -18,6 +18,8 @@ no electronic documents are attached or stored.
    the app writes its database next to the executable.)
 2. Double-click **`Start PRIM.bat`**.
 3. Your browser opens to `http://localhost:5000/`.
+4. Sign in on the login screen. Dev credentials (password = username):
+   `admin01` (Admin), `recordsmgr01` (Records Manager), `mtnelson` (Staff).
 
 To stop the app, close the "PRIM Server" console window.
 

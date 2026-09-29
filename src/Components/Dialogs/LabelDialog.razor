@@ -2,16 +2,20 @@
 @inject AppState App
 
 <MudDialog>
-    <TitleContent><MudText Typo="Typo.h6">Inventory Label</MudText></TitleContent>
+    <TitleContent><MudText Typo="Typo.h6">@(Items.Count <= 1 ? "Inventory Label" : $"Inventory Labels ({Items.Count})")</MudText></TitleContent>
     <DialogContent>
-        <div class="label-sheet">
-            <div style="font-size:18px;font-weight:bold">@Title</div>
-            <div>@Line2</div>
-            <div style="margin-top:8px">BARCODE: @Barcode</div>
-            <div style="font-size:20px;letter-spacing:4px">||||| |||| |||||</div>
-            <div style="font-size:11px;margin-top:8px">Printed @DateTime.Now.ToString("yyyy-MM-dd HH:mm") by @App.CurrentDisplayName</div>
-        </div>
-        <MudText Typo="Typo.caption" Class="mt-2">Label format mirrors the ASRS inventory label style (TIS-364).</MudText>
+        <DialogHotkeys OnSave="Print" OnCancel="() => MudDialog.Close()" />
+        @foreach (var item in Items)
+        {
+            <div class="label-sheet mb-3">
+                <div style="font-size:18px;font-weight:bold">@item.Title</div>
+                <div>@item.Line2</div>
+                <div style="margin-top:8px">BARCODE: @item.Barcode</div>
+                <div style="font-size:20px;letter-spacing:4px">||||| |||| |||||</div>
+                <div style="font-size:11px;margin-top:8px">Printed @DateTime.Now.ToString("yyyy-MM-dd HH:mm") by @App.CurrentDisplayName</div>
+            </div>
+        }
+        <MudText Typo="Typo.caption" Class="mt-2">Label format mirrors the ASRS inventory label style (TIS-364). One label per selected row.</MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => MudDialog.Close()">Close</MudButton>
@@ -22,13 +26,18 @@
 
 @code {
     [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    // Preferred: pass Labels. Single-label callers may still pass Title/Line2/Barcode.
+    [Parameter] public List<(string Title, string Line2, string Barcode)> Labels { get; set; } = new();
     [Parameter] public string Title { get; set; } = "";
     [Parameter] public string Line2 { get; set; } = "";
     [Parameter] public string Barcode { get; set; } = "";
 
+    private List<(string Title, string Line2, string Barcode)> Items =>
+        Labels.Count > 0 ? Labels : new() { (Title, Line2, Barcode) };
+
     private async Task Print()
     {
-        App.Log("Printed label", Title);
+        App.Log("Printed label(s)", $"{Items.Count} label(s)");
         await JS.InvokeVoidAsync("prim.print");
     }
 }

@@ -1,0 +1,76 @@
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_model.Id == 0 ? "New Location" : $"Edit Location {_model.LocationName}")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" Model="_model">
+            <MudGrid>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Location Name *" @bind-Value="_model.LocationName" Required="true"
+                                  Immediate="true" TextChanged="Upper" HelperText="Unique per type + parent." />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="Location Type *" @bind-Value="_model.LocationType" Required="true">
+                        @foreach (var t in SeedData.LocationTypes) { <MudSelectItem Value="t">@t</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="int?" Label="Parent Location" @bind-Value="_model.ParentId" Clearable="true">
+                        @foreach (var l in _locs.Where(x => x.Id != _model.Id))
+                        {
+                            <MudSelectItem T="int?" Value="@((int?)l.Id)">@l.LocationName (@l.LocationType)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Description" @bind-Value="_model.Description" Lines="2" HelperText="Initial case." />
+                </MudItem>
+            </MudGrid>
+            @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Location Model { get; set; } = new();
+
+    private MudForm _form = null!;
+    private Location _model = new();
+    private List<Location> _locs = new();
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _locs = await Prim.GetLocationsAsync();
+        _model = Model.Id == 0 ? new Location() : new Location
+        {
+            Id = Model.Id, LocationName = Model.LocationName, LocationType = Model.LocationType,
+            ParentId = Model.ParentId, Description = Model.Description, Barcode = Model.Barcode,
+            RowVersion = Model.RowVersion
+        };
+    }
+
+    private void Upper(string v) => _model.LocationName = v.ToUpperInvariant();
+
+    private async Task Save()
+    {
+        _error = null;
+        await _form.Validate();
+        if (!_form.IsValid) return;
+        var isNew = _model.Id == 0;
+        var (ok, err) = await Prim.SaveLocationAsync(_model, App.CurrentUserId);
+        if (!ok) { _error = err; return; }
+        Snackbar.Add(isNew ? "Location created." : "Location updated.", Severity.Success);
+        App.Log(isNew ? "Created location" : "Updated location", _model.LocationName);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

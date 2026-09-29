@@ -1,0 +1,34 @@
+@inject IJSRuntime JS
+@inject AppState App
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Inventory Label</MudText></TitleContent>
+    <DialogContent>
+        <div class="label-sheet">
+            <div style="font-size:18px;font-weight:bold">@Title</div>
+            <div>@Line2</div>
+            <div style="margin-top:8px">BARCODE: @Barcode</div>
+            <div style="font-size:20px;letter-spacing:4px">||||| |||| |||||</div>
+            <div style="font-size:11px;margin-top:8px">Printed @DateTime.Now.ToString("yyyy-MM-dd HH:mm") by @App.CurrentDisplayName</div>
+        </div>
+        <MudText Typo="Typo.caption" Class="mt-2">Label format mirrors the ASRS inventory label style (TIS-364).</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Close()">Close</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Print"
+                   OnClick="Print">Print</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Line2 { get; set; } = "";
+    [Parameter] public string Barcode { get; set; } = "";
+
+    private async Task Print()
+    {
+        App.Log("Printed label", Title);
+        await JS.InvokeVoidAsync("prim.print");
+    }
+}

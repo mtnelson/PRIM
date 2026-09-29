@@ -1,0 +1,39 @@
+@inject IJSRuntime JS
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Export to CSV</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">Choose fields (defaults to the current grid columns). Includes print-merge style flat rows.</MudText>
+        @foreach (var c in Columns)
+        {
+            var key = c.Key;
+            <MudCheckBox T="bool" Label="@c.Label" Value="_sel.Contains(key)"
+                         ValueChanged="v => Toggle(key, v)" Dense="true" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="DoExport" Disabled="_sel.Count == 0">Export</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public List<(string Key, string Label)> Columns { get; set; } = new();
+    [Parameter] public Func<List<string>, Task> OnExport { get; set; } = _ => Task.CompletedTask;
+
+    private HashSet<string> _sel = new();
+
+    protected override void OnInitialized() => _sel = Columns.Select(c => c.Key).ToHashSet();
+
+    private void Toggle(string key, bool v)
+    {
+        if (v) _sel.Add(key); else _sel.Remove(key);
+    }
+
+    private async Task DoExport()
+    {
+        await OnExport(_sel.ToList());
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

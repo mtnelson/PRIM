@@ -1,0 +1,122 @@
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_model.Id == 0 ? "New Container" : $"Edit Container {_model.ContainerName}")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" Model="_model">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="Container Type *" @bind-Value="_model.ContainerType" Required="true">
+                        @foreach (var t in SeedData.ContainerTypes) { <MudSelectItem Value="t">@t</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="Field Office *" @bind-Value="_model.FieldOffice" Required="true">
+                        @foreach (var fo in SeedData.FieldOffices) { <MudSelectItem Value="@fo[..2]">@fo</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="Container Code *" @bind-Value="_model.ContainerCode" Required="true">
+                        @foreach (var c in new[] { "SHIP", "NARA", "RESH", "9999", "PENT" }) { <MudSelectItem Value="c">@c</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Formatted Number *" @bind-Value="_model.FormattedNumber" Required="true"
+                                  HelperText="Defaults to next available; you may change it." />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Container Name *" @bind-Value="_model.ContainerName" Required="true"
+                                  ReadOnly="_model.Id != 0" HelperText="System-generated per naming rules; unique per type." />
+                    @if (_model.Id == 0)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="mt-1" OnClick="GenerateName">Generate name</MudButton>
+                    }
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Description" @bind-Value="_model.Description" Lines="2" HelperText="Initial case." />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Home *" @bind-Value="_model.Home" Required="true" ReadOnly="true"
+                                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickHome" />
+                    <MudText Typo="Typo.caption">@_model.HomeKind</MudText>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="Assignee *" @bind-Value="_model.Assignee" Required="true">
+                        @foreach (var u in _users) { <MudSelectItem Value="u.UserId">@u.DisplayName</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+            @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Container Model { get; set; } = new();
+
+    private MudForm _form = null!;
+    private Container _model = new();
+    private List<AppUser> _users = new();
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = await Prim.GetUsersAsync();
+        _model = Model.Id == 0
+            ? new Container { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentUserId }
+            : new Container
+            {
+                Id = Model.Id, ContainerName = Model.ContainerName, ContainerType = Model.ContainerType,
+                FieldOffice = Model.FieldOffice, ContainerCode = Model.ContainerCode, FormattedNumber = Model.FormattedNumber,
+                Description = Model.Description, Barcode = Model.Barcode, Home = Model.Home, HomeKind = Model.HomeKind,
+                HomeRefId = Model.HomeRefId, Assignee = Model.Assignee, ParentContainerId = Model.ParentContainerId,
+                LocationId = Model.LocationId, RowVersion = Model.RowVersion
+            };
+        if (_model.Id == 0) await GenerateName();
+    }
+
+    private async Task GenerateName()
+    {
+        if (string.IsNullOrWhiteSpace(_model.FormattedNumber))
+            _model.FormattedNumber = "00001";
+        _model.ContainerName = await Prim.PreviewContainerNameAsync(_model.ContainerType, _model.FieldOffice, _model.ContainerCode);
+        // For Box/Tub/Crate/Crate/NARA/Virtual the formatted number is embedded directly.
+        if (_model.ContainerType is "Box" or "Tub" or "Crate" or "NARA Box" or "Virtual Container")
+            _model.ContainerName = $"{_model.FieldOffice}-{_model.ContainerCode}-{_model.FormattedNumber}".ToUpperInvariant();
+    }
+
+    private async Task PickHome()
+    {
+        var d = await DialogService.ShowAsync<HomePickerDialog>("Select Home",
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
+        {
+            _model.Home = pick.Item3; _model.HomeKind = pick.Item1; _model.HomeRefId = pick.Item2;
+            if (pick.Item1 == "Location") _model.LocationId = pick.Item2;
+        }
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        await _form.Validate();
+        if (!_form.IsValid) return;
+        var isNew = _model.Id == 0;
+        var (ok, err) = await Prim.SaveContainerAsync(_model, App.CurrentUserId);
+        if (!ok) { _error = err; return; }
+        Snackbar.Add(isNew ? "Container created." : "Container updated.", Severity.Success);
+        App.Log(isNew ? "Created container" : "Updated container", _model.ContainerName);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

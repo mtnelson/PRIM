@@ -1,0 +1,148 @@
+@inherits LayoutComponentBase
+@inject AppState App
+@inject PrimService Prim
+@implements IDisposable
+
+<MudThemeProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<MudPopoverProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1" Dense="true">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleLeft" />
+        <MudText Typo="Typo.h6" Class="ml-2">PRIM</MudText>
+        <MudText Typo="Typo.caption" Class="ml-2" Style="opacity:0.7">Physical Records Inventory Manager</MudText>
+        <MudSpacer />
+        <MudSelect T="AppUser" Value="_me" ValueChanged="OnUserChanged" Dense="true" Variant="Variant.Outlined"
+                   Style="min-width:220px;background:white" Label="Signed in as" ToStringFunc="@(u => u == null ? "" : $"{u.DisplayName} ({u.Role})")">
+            @foreach (var u in _users)
+            {
+                <MudSelectItem Value="u" />
+            }
+        </MudSelect>
+        <MudTooltip Text="Toggle view pane">
+            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Inherit" OnClick="ToggleView" />
+        </MudTooltip>
+    </MudAppBar>
+
+    @if (!string.IsNullOrWhiteSpace(App.ActiveAnnouncement))
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="ma-0" Style="border-radius:0">@App.ActiveAnnouncement</MudAlert>
+    }
+
+    <MudDrawer @bind-Open="_leftOpen" Elevation="1" Width="260px">
+        <MudNavMenu Dense="true">
+            <MudText Typo="Typo.subtitle2" Class="pa-3 pb-1">SHORTCUTS</MudText>
+            <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+            <MudNavLink Href="advanced" Icon="@Icons.Material.Filled.ManageSearch">Advanced Search</MudNavLink>
+            <MudNavLink Href="records" Icon="@Icons.Material.Filled.Description">Records</MudNavLink>
+            <MudNavLink Href="containers" Icon="@Icons.Material.Filled.Inventory2">Containers</MudNavLink>
+            <MudNavLink Href="locations" Icon="@Icons.Material.Filled.Place">Locations</MudNavLink>
+            <MudNavLink Href="users" Icon="@Icons.Material.Filled.People">Users</MudNavLink>
+            <MudNavLink Href="workspaces" Icon="@Icons.Material.Filled.Work">Workspaces</MudNavLink>
+            <MudNavLink Href="reports" Icon="@Icons.Material.Filled.Assessment">Reports</MudNavLink>
+            <MudNavLink Href="admin" Icon="@Icons.Material.Filled.AdminPanelSettings">Admin</MudNavLink>
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.subtitle2" Class="pa-3 pb-1">RECENT</MudText>
+            @if (App.Recent.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Class="pa-3">Nothing viewed yet.</MudText>
+            }
+            @foreach (var r in App.Recent)
+            {
+                <MudNavLink Href="@RecentHref(r)" Icon="@Icons.Material.Filled.History">@r.Label</MudNavLink>
+            }
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudDrawer @bind-Open="_viewOpen" Anchor="Anchor.Right" Elevation="1" Width="400px" Variant="DrawerVariant.Persistent">
+        <MudPaper Elevation="0" Class="pa-2 d-flex align-center">
+            <MudText Typo="Typo.subtitle1"><b>View Pane</b></MudText>
+            <MudSpacer />
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="() => App.ClearViewPane()" />
+        </MudPaper>
+        <MudDivider />
+        @if (App.ViewPaneSelection is { } sel)
+        {
+            <div class="pa-2">
+                <MudText Typo="Typo.caption">@sel.Kind.ToUpper() · @sel.Label</MudText>
+                <ViewPane Kind="@sel.Kind" Id="@sel.Id" />
+            </div>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="pa-4">Select a row to see its properties, notes, and audit trail here.</MudText>
+        }
+    </MudDrawer>
+
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraExtraLarge" Class="pa-4">
+            <div id="main">@Body</div>
+        </MudContainer>
+
+        @if (_logOpen)
+        {
+            <MudPaper Elevation="2" Class="activity-log">
+                <div class="d-flex align-center pa-2">
+                    <MudText Typo="Typo.subtitle2"><b>Activity Log</b> <span style="opacity:0.6">(this session only)</span></MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => App.ClearLog()">Clear</MudButton>
+                    <MudIconButton Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" OnClick="() => _logOpen = false" />
+                </div>
+                <MudDivider />
+                <div class="log-body">
+                    @foreach (var e in App.ActivityLog)
+                    {
+                        <div class="log-row"><span class="log-time">@e.At.ToString("HH:mm:ss")</span><b>@e.Action</b><span>@e.Detail</span></div>
+                    }
+                </div>
+            </MudPaper>
+        }
+        else
+        {
+            <MudTooltip Text="Show activity log">
+                <MudFab Color="Color.Default" Size="Size.Small" StartIcon="@Icons.Material.Filled.Terminal"
+                        Class="activity-fab" OnClick="() => _logOpen = true" />
+            </MudTooltip>
+        }
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _leftOpen = true;
+    private bool _viewOpen = true;
+    private bool _logOpen = false;
+    private List<AppUser> _users = new();
+    private AppUser? _me;
+
+    protected override async Task OnInitializedAsync()
+    {
+        App.Changed += OnAppChanged;
+        _users = await Prim.GetUsersAsync();
+        _me = _users.FirstOrDefault(u => u.UserId == App.CurrentUserId) ?? _users.FirstOrDefault();
+        App.ActiveAnnouncement = await Prim.GetAnnouncementAsync();
+    }
+
+    private void OnUserChanged(AppUser? u)
+    {
+        if (u == null) return;
+        _me = u;
+        App.SetUser(u.UserId, u.DisplayName, u.Role);
+    }
+
+    private void OnAppChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => App.Changed -= OnAppChanged;
+
+    private void ToggleLeft() => _leftOpen = !_leftOpen;
+    private void ToggleView() => _viewOpen = !_viewOpen;
+
+    private string RecentHref((string Kind, int Id, string Label) r) => r.Kind switch
+    {
+        "Record" => "records",
+        "Container" => "containers",
+        "Location" => "locations",
+        "User" => "users",
+        _ => ""
+    };
+}

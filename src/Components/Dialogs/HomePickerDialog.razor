@@ -1,0 +1,56 @@
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Select Home</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" Label="Search" @bind-Value="_q" Immediate="true" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-2" />
+        <MudTabs Rounded="true">
+            <MudTabPanel Text="Locations">
+                <MudList T="string" Dense="true" Style="max-height:300px;overflow-y:auto">
+                    @foreach (var l in _locs.Where(x => Match(x.LocationName)))
+                    {
+                        <MudListItem Text="@l.LocationName" SecondaryText="@l.LocationType" OnClick="@(() => Choose("Location", l.Id, l.LocationName))" />
+                    }
+                </MudList>
+            </MudTabPanel>
+            <MudTabPanel Text="Containers">
+                <MudList T="string" Dense="true" Style="max-height:300px;overflow-y:auto">
+                    @foreach (var c in _containers.Where(x => Match(x.ContainerName)))
+                    {
+                        <MudListItem Text="@c.ContainerName" SecondaryText="@c.ContainerType" OnClick="@(() => Choose("Container", c.Id, c.ContainerName))" />
+                    }
+                </MudList>
+            </MudTabPanel>
+            <MudTabPanel Text="Users">
+                <MudList T="string" Dense="true" Style="max-height:300px;overflow-y:auto">
+                    @foreach (var u in _users.Where(x => Match(x.DisplayName) || Match(x.UserId)))
+                    {
+                        <MudListItem Text="@u.DisplayName" SecondaryText="@u.Role" OnClick="@(() => Choose("User", u.Id, u.DisplayName))" />
+                    }
+                </MudList>
+            </MudTabPanel>
+        </MudTabs>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    private string _q = "";
+    private List<Location> _locs = new();
+    private List<Container> _containers = new();
+    private List<AppUser> _users = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _locs = await Prim.GetLocationsAsync();
+        _containers = await Prim.GetContainersAsync();
+        _users = await Prim.GetUsersAsync();
+    }
+    private bool Match(string s) => string.IsNullOrWhiteSpace(_q) || s.Contains(_q, StringComparison.OrdinalIgnoreCase);
+    private void Choose(string kind, int id, string label) => MudDialog.Close(DialogResult.Ok((kind, id, label)));
+}

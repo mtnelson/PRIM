@@ -1,0 +1,66 @@
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Move @Count item(s)</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">Change Home and/or Assignee for the selected @(Kind.ToLower())s.</MudText>
+        <MudCheckBox T="bool" Label="Change Home" @bind-Value="_changeHome" />
+        @if (_changeHome)
+        {
+            <MudTextField T="string" Label="New Home" Value="_newHome" ReadOnly="true"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickHome" />
+            <MudText Typo="Typo.caption">@_newHomeKind</MudText>
+            <MudCheckBox T="bool" Label="Default the assignee to the home (TIS-2201)" @bind-Value="_assigneeFollowsHome" Class="mt-2" />
+        }
+        <MudCheckBox T="bool" Label="Change Assignee" @bind-Value="_changeAssignee" Class="mt-2" />
+        @if (_changeAssignee)
+        {
+            <MudSelect T="string" Label="New Assignee" @bind-Value="_newAssignee">
+                @foreach (var u in _users) { <MudSelectItem Value="u.UserId">@u.DisplayName</MudSelectItem> }
+            </MudSelect>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save"
+                   Disabled="!((_changeHome && _newHome != null) || _changeAssignee)">Move</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string Kind { get; set; } = "Record";
+    [Parameter] public List<int> Ids { get; set; } = new();
+    private int Count => Ids.Count;
+
+    private bool _changeHome, _changeAssignee, _assigneeFollowsHome = true;
+    private string? _newHome, _newHomeKind, _newAssignee;
+    private int? _newHomeRefId;
+    private List<AppUser> _users = new();
+
+    protected override async Task OnInitializedAsync() => _users = await Prim.GetUsersAsync();
+
+    private async Task PickHome()
+    {
+        var d = await DialogService.ShowAsync<HomePickerDialog>("Select Home",
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
+        {
+            _newHomeKind = pick.Item1; _newHomeRefId = pick.Item2; _newHome = pick.Item3;
+        }
+    }
+
+    private async Task Save()
+    {
+        var n = await Prim.MoveItemsAsync(Kind, Ids,
+            _changeHome ? _newHome : null, _newHomeKind, _newHomeRefId,
+            _changeAssignee ? _newAssignee : null, _assigneeFollowsHome, App.CurrentUserId);
+        Snackbar.Add($"Moved {n} item(s).", Severity.Success);
+        App.Log("Moved items", $"{n} {Kind.ToLower()}(s)");
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

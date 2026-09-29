@@ -1,0 +1,112 @@
+@page "/admin"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+
+<PageTitle>PRIM — Admin</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-3">Administration</MudText>
+
+<MudTabs Rounded="true">
+    <MudTabPanel Text="Deleted Records">
+        <div class="d-flex align-center mt-2 mb-2">
+            <MudText Typo="Typo.subtitle1"><b>Deleted record review</b></MudText>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Load">Refresh</MudButton>
+        </div>
+        <MudDataGrid Items="_deleted" Dense="true" Hover="true">
+            <Columns>
+                <PropertyColumn Property="x => x.RecordNumber" Title="Record Number" />
+                <PropertyColumn Property="x => x.CaseNumber" Title="Case Number" />
+                <PropertyColumn Property="x => x.DeleteReason" Title="Reason" />
+                <PropertyColumn Property="x => x.MergedIntoBarcode" Title="Merged Into" />
+                <PropertyColumn Property="x => x.LastUpdatedBy" Title="Deleted By" />
+                <TemplateColumn Title="">
+                    <CellTemplate>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
+                                   OnClick="() => Restore(context.Item)">Restore</MudButton>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+        @if (!_deleted.Any())
+        {
+            <MudText Typo="Typo.body2" Class="pa-4" Style="opacity:0.6">No deleted records.</MudText>
+        }
+    </MudTabPanel>
+
+    <MudTabPanel Text="Announcement">
+        <MudPaper Elevation="1" Class="pa-4 mt-2" Style="max-width:640px">
+            <MudText Typo="Typo.subtitle1" Class="mb-2"><b>Global announcement banner</b></MudText>
+            <MudTextField T="string" @bind-Value="_announcement" Lines="3" Label="Announcement text (empty clears it)" />
+            <div class="d-flex gap-2 mt-3">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAnnouncement">Save</MudButton>
+                <MudButton Variant="Variant.Outlined" OnClick="ClearAnnouncement">Clear</MudButton>
+            </div>
+        </MudPaper>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Saved Searches">
+        <MudTable Items="_searches" Dense="true" Hover="true" Class="mt-2">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Type</MudTh>
+                <MudTh>Owner</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name">@context.Name</MudTd>
+                <MudTd DataLabel="Type">@context.ObjectKind</MudTd>
+                <MudTd DataLabel="Owner">@context.OwnerUserId</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" OnClick="() => DeleteSearch(context)" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private List<RecordItem> _deleted = new();
+    private string _announcement = "";
+    private List<SavedSearch> _searches = new();
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _deleted = await Prim.GetRecordsAsync(includeDeleted: true);
+        _deleted = _deleted.Where(r => r.Deleted).ToList();
+        _announcement = await Prim.GetAnnouncementAsync() ?? "";
+        _searches = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+        StateHasChanged();
+    }
+
+    private async Task Restore(RecordItem r)
+    {
+        await Prim.RestoreRecordsAsync(new[] { r.Id }, App.CurrentUserId);
+        Snackbar.Add($"Restored {r.RecordNumber}.", Severity.Success);
+        App.Log("Restored record", r.RecordNumber);
+        await Load();
+    }
+
+    private async Task SaveAnnouncement()
+    {
+        await Prim.SetAnnouncementAsync(_announcement, !string.IsNullOrWhiteSpace(_announcement), App.CurrentUserId);
+        App.ActiveAnnouncement = string.IsNullOrWhiteSpace(_announcement) ? null : _announcement;
+        Snackbar.Add("Announcement updated.", Severity.Success);
+        App.Log("Updated announcement", "");
+    }
+
+    private async Task ClearAnnouncement()
+    {
+        _announcement = "";
+        await SaveAnnouncement();
+    }
+
+    private async Task DeleteSearch(SavedSearch s)
+    {
+        await Prim.DeleteSavedSearchAsync(s.Id);
+        await Load();
+    }
+}

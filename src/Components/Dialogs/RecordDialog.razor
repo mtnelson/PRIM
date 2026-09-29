@@ -1,0 +1,181 @@
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_model.Id == 0 ? "New Record" : $"Edit Record {_model.RecordNumber}")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" Model="_model">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="Record Type *" @bind-Value="_model.RecordType" Required="true"
+                               Disabled="_typeLocked" HelperText="@(_typeLocked ? "Type changes require the Records Manager role." : "")">
+                        @foreach (var t in SeedData.RecordTypes) { <MudSelectItem Value="t">@t</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="State" @bind-Value="_model.State">
+                        @foreach (var s in SeedData.RecordStates) { <MudSelectItem Value="s">@s</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string" Label="Case Classification *" @bind-Value="_model.CaseClassification"
+                                  Required="true" Immediate="true" TextChanged="UpperClass" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudSelect T="string" Label="Field Office *" @bind-Value="_model.FieldOffice" Required="true">
+                        @foreach (var fo in SeedData.FieldOffices) { <MudSelectItem Value="@fo[..2]">@fo</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string" Label="Case Number *" @bind-Value="_model.CaseNumber"
+                                  Required="true" Immediate="true" TextChanged="UpperCase" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string" Label="Subfile ID" @bind-Value="_model.SubfileId" Immediate="true" TextChanged="UpperSubfile" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string" Label="Volume *" @bind-Value="_model.Volume" Required="true" />
+                </MudItem>
+                <MudItem xs="6" md="2">
+                    <MudTextField T="string" Label="Serial Start" @bind-Value="_model.SerialStart" Immediate="true" TextChanged="UpperSerialStart" />
+                </MudItem>
+                <MudItem xs="6" md="2">
+                    <MudTextField T="string" Label="Serial End" @bind-Value="_model.SerialEnd" Immediate="true" TextChanged="UpperSerialEnd" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Auxiliary Office" @bind-Value="_model.AuxiliaryOffice" />
+                </MudItem>
+                <MudItem xs="12" md="6" Class="d-flex align-center gap-4">
+                    <MudCheckBox T="bool" Label="Is Bulky?" @bind-Value="_model.IsBulky" />
+                    <MudCheckBox T="bool" Label="Is Admin?" @bind-Value="_model.IsAdmin" />
+                    <MudCheckBox T="bool" Label="Is Control File?" @bind-Value="_model.IsControlFile" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Record Labels (comma-separated)" @bind-Value="_model.Labels" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" Label="Security Classification" @bind-Value="_model.SecurityClassification" Clearable="true">
+                        @foreach (var s in SeedData.SecurityClassifications) { <MudSelectItem Value="s">@s</MudSelectItem> }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Notes" @bind-Value="_model.Notes" Lines="3" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Subject" @bind-Value="_model.Subject" Lines="2" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Home *" @bind-Value="_model.Home" Required="true" ReadOnly="true"
+                                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickHome" />
+                    <MudText Typo="Typo.caption">@_model.HomeKind</MudText>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <div class="d-flex gap-2 align-center">
+                        <MudSelect T="string" Label="Assignee *" @bind-Value="_model.Assignee" Required="true" Style="flex:1">
+                            @foreach (var u in _users) { <MudSelectItem Value="u.UserId">@u.DisplayName</MudSelectItem> }
+                        </MudSelect>
+                        <MudTooltip Text="Default assignee to home (TIS-2201)">
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="MatchHome">Match Home</MudButton>
+                        </MudTooltip>
+                    </div>
+                </MudItem>
+            </MudGrid>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert>
+            }
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public RecordItem Model { get; set; } = new();
+
+    private MudForm _form = null!;
+    private RecordItem _model = new();
+    private List<AppUser> _users = new();
+    private string? _error;
+    private string _originalType = "";
+    private bool _typeLocked => _model.Id != 0 && !App.IsRecordsManager;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = await Prim.GetUsersAsync();
+        _model = Model.Id == 0
+            ? new RecordItem { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentUserId }
+            : Clone(Model);
+        _originalType = _model.RecordType;
+    }
+
+    private static RecordItem Clone(RecordItem r) => new()
+    {
+        Id = r.Id, RecordNumber = r.RecordNumber, Barcode = r.Barcode, RecordType = r.RecordType,
+        CaseClassification = r.CaseClassification, FieldOffice = r.FieldOffice, CaseNumber = r.CaseNumber,
+        SubfileId = r.SubfileId, Volume = r.Volume, SerialStart = r.SerialStart, SerialEnd = r.SerialEnd,
+        AuxiliaryOffice = r.AuxiliaryOffice, IsBulky = r.IsBulky, IsAdmin = r.IsAdmin, IsControlFile = r.IsControlFile,
+        Labels = r.Labels, SecurityClassification = r.SecurityClassification, Subject = r.Subject, Notes = r.Notes,
+        Home = r.Home, HomeKind = r.HomeKind, HomeRefId = r.HomeRefId, Assignee = r.Assignee, State = r.State,
+        RowVersion = r.RowVersion
+    };
+
+    private void UpperClass(string v) => _model.CaseClassification = v.ToUpperInvariant();
+    private void UpperCase(string v) => _model.CaseNumber = v.ToUpperInvariant();
+    private void UpperSubfile(string v) => _model.SubfileId = v.ToUpperInvariant();
+    private void UpperSerialStart(string v) => _model.SerialStart = v.ToUpperInvariant();
+    private void UpperSerialEnd(string v) => _model.SerialEnd = v.ToUpperInvariant();
+    private void MatchHome()
+    {
+        if (_model.HomeKind == "User")
+        {
+            var u = _users.FirstOrDefault(x => x.DisplayName == _model.Home || x.UserId == _model.Home);
+            _model.Assignee = u?.UserId ?? _model.Assignee;
+        }
+    }
+
+    private async Task PickHome()
+    {
+        var opts = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var d = await DialogService.ShowAsync<HomePickerDialog>("Select Home", opts);
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
+        {
+            _model.Home = pick.Item3; _model.HomeKind = pick.Item1; _model.HomeRefId = pick.Item2;
+        }
+    }
+    [Inject] IDialogService DialogService { get; set; } = null!;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Save()
+    {
+        _error = null;
+        await _form.Validate();
+        if (!_form.IsValid) return;
+
+        // TIS-2218: type change needs Records Manager + confirmation.
+        if (_model.Id != 0 && _model.RecordType != _originalType)
+        {
+            if (!App.IsRecordsManager) { _error = "Changing the record type requires the Records Manager role."; return; }
+            bool? ok = await DialogService.ShowMessageBox("Change record type?",
+                $"Change type from '{_originalType}' to '{_model.RecordType}'? Fields not associated with the new type will be removed.",
+                yesText: "Change", cancelText: "Cancel");
+            if (ok != true) { _model.RecordType = _originalType; return; }
+            if (_model.RecordType == "Compressed") { _model.SerialStart = _model.SerialEnd = null; } // TIS-1808
+        }
+
+        var isNew = _model.Id == 0;
+        var (ok2, err) = await Prim.SaveRecordAsync(_model, App.CurrentUserId);
+        if (!ok2) { _error = err; return; }
+        Snackbar.Add(isNew ? "Record created." : "Record updated.", Severity.Success);
+        App.Log(isNew ? "Created record" : "Updated record", _model.RecordNumber);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

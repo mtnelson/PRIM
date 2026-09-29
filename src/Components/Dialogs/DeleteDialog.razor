@@ -1,0 +1,55 @@
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Delete @Ids.Count record(s)</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Deleted records are immediately excluded from search and moved to a deletion state.
+            A reason is required (TIS-370).
+        </MudText>
+        <MudRadioGroup T="string" @bind-Value="_reason">
+            <MudRadio Value="@("Duplicate entry")">Duplicate entry</MudRadio>
+            <MudRadio Value="@("Merged with case file")">Merged with case file</MudRadio>
+            <MudRadio Value="@("Invalid Case Number")">Invalid Case Number</MudRadio>
+            <MudRadio Value="@("All files within range dispositioned")">All files within range dispositioned</MudRadio>
+            <MudRadio Value="@("Other")">Other</MudRadio>
+        </MudRadioGroup>
+        @if (_reason == "Merged with case file")
+        {
+            <MudTextField T="string" Label="Merged Into (barcode) *" @bind-Value="_mergedInto" Required="true" Class="mt-2" />
+        }
+        @if (_reason == "Other")
+        {
+            <MudTextField T="string" Label="Reason *" @bind-Value="_otherText" Required="true" Lines="2" Class="mt-2" />
+        }
+        @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Submit">Delete</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public List<int> Ids { get; set; } = new();
+
+    private string _reason = "Duplicate entry";
+    private string? _mergedInto, _otherText, _error;
+
+    private async Task Submit()
+    {
+        _error = null;
+        if (_reason == "Merged with case file" && string.IsNullOrWhiteSpace(_mergedInto))
+        { _error = "Merged Into barcode is required."; return; }
+        if (_reason == "Other" && string.IsNullOrWhiteSpace(_otherText))
+        { _error = "A reason is required."; return; }
+
+        var n = await Prim.DeleteRecordsAsync(Ids, _reason, _mergedInto, _otherText, App.CurrentUserId);
+        Snackbar.Add($"Deleted {n} record(s).", Severity.Success);
+        App.Log("Deleted records", $"{n} record(s): {_reason}");
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

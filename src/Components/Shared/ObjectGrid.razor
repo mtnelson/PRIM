@@ -1,20 +1,36 @@
 @typeparam T
 @inject PrimService Prim
 @inject AppState App
+@inject HotkeyManager Hotkeys
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject IJSRuntime JS
+@implements IDisposable
+
+<div class="d-flex align-center mb-1">
+    <MudText Typo="Typo.caption" Style="opacity:0.7">
+        @(_selected.Count == 0 ? "Click a row to select · Ctrl+click toggles · double-click edits" : $"{_selected.Count} row(s) selected")
+    </MudText>
+    <MudSpacer />
+    <MudTooltip Text="Customize columns (add, remove, reorder — saved to your profile)">
+        <MudIconButton Icon="@Icons.Material.Filled.ViewColumn" Size="Size.Small" OnClick="CustomizeColumns" />
+    </MudTooltip>
+</div>
 
 <GridContextMenu HeaderText="@_menuHeader" NoTarget="@NoTarget"
                  CanMove="CanMove" CanDelete="CanDelete"
                  OnView="MenuView" OnEdit="MenuEdit" OnMove="MenuMove" OnDelete="MenuDelete" OnAudit="MenuAudit"
-                 OnAddToSlot="MenuAddToSlot" OnRemoveFromSlot="RemoveCallback" OnPrint="MenuPrint"
-                 OnExport="MenuExport" OnCopy="MenuCopy" OnSelectAll="SelectAll" OnUnselectAll="UnselectAll">
+                 OnAddToSlot="MenuAddToSlot" OnPrint="MenuPrint"
+                 OnExport="MenuExport" OnCopy="MenuCopy" OnSelectAll="SelectAll" OnUnselectAll="UnselectAll"
+                 OnRemoveFromSlot="MenuRemoveFromSlot" ShowRemove="ShowRemoveFromSlot">
     <Activator>
         <MudDataGrid Items="Items" Dense="true" Hover="true" MultiSelection="true" Striped="false"
-                     SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))" RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))">
+                     SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))"
+                     RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))"
+                     RowClassFunc="RowClass" @ondblclick="OnGridDblClick">
             <Columns>
-                @foreach (var col in ExportCols)
+                <SelectColumn T="T" />
+                @foreach (var col in _effective)
                 {
                     var c = col;
                     <TemplateColumn T="T" Title="@c.Label" Sortable="true" SortBy="@(x => CellVal(x, c.Key))">
@@ -29,6 +45,8 @@
 @code {
     [Parameter] public IEnumerable<T> Items { get; set; } = Enumerable.Empty<T>();
     [Parameter] public string Kind { get; set; } = "";
+    [Parameter] public string GridId { get; set; } = "";
+    [Parameter] public string Scope { get; set; } = "";
     [Parameter] public Func<T, (string Kind, int Id, string Label)> GetInfo { get; set; } = _ => ("", 0, "");
     [Parameter] public Func<T, string> GetBarcode { get; set; } = _ => "";
     [Parameter] public Func<T, Task<bool>>? EditItem { get; set; }
@@ -38,15 +56,76 @@
     [Parameter] public bool CanMove { get; set; } = true;
     [Parameter] public bool CanDelete { get; set; } = true;
     [Parameter] public bool ShowRemoveFromSlot { get; set; } = false;
-    [Parameter] public EventCallback<string> RemoveFromSlot { get; set; }
+    [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private HashSet<T> _selected = new();
     private T? _active;
     private bool _hasActive;
+    // Plain-click single-select: MudDataGrid fires its own selection toggle
+    // around RowClick (order not guaranteed), so a pending plain click
+    // overrides whatever set the grid reports.
+    private bool _singleSelectPending;
+    private T? _singleSelectItem;
     private string _menuHeader = "No selection";
+    private List<(string Key, string Label)> _effective = new();
+    private string _scope => string.IsNullOrEmpty(Scope) ? GridId : Scope;
 
     private bool NoTarget => _selected.Count == 0 && !_hasActive;
+
+    protected override void OnInitialized()
+    {
+        _effective = ExportCols.ToList();
+        if (!string.IsNullOrEmpty(_scope))
+        {
+            Hotkeys.Register(_scope, "Ctrl+A", SelectAll);
+            Hotkeys.Register(_scope, "Ctrl+C", CopyWithHeaders);
+            Hotkeys.Register(_scope, "F2", MenuEdit);
+            Hotkeys.Register(_scope, "Delete", MenuDelete);
+            Hotkeys.Register(_scope, "Ctrl+P", MenuPrint);
+            Hotkeys.Register(_scope, "Escape", ClearSelection);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrEmpty(GridId) && !string.IsNullOrEmpty(App.CurrentUserId))
+        {
+            var saved = await Prim.GetGridLayoutAsync(App.CurrentUserId, GridId);
+            if (saved is { Count: > 0 }) ApplyLayout(saved);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!string.IsNullOrEmpty(_scope)) Hotkeys.UnregisterScope(_scope);
+    }
+
+    private void ApplyLayout(List<string> keys)
+    {
+        var labels = ExportCols.ToDictionary(c => c.Key, c => c.Label);
+        _effective = keys.Where(labels.ContainsKey).Select(k => (k, labels[k])).ToList();
+        if (_effective.Count == 0) _effective = ExportCols.ToList();
+    }
+
+    private async Task CustomizeColumns()
+    {
+        var p = new DialogParameters
+        {
+            ["Available"] = ExportCols,
+            ["Current"] = _effective.Select(c => c.Key).ToList()
+        };
+        var d = await DialogService.ShowAsync<ColumnPickerDialog>("Customize Columns", p,
+            new DialogOptions { MaxWidth = MaxWidth.Small });
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: List<string> keys } && !string.IsNullOrEmpty(GridId))
+        {
+            await Prim.SaveGridLayoutAsync(App.CurrentUserId, GridId, keys);
+            ApplyLayout(keys);
+            App.Log("Customized columns", $"{Kind} grid");
+            Snackbar.Add("Column layout saved to your profile.", Severity.Success);
+        }
+    }
 
     public void ClearSelection()
     {
@@ -54,17 +133,61 @@
         UpdateMenuHeader(); StateHasChanged();
     }
 
-    private void OnSelChanged(HashSet<T> v) { _selected = v; UpdateMenuHeader(); }
+    private void OnSelChanged(HashSet<T> v)
+    {
+        if (_singleSelectPending && _singleSelectItem is not null)
+        {
+            _singleSelectPending = false;
+            _selected = new HashSet<T> { _singleSelectItem };
+        }
+        else
+        {
+            _selected = v;
+        }
+        UpdateMenuHeader();
+    }
+
+    private string RowClass(T item, int index) =>
+        _selected.Contains(item) ? "prim-row-selected" : "";
 
     private string CellVal(T x, string key)
         => RowToDict is null ? "" : RowToDict(x).GetValueOrDefault(key, "");
 
     private void OnRowClick(DataGridRowClickEventArgs<T> e)
     {
+        var toggle = e.MouseEventArgs?.CtrlKey == true || e.MouseEventArgs?.MetaKey == true;
         _active = e.Item; _hasActive = true;
+        if (toggle)
+        {
+            // Ctrl+click (Cmd+click on Mac): toggle without clearing the rest.
+            _singleSelectPending = false;
+            var next = new HashSet<T>(_selected);
+            if (!next.Add(e.Item)) next.Remove(e.Item);
+            _selected = next;
+            UpdateMenuHeader();
+            StateHasChanged();
+        }
+        else
+        {
+            // Plain click: single-select (overrides the grid's own toggle).
+            _singleSelectPending = true;
+            _singleSelectItem = e.Item;
+            _selected = new HashSet<T> { e.Item };
+            UpdateMenuHeader();
+            StateHasChanged();
+        }
         var (kind, id, label) = GetInfo(e.Item);
         App.SetViewPane(kind, id, label);
         UpdateMenuHeader();
+    }
+
+    private async Task OnGridDblClick()
+    {
+        // Two clicks precede the double-click, so _active is the double-clicked row.
+        if (_active is null || !_hasActive) return;
+        var t = new List<T> { _active };
+        if (EditItem is null) return;
+        if (await EditItem(t[0])) await OnChanged.InvokeAsync();
     }
 
     private List<T> Targets()
@@ -82,8 +205,8 @@
         };
     }
 
-    private void SelectAll() { _selected = Items.ToHashSet(); UpdateMenuHeader(); }
-    private void UnselectAll() { _selected.Clear(); UpdateMenuHeader(); }
+    private void SelectAll() { _selected = Items.ToHashSet(); UpdateMenuHeader(); StateHasChanged(); }
+    private void UnselectAll() { _selected.Clear(); UpdateMenuHeader(); StateHasChanged(); }
 
     private void MenuView()
     {
@@ -142,27 +265,29 @@
 
     private async Task MenuRemoveFromSlot()
     {
-        if (RemoveFromSlot.HasDelegate) await RemoveFromSlot.InvokeAsync("");
+        var t = Targets(); if (t.Count == 0) return;
+        if (RemoveFromSlot.HasDelegate)
+            await RemoveFromSlot.InvokeAsync(t.Select(x => GetInfo(x).Id).ToList());
     }
-
-    private EventCallback RemoveCallback => ShowRemoveFromSlot
-        ? EventCallback.Factory.Create(this, (Func<Task>)(() => RemoveFromSlot.InvokeAsync("")))
-        : default;
 
     private async Task MenuPrint()
     {
-        var t = Targets(); if (t.Count != 1) { Snackbar.Add("Select exactly one row.", Severity.Info); return; }
-        var (kind, _, label) = GetInfo(t[0]);
-        var p = new DialogParameters { ["Title"] = label, ["Line2"] = kind, ["Barcode"] = GetBarcode(t[0]) };
-        await DialogService.ShowAsync<LabelDialog>("Inventory Label", p, new DialogOptions { MaxWidth = MaxWidth.Small });
+        var t = Targets(); if (t.Count == 0) return;
+        var labels = t.Select(x =>
+        {
+            var (kind, _, label) = GetInfo(x);
+            return (Title: label, Line2: kind, Barcode: GetBarcode(x));
+        }).ToList();
+        var p = new DialogParameters { ["Labels"] = labels };
+        await DialogService.ShowAsync<LabelDialog>("Inventory Labels", p, new DialogOptions { MaxWidth = MaxWidth.Small });
     }
 
     private async Task MenuExport()
     {
         var t = Targets(); if (t.Count == 0) return;
-        if (RowToDict is null || ExportCols.Count == 0) return;
+        if (RowToDict is null || _effective.Count == 0) return;
         var rows = t.Select(RowToDict).ToList();
-        var cols = ExportCols;
+        var cols = _effective;
         var p = new DialogParameters
         {
             ["Columns"] = cols,
@@ -188,5 +313,21 @@
         var t = Targets(); if (t.Count == 0) return;
         var ok = await JS.InvokeAsync<bool>("prim.copyText", string.Join("\n", t.Select(x => GetInfo(x).Label)));
         Snackbar.Add(ok ? $"Copied {t.Count} item(s)." : "Clipboard unavailable.", ok ? Severity.Success : Severity.Warning);
+    }
+
+    // Ctrl+C on the grid: rows WITH column headers, tab-separated for spreadsheets.
+    private async Task CopyWithHeaders()
+    {
+        var t = Targets(); if (t.Count == 0 || RowToDict is null || _effective.Count == 0) return;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(string.Join("\t", _effective.Select(c => c.Label)));
+        foreach (var x in t)
+        {
+            var d = RowToDict(x);
+            sb.AppendLine(string.Join("\t", _effective.Select(c => d.GetValueOrDefault(c.Key, ""))));
+        }
+        var ok = await JS.InvokeAsync<bool>("prim.copyText", sb.ToString());
+        Snackbar.Add(ok ? $"Copied {t.Count} row(s) with headers." : "Clipboard unavailable.",
+            ok ? Severity.Success : Severity.Warning);
     }
 }

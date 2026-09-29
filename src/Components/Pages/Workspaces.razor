@@ -1,19 +1,24 @@
 @page "/workspaces"
 @inject PrimService Prim
 @inject AppState App
+@inject HotkeyManager Hotkeys
+@inject ISnackbar Snackbar
+@implements IDisposable
 
 <PageTitle>PRIM — Workspaces</PageTitle>
 <MudText Typo="Typo.h5" Class="mb-3">Workspaces</MudText>
 <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:0.7">
     Five personal workspaces plus Favorites (TIS-1411). Items are stored per user.
+    Right-click a row for actions — removing an item from a workspace never deletes the item itself.
 </MudText>
 
-<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2" @bind-ActivePanelIndex="_tab">
     @foreach (var slot in Slots)
     {
-        <MudTabPanel Text="@slot">
+        var s = slot;
+        <MudTabPanel Text="@s">
             @{
-                var items = _items.GetValueOrDefault(slot, new List<WorkspaceItem>());
+                var items = _items.GetValueOrDefault(s, new List<WorkspaceItem>());
             }
             @if (items.Count == 0)
             {
@@ -23,27 +28,13 @@
             }
             else
             {
-                <MudList T="WorkspaceItem" Dense="true">
-                    @foreach (var w in items)
-                    {
-                        <MudListItem T="WorkspaceItem">
-                            <div class="d-flex align-center">
-                                <div class="flex-grow-1">
-                                    <MudText Typo="Typo.body2"><b>@w.Label</b></MudText>
-                                    <MudText Typo="Typo.caption" Style="opacity:0.7">@w.ObjectKind — added @w.AddedUtc.ToLocalTime().ToString("g")</MudText>
-                                </div>
-                                <MudTooltip Text="Open in view pane">
-                                    <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small"
-                                                   OnClick="@(() => OpenItem(w))" />
-                                </MudTooltip>
-                                <MudTooltip Text="Remove from workspace">
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
-                                                   OnClick="@(() => RemoveItem(slot, w))" />
-                                </MudTooltip>
-                            </div>
-                        </MudListItem>
-                    }
-                </MudList>
+                <ObjectGrid T="WorkspaceItem" Kind="@s" GridId="@GridIdFor(s)" Scope="workspaces" Items="items"
+                            GetInfo="@(w => (w.ObjectKind, w.ObjectId, w.Label))"
+                            GetBarcode="@(w => "")"
+                            ExportCols="GridColumns.WorkspaceColumns()" RowToDict="GridColumns.WorkspaceRow"
+                            CanMove="false" CanDelete="false" ShowRemoveFromSlot="true"
+                            RemoveFromSlot="(ids => RemoveSelected(s, ids))"
+                            OnChanged="Load" />
             }
         </MudTabPanel>
     }
@@ -54,18 +45,37 @@
         { "Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4", "Workspace 5", "Favorites" };
 
     private Dictionary<string, List<WorkspaceItem>> _items = new();
+    private int _tab;
+
+    private static string GridIdFor(string slot) => "ws-" + slot.ToLowerInvariant().Replace(" ", "-");
 
     protected override async Task OnInitializedAsync()
     {
-        foreach (var s in Slots)
-            _items[s] = await Prim.GetSlotAsync(App.CurrentUserId, s);
+        Hotkeys.PushScope("workspaces");
+        Hotkeys.Register("workspaces", "F9", Refresh);
+        await Load();
     }
 
-    private void OpenItem(WorkspaceItem w) => App.SetViewPane(w.ObjectKind, w.ObjectId, w.Label);
+    public void Dispose() => Hotkeys.UnregisterScope("workspaces");
 
-    private async Task RemoveItem(string slot, WorkspaceItem w)
+    private async Task Refresh() { await Load(); Snackbar.Add("Workspaces refreshed.", Severity.Info); }
+
+    private async Task Load()
     {
-        await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, w.ObjectKind, w.ObjectId);
-        _items[slot] = await Prim.GetSlotAsync(App.CurrentUserId, slot);
+        foreach (var s in Slots)
+            _items[s] = await Prim.GetSlotAsync(App.CurrentUserId, s);
+        StateHasChanged();
+    }
+
+    // Delete on the workspace grid removes the selected item(s) from the slot,
+    // never the underlying object.
+    private async Task RemoveSelected(string slot, List<int> ids)
+    {
+        var items = _items.GetValueOrDefault(slot, new List<WorkspaceItem>());
+        var byId = items.Where(w => ids.Contains(w.ObjectId)).ToList();
+        foreach (var w in byId)
+            await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, w.ObjectKind, w.ObjectId);
+        App.Log("Removed from " + slot, $"{byId.Count} item(s)");
+        await Load();
     }
 }

@@ -13,7 +13,7 @@ public class RecordItem
     [Required] public string RecordNumber { get; set; } = "";   // system-assigned R-000001
     [Required] public string Barcode { get; set; } = "";        // system-assigned
 
-    [Required] public string RecordType { get; set; } = "Standard"; // Standard, Compressed, Abstract, HQ Bureau Applicant, HQ In Service, HQ Out of Service
+    [Required] public string RecordType { get; set; } = "Case File"; // Case File, Compressed, Abstract, HQ Bureau Applicant, HQ In Service, HQ Out of Service
     [Required] public string CaseClassification { get; set; } = "";  // forced UPPERCASE
     [Required] public string FieldOffice { get; set; } = "";         // FO code, e.g. HQ
     [Required] public string CaseNumber { get; set; } = "";          // forced UPPERCASE
@@ -34,8 +34,11 @@ public class RecordItem
     // the creating user; Assignee defaults to Home (TIS-2201).
     [Required] public string Home { get; set; } = "";
     public string? HomeKind { get; set; }               // Location | Container | User
+    public string? AssigneeKind { get; set; }            // Container | Location | User
     public int? HomeRefId { get; set; }
     [Required] public string Assignee { get; set; } = "";
+
+    public int? ParentRecordId { get; set; }            // child of a Compressed record (expandable tree)
 
     [Required] public string State { get; set; } = "Active"; // TIS-2294 spike values
     public bool Deleted { get; set; }
@@ -65,6 +68,7 @@ public class Container
     [Required] public string Barcode { get; set; } = "";
     [Required] public string Home { get; set; } = "";
     public string? HomeKind { get; set; }
+    public string? AssigneeKind { get; set; }
     public int? HomeRefId { get; set; }
     [Required] public string Assignee { get; set; } = "";
     public int? ParentContainerId { get; set; }           // nesting
@@ -105,6 +109,9 @@ public class AppUser
     [Required] public string Role { get; set; } = "Staff"; // Admin, Records Manager, Staff
     public string? Email { get; set; }
     public bool Active { get; set; } = true;
+    public int? LocationId { get; set; }                 // membership in a location
+    public string? PasswordHash { get; set; }           // dev password auth (PBKDF2); production uses OAuth/SSO via IAuthProvider
+    public string? PasswordSalt { get; set; }
     public DateTime CreatedUtc { get; set; }
     [ConcurrencyCheck] public int RowVersion { get; set; }
 }
@@ -158,5 +165,15 @@ public class Announcement
     public string Message { get; set; } = "";
     public bool IsActive { get; set; }
     public string UpdatedBy { get; set; } = "";
+    public DateTime UpdatedUtc { get; set; }
+}
+
+// Per-user data grid column layout (customizable columns, persisted per user).
+public class UserGridLayout
+{
+    public int Id { get; set; }
+    [Required] public string UserId { get; set; } = "";
+    [Required] public string GridId { get; set; } = "";   // records | containers | locations | users | workspaces
+    [Required] public string ColumnsCsv { get; set; } = ""; // ordered visible column keys
     public DateTime UpdatedUtc { get; set; }
 }

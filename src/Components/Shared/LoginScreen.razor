@@ -1,0 +1,51 @@
+@* PRIM login screen (development). Production will determine identity via
+   OAuth/SSO — always authenticate through IAuthProvider, never hard-wire. *@
+@inject IAuthProvider Auth
+@inject AppState App
+@inject ISnackbar Snackbar
+
+<MudThemeProvider />
+<MudSnackbarProvider />
+
+<div class="login-wrap">
+    <MudPaper Elevation="3" Class="pa-6 login-card">
+        <MudText Typo="Typo.h5" Class="mb-1">PRIM</MudText>
+        <MudText Typo="Typo.caption" Class="mb-4" Style="opacity:0.7">Physical Records Inventory Manager — sign in</MudText>
+        <form @onsubmit="Login" @onsubmit:preventDefault="true">
+            <MudTextField T="string" @bind-Value="_userId" Label="Username" Variant="Variant.Outlined"
+                          Class="mb-3" Immediate="true" AutoFocus="true" />
+            <MudTextField T="string" @bind-Value="_password" Label="Password" Variant="Variant.Outlined"
+                          InputType="InputType.Password" Class="mb-3" />
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+            }
+            <MudButton ButtonType="ButtonType.Submit" Color="Color.Primary" Variant="Variant.Filled"
+                       FullWidth="true" Disabled="_busy">
+                @(_busy ? "Signing in…" : "Sign in")
+            </MudButton>
+        </form>
+        <MudText Typo="Typo.caption" Class="mt-3" Style="opacity:0.6">
+            Dev build: sign in with a seeded username and password.
+        </MudText>
+    </MudPaper>
+</div>
+
+@code {
+    private string _userId = "";
+    private string _password = "";
+    private string? _error;
+    private bool _busy;
+
+    private async Task Login()
+    {
+        _error = null; _busy = true;
+        try
+        {
+            var res = await Auth.AuthenticateAsync(_userId, _password);
+            if (!res.Ok) { _error = res.Error; return; }
+            App.SignIn(res.UserId, res.DisplayName, res.Role);
+        }
+        finally { _busy = false; }
+    }
+}

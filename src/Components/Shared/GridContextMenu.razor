@@ -21,7 +21,7 @@
         <MudMenuItem Icon="@Icons.Material.Filled.Work" OnClick='() => OnAddToSlot.InvokeAsync("Workspace 4")' Disabled="@NoTarget">Add to Workspace 4</MudMenuItem>
         <MudMenuItem Icon="@Icons.Material.Filled.Work" OnClick='() => OnAddToSlot.InvokeAsync("Workspace 5")' Disabled="@NoTarget">Add to Workspace 5</MudMenuItem>
         <MudMenuItem Icon="@Icons.Material.Filled.Star" OnClick='() => OnAddToSlot.InvokeAsync("Favorites")' Disabled="@NoTarget">Add to Favorites</MudMenuItem>
-        @if (OnRemoveFromSlot.HasDelegate)
+        @if (ShowRemove && OnRemoveFromSlot.HasDelegate)
         {
             <MudMenuItem Icon="@Icons.Material.Filled.StarOutline" OnClick="OnRemoveFromSlot" Disabled="@NoTarget">Remove from this list</MudMenuItem>
         }
@@ -46,6 +46,7 @@
     [Parameter] public bool NoTarget { get; set; }
     [Parameter] public bool CanMove { get; set; } = true;
     [Parameter] public bool CanDelete { get; set; } = true;
+    [Parameter] public bool ShowRemove { get; set; }
     [Parameter] public EventCallback OnView { get; set; }
     [Parameter] public EventCallback OnEdit { get; set; }
     [Parameter] public EventCallback OnMove { get; set; }

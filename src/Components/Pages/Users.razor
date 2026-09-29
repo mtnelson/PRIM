@@ -1,0 +1,55 @@
+@page "/users"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>PRIM — Users</PageTitle>
+
+<div class="d-flex align-center mb-3">
+    <MudText Typo="Typo.h5">Users</MudText>
+    <MudSpacer />
+    <MudCheckBox T="bool" @bind-Value="_showInactive" Label="Show inactive" Dense="true" Class="mr-2" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewUser">New User</MudButton>
+</div>
+
+<MudText Typo="Typo.caption" Class="mb-2" Style="opacity:0.7">
+    Minimal user schema — the source analysis did not define user fields beyond ID, role, and email.
+    Right-click a row for actions. Users are deactivated, not deleted.
+</MudText>
+
+<ObjectGrid T="AppUser" Kind="user" Items="Filtered" ExportCols="GridColumns.UserColumns()"
+            RowToDict="GridColumns.UserRow" GetInfo="@(u => ("User", u.Id, u.UserId))"
+            GetBarcode="@(u => "")"
+            EditItem="EditUser" OnChanged="Load" CanMove="false" />
+
+@code {
+    private List<AppUser> _items = new();
+    private bool _showInactive;
+
+    private IEnumerable<AppUser> Filtered => _showInactive ? _items : _items.Where(u => u.Active);
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _items = await Prim.GetUsersAsync();
+        StateHasChanged();
+    }
+
+    private async Task NewUser()
+    {
+        var d = await DialogService.ShowAsync<UserDialog>("New User",
+            new DialogParameters { ["Model"] = new AppUser() },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if ((await d.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task<bool> EditUser(AppUser u)
+    {
+        var d = await DialogService.ShowAsync<UserDialog>("Edit User",
+            new DialogParameters { ["Model"] = u },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+}

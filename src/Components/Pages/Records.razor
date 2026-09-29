@@ -1,0 +1,69 @@
+@page "/records"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>PRIM — Records</PageTitle>
+
+<div class="d-flex align-center mb-3">
+    <MudText Typo="Typo.h5">Records</MudText>
+    <MudSpacer />
+    <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…" Margin="Margin.Dense" Immediate="true"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:260px" Class="mr-2" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewRecord">New Record</MudButton>
+</div>
+
+<ObjectGrid @ref="_grid" Items="Filtered" Kind="Record"
+            GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
+            GetBarcode="r => r.Barcode"
+            EditItem="EditRecord" DeleteItems="DeleteRecords"
+            ExportCols="GridColumns.RecordColumns()" RowToDict="GridColumns.RecordRow"
+            OnChanged="Load">
+</ObjectGrid>
+
+@code {
+    private ObjectGrid<RecordItem>? _grid;
+    private List<RecordItem> _items = new();
+    private string _filter = "";
+
+    private IEnumerable<RecordItem> Filtered => string.IsNullOrWhiteSpace(_filter) ? _items
+        : _items.Where(r =>
+            r.RecordNumber.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
+            r.CaseNumber.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
+            r.Barcode.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
+            (r.Subject ?? "").Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _items = await Prim.GetRecordsAsync(includeDeleted: false);
+        _grid?.ClearSelection();
+        StateHasChanged();
+    }
+
+    private async Task NewRecord()
+    {
+        var d = await DialogService.ShowAsync<RecordDialog>("New Record",
+            new DialogParameters { ["Model"] = new RecordItem() },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false }) await Load();
+    }
+
+    private async Task<bool> EditRecord(RecordItem r)
+    {
+        var d = await DialogService.ShowAsync<RecordDialog>("Edit Record",
+            new DialogParameters { ["Model"] = r },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+
+    private async Task<bool> DeleteRecords(List<int> ids)
+    {
+        var d = await DialogService.ShowAsync<DeleteDialog>("Delete Records",
+            new DialogParameters { ["Ids"] = ids }, new DialogOptions { MaxWidth = MaxWidth.Medium });
+        return (await d.Result) is { Canceled: false };
+    }
+}

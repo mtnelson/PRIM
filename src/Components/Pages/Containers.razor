@@ -1,0 +1,80 @@
+@page "/containers"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>PRIM — Containers</PageTitle>
+
+<div class="d-flex align-center mb-3">
+    <MudText Typo="Typo.h5">Containers</MudText>
+    <MudSpacer />
+    <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…" Margin="Margin.Dense" Immediate="true"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:260px" Class="mr-2" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewContainer">New Container</MudButton>
+</div>
+
+<ObjectGrid @ref="_grid" Items="Filtered" Kind="Container"
+            GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
+            GetBarcode="c => c.Barcode"
+            EditItem="EditContainer" DeleteItems="DeleteContainers"
+            ExportCols="GridColumns.ContainerColumns()" RowToDict="GridColumns.ContainerRow"
+            OnChanged="Load">
+</ObjectGrid>
+
+@code {
+    private ObjectGrid<Container>? _grid;
+    private List<Container> _items = new();
+    private string _filter = "";
+
+    private IEnumerable<Container> Filtered => string.IsNullOrWhiteSpace(_filter) ? _items
+        : _items.Where(c =>
+            c.ContainerName.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
+            c.Barcode.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
+            (c.Description ?? "").Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _items = await Prim.GetContainersAsync();
+        _grid?.ClearSelection();
+        StateHasChanged();
+    }
+
+    private async Task NewContainer()
+    {
+        var d = await DialogService.ShowAsync<ContainerDialog>("New Container",
+            new DialogParameters { ["Model"] = new Container() },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false }) await Load();
+    }
+
+    private async Task<bool> EditContainer(Container c)
+    {
+        var d = await DialogService.ShowAsync<ContainerDialog>("Edit Container",
+            new DialogParameters { ["Model"] = c },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+
+    private async Task<bool> DeleteContainers(List<int> ids)
+    {
+        bool? ok = await DialogService.ShowMessageBox("Delete containers?",
+            $"Delete {ids.Count} container(s)? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return false;
+        try
+        {
+            var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
+            Snackbar.Add($"Deleted {n} container(s).", Severity.Success);
+            App.Log("Deleted containers", $"{n} container(s)");
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return false;
+        }
+    }
+}

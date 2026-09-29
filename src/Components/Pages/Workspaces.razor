@@ -1,0 +1,71 @@
+@page "/workspaces"
+@inject PrimService Prim
+@inject AppState App
+
+<PageTitle>PRIM — Workspaces</PageTitle>
+<MudText Typo="Typo.h5" Class="mb-3">Workspaces</MudText>
+<MudText Typo="Typo.body2" Class="mb-4" Style="opacity:0.7">
+    Five personal workspaces plus Favorites (TIS-1411). Items are stored per user.
+</MudText>
+
+<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+    @foreach (var slot in Slots)
+    {
+        <MudTabPanel Text="@slot">
+            @{
+                var items = _items.GetValueOrDefault(slot, new List<WorkspaceItem>());
+            }
+            @if (items.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Class="pa-4" Style="opacity:0.7">
+                    Empty. Right-click items on other screens and choose Add to Workspace.
+                </MudText>
+            }
+            else
+            {
+                <MudList T="WorkspaceItem" Dense="true">
+                    @foreach (var w in items)
+                    {
+                        <MudListItem T="WorkspaceItem">
+                            <div class="d-flex align-center">
+                                <div class="flex-grow-1">
+                                    <MudText Typo="Typo.body2"><b>@w.Label</b></MudText>
+                                    <MudText Typo="Typo.caption" Style="opacity:0.7">@w.ObjectKind — added @w.AddedUtc.ToLocalTime().ToString("g")</MudText>
+                                </div>
+                                <MudTooltip Text="Open in view pane">
+                                    <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small"
+                                                   OnClick="@(() => OpenItem(w))" />
+                                </MudTooltip>
+                                <MudTooltip Text="Remove from workspace">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                   OnClick="@(() => RemoveItem(slot, w))" />
+                                </MudTooltip>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudTabPanel>
+    }
+</MudTabs>
+
+@code {
+    private static readonly string[] Slots =
+        { "Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4", "Workspace 5", "Favorites" };
+
+    private Dictionary<string, List<WorkspaceItem>> _items = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        foreach (var s in Slots)
+            _items[s] = await Prim.GetSlotAsync(App.CurrentUserId, s);
+    }
+
+    private void OpenItem(WorkspaceItem w) => App.SetViewPane(w.ObjectKind, w.ObjectId, w.Label);
+
+    private async Task RemoveItem(string slot, WorkspaceItem w)
+    {
+        await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, w.ObjectKind, w.ObjectId);
+        _items[slot] = await Prim.GetSlotAsync(App.CurrentUserId, slot);
+    }
+}

@@ -1,0 +1,71 @@
+@page "/reports"
+@inject PrimService Prim
+@inject IJSRuntime JS
+
+<PageTitle>PRIM — Reports</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-3">Reports</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">Inventory Totals</MudText>
+            <MudList T="string" Dense="true">
+                @foreach (var kv in _counts)
+                {
+                    <MudListItem T="string">
+                        <div class="d-flex" style="width:100%">
+                            <span>@kv.Key</span><MudSpacer /><b>@kv.Value</b>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">Records by Type</MudText>
+            <MudChart ChartType="ChartType.Pie" Width="100%" Height="280px"
+                      InputData="@_typeData" InputLabels="@_typeLabels" />
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">Records by Field Office</MudText>
+            <MudChart ChartType="ChartType.Donut" Width="100%" Height="280px"
+                      InputData="@_foData" InputLabels="@_foLabels" />
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+                   OnClick="ExportCounts">Export Totals (CSV)</MudButton>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private Dictionary<string, int> _counts = new();
+    private double[] _typeData = Array.Empty<double>();
+    private string[] _typeLabels = Array.Empty<string>();
+    private double[] _foData = Array.Empty<double>();
+    private string[] _foLabels = Array.Empty<string>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _counts = await Prim.GetCountsAsync();
+
+        var byType = await Prim.GroupRecordsAsync(r => r.RecordType);
+        _typeData = byType.Select(g => (double)g.Count).ToArray();
+        _typeLabels = byType.Select(g => $"{g.Label} ({g.Count})").ToArray();
+
+        var byOffice = await Prim.GroupRecordsAsync(r => r.FieldOffice);
+        _foData = byOffice.Select(g => (double)g.Count).ToArray();
+        _foLabels = byOffice.Select(g => $"{g.Label} ({g.Count})").ToArray();
+    }
+
+    private async Task ExportCounts()
+    {
+        var csv = "Metric,Count\r\n" + string.Join("\r\n",
+            _counts.Select(kv => $"{Csv.Escape(kv.Key)},{kv.Value}"));
+        await Csv.DownloadAsync(JS, "prim-totals.csv", csv);
+    }
+}

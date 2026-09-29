@@ -1,0 +1,108 @@
+@page "/advanced"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>PRIM — Advanced Search</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-3">Advanced Search — Records</MudText>
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    <div class="d-flex align-center gap-3 mb-2">
+        <MudText Typo="Typo.body2">Match</MudText>
+        <MudRadioGroup T="string" @bind-Value="_logic" Class="d-flex gap-4">
+            <MudRadio Value="@("AND")">ALL criteria (AND)</MudRadio>
+            <MudRadio Value="@("OR")">ANY criteria (OR)</MudRadio>
+        </MudRadioGroup>
+    </div>
+
+    @foreach (var row in _rows)
+    {
+        var r = row;
+        <div class="d-flex gap-2 align-center mb-2">
+            <MudSelect T="string" @bind-Value="r.Field" Label="Field" Dense="true" Style="min-width:200px">
+                @foreach (var f in _advFields) { <MudSelectItem Value="f.Key">@f.Label</MudSelectItem> }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="r.Op" Label="Operator" Dense="true" Style="min-width:150px">
+                <MudSelectItem Value="@("Contains")">contains</MudSelectItem>
+                <MudSelectItem Value="@("Equals")">equals</MudSelectItem>
+                <MudSelectItem Value="@("StartsWith")">starts with</MudSelectItem>
+                <MudSelectItem Value="@("EndsWith")">ends with</MudSelectItem>
+            </MudSelect>
+            <MudTextField T="string" @bind-Value="r.Value" Label="Value (* ? wildcards)" Margin="Margin.Dense" Style="flex:1" />
+            <MudIconButton Icon="@Icons.Material.Filled.RemoveCircle" Color="Color.Error" OnClick="() => _rows.Remove(r)" Disabled="_rows.Count == 1" />
+        </div>
+    }
+
+    <div class="d-flex gap-2 mt-2">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => _rows.Add(new AdvRow())">Add criterion</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search" OnClick="RunSearch">Search</MudButton>
+    </div>
+</MudPaper>
+
+@if (_searched)
+{
+    <MudText Typo="Typo.subtitle1" Class="mb-2">@_resultsTitle</MudText>
+    <ObjectGrid @ref="_grid" Items="_records" Kind="Record"
+                GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
+                GetBarcode="r => r.Barcode"
+                EditItem="EditRecord" DeleteItems="DeleteRecords"
+                ExportCols="GridColumns.RecordColumns()" RowToDict="GridColumns.RecordRow"
+                OnChanged="RunSearch">
+    </ObjectGrid>
+}
+
+@code {
+    private class AdvRow
+    {
+        public string Field { get; set; } = "CaseNumber";
+        public string Op { get; set; } = "Contains";
+        public string Value { get; set; } = "";
+    }
+
+    private List<AdvRow> _rows = new() { new AdvRow() };
+    private string _logic = "AND";
+    private bool _searched = false;
+    private string _resultsTitle = "";
+    private List<RecordItem> _records = new();
+    private ObjectGrid<RecordItem>? _grid;
+
+    private List<(string Key, string Label)> _advFields = new()
+    {
+        ("RecordNumber","Record Number"), ("RecordType","Record Type"),
+        ("CaseClassification","Case Classification"), ("FieldOffice","Field Office"),
+        ("CaseNumber","Case Number"), ("SubfileId","Subfile ID"),
+        ("Volume","Volume"), ("SerialStart","Serial Start"), ("SerialEnd","Serial End"),
+        ("Barcode","Barcode"), ("Home","Home"), ("Assignee","Assignee"),
+        ("Subject","Subject"), ("State","State"),
+    };
+
+    private async Task RunSearch()
+    {
+        var rows = _rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
+        if (rows.Count == 0) { Snackbar.Add("Enter at least one criterion.", Severity.Info); return; }
+
+        _records = await Prim.AdvancedSearchRecordsAsync(
+            rows.Select(r => (r.Field, r.Op, r.Value)).ToList(), _logic);
+        _resultsTitle = $"{_records.Count} record(s) found";
+        _searched = true;
+        _grid?.ClearSelection();
+        App.Log("Advanced search", _resultsTitle);
+    }
+
+    private async Task<bool> EditRecord(RecordItem r)
+    {
+        var d = await DialogService.ShowAsync<RecordDialog>("Edit Record",
+            new DialogParameters { ["Model"] = r },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+
+    private async Task<bool> DeleteRecords(List<int> ids)
+    {
+        var d = await DialogService.ShowAsync<DeleteDialog>("Delete Records",
+            new DialogParameters { ["Ids"] = ids }, new DialogOptions { MaxWidth = MaxWidth.Medium });
+        return (await d.Result) is { Canceled: false };
+    }
+}

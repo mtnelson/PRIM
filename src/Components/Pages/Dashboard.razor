@@ -1,0 +1,257 @@
+@page "/"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>PRIM — Dashboard</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-3">Quick Search</MudText>
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    <MudRadioGroup T="string" Value="_objectType" ValueChanged="OnObjectTypeChanged" Class="mb-2">
+        <MudRadio Value="@("Record")">Records</MudRadio>
+        <MudRadio Value="@("Container")">Containers</MudRadio>
+        <MudRadio Value="@("Location")">Locations</MudRadio>
+    </MudRadioGroup>
+
+    <MudGrid>
+        @foreach (var f in _fields)
+        {
+            var field = f;
+            <MudItem xs="12" md="4" Class="d-flex align-center gap-2">
+                <MudCheckBox T="bool" Value="_selectedFields.Contains(field.Key)"
+                             ValueChanged="v => ToggleField(field.Key, v)" Dense="true" Style="min-width:170px">
+                    @field.Label
+                </MudCheckBox>
+                @if (_selectedFields.Contains(field.Key))
+                {
+                    <MudTextField T="string" @bind-Value="_criteria[field.Key]" Placeholder="* wildcard supported"
+                                  Margin="Margin.Dense" Immediate="true" OnKeyDown="OnKeyDown" Style="flex:1" />
+                }
+            </MudItem>
+        }
+    </MudGrid>
+
+    <div class="d-flex gap-2 mt-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search" OnClick="RunSearch">Search</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="ClearCriteria">Clear</MudButton>
+        <MudSpacer />
+        <MudTextField T="string" @bind-Value="_saveName" Placeholder="Save search as…" Margin="Margin.Dense" Style="max-width:220px" />
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSearch" Disabled="string.IsNullOrWhiteSpace(_saveName)">Save</MudButton>
+    </div>
+
+    @if (_saved.Count > 0)
+    {
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">Saved searches</MudText>
+        <MudChipSet T="string">
+            @foreach (var s in _saved)
+            {
+                <MudChip T="string" OnClick="() => LoadSaved(s)" OnClose="() => DeleteSaved(s)">@s.Name</MudChip>
+            }
+        </MudChipSet>
+    }
+</MudPaper>
+
+@if (_searched)
+{
+    <MudText Typo="Typo.subtitle1" Class="mb-2">@_resultsTitle</MudText>
+
+    @if (_objectType == "Record")
+    {
+        <ObjectGrid @ref="_recordGrid" Items="_records" Kind="Record"
+                    GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
+                    GetBarcode="r => r.Barcode"
+                    EditItem="EditRecord" DeleteItems="DeleteRecords"
+                    ExportCols="GridColumns.RecordColumns()" RowToDict="GridColumns.RecordRow"
+                    OnChanged="RunSearch">
+        </ObjectGrid>
+    }
+    else if (_objectType == "Container")
+    {
+        <ObjectGrid @ref="_containerGrid" Items="_containers" Kind="Container"
+                    GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
+                    GetBarcode="c => c.Barcode"
+                    EditItem="EditContainer" DeleteItems="DeleteContainers"
+                    ExportCols="GridColumns.ContainerColumns()" RowToDict="GridColumns.ContainerRow"
+                    OnChanged="RunSearch">
+        </ObjectGrid>
+    }
+    else
+    {
+        <ObjectGrid @ref="_locationGrid" Items="_locations" Kind="Location"
+                    GetInfo="@(l => ("Location", l.Id, l.LocationName))"
+                    GetBarcode="l => l.Barcode"
+                    EditItem="EditLocation"
+                    ExportCols="GridColumns.LocationColumns()" RowToDict="GridColumns.LocationRow"
+                    CanMove="false" CanDelete="false"
+                    OnChanged="RunSearch">
+        </ObjectGrid>
+    }
+}
+
+@code {
+    private ObjectGrid<RecordItem>? _recordGrid;
+    private ObjectGrid<Container>? _containerGrid;
+    private ObjectGrid<Location>? _locationGrid;
+
+    private string _objectType = "Record";
+    private List<(string Key, string Label)> _fields = new();
+    private HashSet<string> _selectedFields = new();
+    private Dictionary<string, string> _criteria = new();
+    private bool _searched = false;
+    private string _resultsTitle = "", _saveName = "";
+    private List<SavedSearch> _saved = new();
+
+    private List<RecordItem> _records = new();
+    private List<Container> _containers = new();
+    private List<Location> _locations = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        SetFields();
+        _saved = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+    }
+
+    private void SetFields()
+    {
+        _fields = _objectType switch
+        {
+            "Record" => new() { ("Barcode","Barcode"), ("CaseClassification","Case Classification"), ("FieldOffice","Field Office"),
+                                ("CaseNumber","Case Number"), ("SubfileId","Subfile ID"), ("RecordNumber","Record Number"), ("Home","Home") },
+            "Container" => new() { ("Barcode","Barcode"), ("ContainerName","Container Name"), ("FieldOffice","Field Office"),
+                                   ("ContainerCode","Container Code"), ("Home","Home") },
+            _ => new() { ("LocationName","Location Name") },
+        };
+        _selectedFields = _objectType switch
+        {
+            "Record" => new() { "Barcode","CaseClassification","FieldOffice","CaseNumber","SubfileId","RecordNumber","Home" },
+            "Container" => new() { "Barcode","ContainerName","FieldOffice","ContainerCode","Home" },
+            _ => new() { "LocationName" },
+        };
+        _criteria = _fields.ToDictionary(f => f.Key, _ => "");
+    }
+
+    private void OnObjectTypeChanged(string v)
+    {
+        _objectType = v; _searched = false;
+        SetFields();
+    }
+
+    private void ToggleField(string key, bool v)
+    {
+        if (v) _selectedFields.Add(key); else { _selectedFields.Remove(key); _criteria[key] = ""; }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await RunSearch();
+    }
+
+    private async Task RunSearch()
+    {
+        var crit = _selectedFields.Where(k => !string.IsNullOrWhiteSpace(_criteria[k]))
+                                 .ToDictionary(k => k, k => _criteria[k]);
+        if (_objectType == "Record")
+        {
+            _records = await Prim.SearchRecordsAsync(crit);
+            _resultsTitle = $"{_records.Count} record(s) found";
+        }
+        else if (_objectType == "Container")
+        {
+            _containers = await Prim.SearchContainersAsync(crit);
+            _resultsTitle = $"{_containers.Count} container(s) found";
+        }
+        else
+        {
+            _locations = await Prim.SearchLocationsAsync(crit.GetValueOrDefault("LocationName"));
+            _resultsTitle = $"{_locations.Count} location(s) found";
+        }
+        _recordGrid?.ClearSelection(); _containerGrid?.ClearSelection(); _locationGrid?.ClearSelection();
+        _searched = true;
+        App.Log("Quick search", $"{_objectType}: {_resultsTitle}");
+    }
+
+    private void ClearCriteria()
+    {
+        foreach (var k in _criteria.Keys.ToList()) _criteria[k] = "";
+    }
+
+    private async Task SaveSearch()
+    {
+        var crit = _selectedFields.Where(k => !string.IsNullOrWhiteSpace(_criteria[k]))
+                                 .ToDictionary(k => k, k => _criteria[k]);
+        await Prim.SaveSearchAsync(new SavedSearch
+        {
+            OwnerUserId = App.CurrentUserId, Name = _saveName, ObjectKind = _objectType,
+            FieldsCsv = string.Join(",", crit.Keys),
+            Criteria = System.Text.Json.JsonSerializer.Serialize(crit)
+        });
+        _saved = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+        Snackbar.Add($"Saved search '{_saveName}'.", Severity.Success);
+        _saveName = "";
+    }
+
+    private async Task LoadSaved(SavedSearch s)
+    {
+        _objectType = s.ObjectKind; SetFields();
+        var crit = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,string>>(s.Criteria) ?? new();
+        _selectedFields = crit.Keys.ToHashSet();
+        foreach (var (k,v) in crit) if (_criteria.ContainsKey(k)) _criteria[k] = v;
+        await RunSearch();
+    }
+
+    private async Task DeleteSaved(SavedSearch s)
+    {
+        await Prim.DeleteSavedSearchAsync(s.Id);
+        _saved = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+    }
+
+    private async Task<bool> EditRecord(RecordItem r)
+    {
+        var d = await DialogService.ShowAsync<RecordDialog>("Edit Record",
+            new DialogParameters { ["Model"] = r },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        var res = await d.Result;
+        return res is { Canceled: false };
+    }
+
+    private async Task<bool> EditContainer(Container c)
+    {
+        var d = await DialogService.ShowAsync<ContainerDialog>("Edit Container",
+            new DialogParameters { ["Model"] = c },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        var res = await d.Result;
+        return res is { Canceled: false };
+    }
+
+    private async Task<bool> EditLocation(Location l)
+    {
+        var d = await DialogService.ShowAsync<LocationDialog>("Edit Location",
+            new DialogParameters { ["Model"] = l },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        var res = await d.Result;
+        return res is { Canceled: false };
+    }
+
+    private async Task<bool> DeleteRecords(List<int> ids)
+    {
+        var d = await DialogService.ShowAsync<DeleteDialog>("Delete Records",
+            new DialogParameters { ["Ids"] = ids },
+            new DialogOptions { MaxWidth = MaxWidth.Medium });
+        var res = await d.Result;
+        return res is { Canceled: false };
+    }
+
+    private async Task<bool> DeleteContainers(List<int> ids)
+    {
+        bool? ok = await DialogService.ShowMessageBox("Delete containers?",
+            $"Delete {ids.Count} container(s)? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return false;
+        var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
+        Snackbar.Add($"Deleted {n} container(s).", Severity.Success);
+        App.Log("Deleted containers", $"{n} container(s)");
+        return true;
+    }
+}

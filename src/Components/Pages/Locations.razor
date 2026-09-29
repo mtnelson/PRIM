@@ -1,0 +1,82 @@
+@page "/locations"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>PRIM — Locations</PageTitle>
+
+<div class="d-flex align-center mb-3">
+    <MudText Typo="Typo.h5">Locations</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewLocation">New Location</MudButton>
+</div>
+
+<MudGrid>
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="1" Class="pa-2">
+            <MudText Typo="Typo.subtitle2" Class="pa-2">Hierarchy</MudText>
+            <MudTreeView T="Location" Items="_roots" Hover="true" Dense="true" ExpandOnClick="true">
+                <ItemTemplate>
+                    <MudTreeViewItem T="Location" Value="@context.Value" Items="@context.Children"
+                                     Text="@context.Value!.LocationName" EndText="@context.Value.LocationType"
+                                     OnClick="() => SelectFromTree(context.Value)" />
+                </ItemTemplate>
+            </MudTreeView>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="8">
+        <ObjectGrid @ref="_grid" Items="_items" Kind="Location"
+                    GetInfo="@(l => ("Location", l.Id, l.LocationName))"
+                    GetBarcode="l => l.Barcode"
+                    EditItem="EditLocation"
+                    ExportCols="GridColumns.LocationColumns()" RowToDict="GridColumns.LocationRow"
+                    CanMove="false" CanDelete="false"
+                    OnChanged="Load">
+        </ObjectGrid>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private ObjectGrid<Location>? _grid;
+    private List<Location> _items = new();
+    private List<TreeItemData<Location>> _roots = new();
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _items = await Prim.GetLocationsAsync();
+        var byParent = _items.ToLookup(l => l.ParentId);
+        TreeItemData<Location> Build(Location l)
+        {
+            var kids = byParent[l.Id].Select(Build).ToList();
+            return new TreeItemData<Location> { Value = l, Children = kids };
+        }
+        _roots = byParent[null].Select(Build).ToList();
+        _grid?.ClearSelection();
+        StateHasChanged();
+    }
+
+    private void SelectFromTree(Location l)
+    {
+        App.SetViewPane("Location", l.Id, l.LocationName);
+        App.TouchRecent("Location", l.Id, l.LocationName);
+    }
+
+    private async Task NewLocation()
+    {
+        var d = await DialogService.ShowAsync<LocationDialog>("New Location",
+            new DialogParameters { ["Model"] = new Location() },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if ((await d.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task<bool> EditLocation(Location l)
+    {
+        var d = await DialogService.ShowAsync<LocationDialog>("Edit Location",
+            new DialogParameters { ["Model"] = l },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+}

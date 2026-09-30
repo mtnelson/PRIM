@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Prim.Data;
 
@@ -227,48 +227,95 @@ public class PrimService
         return max;
     }
 
-    // ---------- Advanced search (AND/OR across criteria rows) ----------
-    public Task<List<RecordItem>> AdvancedSearchRecordsAsync(List<(string Field, string Op, string Value)> rows, string logic,
-        int maxResults = 500)
+    // ---------- Advanced search (AND/OR across criteria rows), SQL-side ----------
+    // Every criterion compiles to EF.Functions.Like over its mapped column, so
+    // filtering AND paging both happen in the database; Blazor only ever sees
+    // 500-row chunks. This is the 20M-safe path: the previous AsEnumerable()
+    // implementation materialized the whole table in memory.
+    private static readonly HashSet<string> AdvSearchFields = new()
+        { "RecordNumber","RecordType","CaseClassification","FieldOffice","CaseNumber","SubfileId","Volume",
+          "SerialStart","SerialEnd","Barcode","Home","Assignee","Subject","State" };
+
+    public async Task<GridPageResult<RecordItem>> AdvancedSearchRecordsPageAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req)
     {
-        return Task.Run(() =>
-        {
-            using var db = _factory.CreateDbContext();
-            var matchers = rows.Select(r => BuildMatcher(r.Field, r.Op, r.Value)).ToList();
-            var q = db.Records.Where(r => !r.Deleted).AsEnumerable();
-            q = logic == "OR" ? q.Where(r => matchers.Any(m => m(r))) : q.Where(r => matchers.All(m => m(r)));
-            return q.OrderBy(r => r.RecordNumber).Take(maxResults).ToList();
-        });
+        using var db = _factory.CreateDbContext();
+        IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
+        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
+        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate(crit, logic));
+        return await PageAsync(q, req, RecordSortProps);
     }
 
-    private static Func<RecordItem, bool> BuildMatcher(string field, string op, string value)
+    public async Task<int> AdvancedSearchRecordsCountAsync(
+        List<(string Field, string Op, string Value)> rows, string logic)
     {
-        var rx = new Regex("^" + Regex.Escape(value).Replace(@"\*", ".*").Replace(@"\?", ".") + "$",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        Func<string?, bool> test = s => op switch
+        using var db = _factory.CreateDbContext();
+        IQueryable<RecordItem> q = db.Records.Where(r => !r.Deleted);
+        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
+        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate(crit, logic));
+        return await q.CountAsync();
+    }
+
+    // Bounded compatibility wrapper: walks server-side pages up to maxResults.
+    public async Task<List<RecordItem>> AdvancedSearchRecordsAsync(List<(string Field, string Op, string Value)> rows,
+        string logic, int maxResults = 500)
+    {
+        var results = new List<RecordItem>();
+        int? after = null; bool more = true;
+        while (more && results.Count < maxResults)
         {
-            "StartsWith" => (s ?? "").StartsWith(value.TrimEnd('*', '?'), StringComparison.OrdinalIgnoreCase),
-            "EndsWith" => (s ?? "").EndsWith(value.TrimStart('*', '?'), StringComparison.OrdinalIgnoreCase),
-            _ => rx.IsMatch(s ?? ""),
-        };
-        return field switch
+            var page = await AdvancedSearchRecordsPageAsync(rows, logic,
+                new GridPageRequest { Take = Math.Min(500, maxResults - results.Count), AfterId = after });
+            results.AddRange(page.Rows);
+            if (page.Rows.Count > 0) after = page.Rows[^1].Id;
+            more = page.HasMore;
+        }
+        return results;
+    }
+
+    private static Expression<Func<RecordItem, bool>> BuildCriteriaPredicate(
+        List<(string Field, string Op, string Value)> rows, string logic)
+    {
+        var param = Expression.Parameter(typeof(RecordItem), "r");
+        Expression? body = null;
+        foreach (var (field, op, value) in rows)
         {
-            "RecordNumber" => r => test(r.RecordNumber),
-            "RecordType" => r => test(r.RecordType),
-            "CaseClassification" => r => test(r.CaseClassification),
-            "FieldOffice" => r => test(r.FieldOffice),
-            "CaseNumber" => r => test(r.CaseNumber),
-            "SubfileId" => r => test(r.SubfileId),
-            "Volume" => r => test(r.Volume),
-            "SerialStart" => r => test(r.SerialStart),
-            "SerialEnd" => r => test(r.SerialEnd),
-            "Barcode" => r => test(r.Barcode),
-            "Home" => r => test(r.Home),
-            "Assignee" => r => test(r.Assignee),
-            "Subject" => r => test(r.Subject),
-            "State" => r => test(r.State),
-            _ => _ => true,
+            var row = BuildRowPredicate(field, op, value);
+            var rewritten = new ParameterReplacer(row.Parameters[0], param).Visit(row.Body);
+            body = body is null ? rewritten
+                : logic == "OR" ? Expression.OrElse(body, rewritten)
+                                : Expression.AndAlso(body, rewritten);
+        }
+        return Expression.Lambda<Func<RecordItem, bool>>(body ?? Expression.Constant(true), param);
+    }
+
+    private static Expression<Func<RecordItem, bool>> BuildRowPredicate(string field, string op, string value)
+    {
+        var param = Expression.Parameter(typeof(RecordItem), "r");
+        if (!AdvSearchFields.Contains(field))
+            return Expression.Lambda<Func<RecordItem, bool>>(Expression.Constant(true), param);
+        var prop = Expression.Property(param, field);
+        var safe = Expression.Coalesce(prop, Expression.Constant(string.Empty));
+        string pattern = op switch
+        {
+            "StartsWith" => ToLike(value.TrimEnd('*', '?')) + "%",
+            "EndsWith" => "%" + ToLike(value.TrimStart('*', '?')),
+            _ => ToLike(value), // "=" / "Contains": wildcard match, * and ? supported
         };
+        var like = typeof(DbFunctionsExtensions).GetMethod(nameof(DbFunctionsExtensions.Like),
+            new[] { typeof(DbFunctions), typeof(string), typeof(string) })!;
+        var call = Expression.Call(like,
+            Expression.Property(null, typeof(EF).GetProperty(nameof(EF.Functions))!),
+            safe, Expression.Constant(pattern));
+        return Expression.Lambda<Func<RecordItem, bool>>(call, param);
+    }
+
+    private sealed class ParameterReplacer : ExpressionVisitor
+    {
+        private readonly ParameterExpression _from, _to;
+        public ParameterReplacer(ParameterExpression from, ParameterExpression to) => (_from, _to) = (from, to);
+        protected override Expression VisitParameter(ParameterExpression node) =>
+            node == _from ? _to : base.VisitParameter(node);
     }
 
     public async Task<string?> GetAnnouncementAsync()
@@ -1037,6 +1084,55 @@ public class PrimService
         using var db = _factory.CreateDbContext();
         var s = await db.SavedSearches.FindAsync(id);
         if (s != null) { db.SavedSearches.Remove(s); await db.SaveChangesAsync(); }
+    }
+
+    // ---------------- search sessions (per-page tabs) ----------------
+    public const int MaxOpenSessionsPerPage = 10;
+
+    public async Task<List<SearchSession>> GetOpenSessionsAsync(string owner, string pageKind)
+    {
+        using var db = _factory.CreateDbContext();
+        return await db.SearchSessions
+            .Where(s => s.OwnerUserId == owner && s.PageKind == pageKind && s.IsOpen)
+            .OrderByDescending(s => s.LastUsedUtc).ToListAsync();
+    }
+
+    /// <summary>Opens a new search tab. Refuses when the per-page cap is hit.</summary>
+    public async Task<(bool Ok, string? Error, SearchSession? Session)> CreateSessionAsync(SearchSession s)
+    {
+        using var db = _factory.CreateDbContext();
+        var open = await db.SearchSessions.CountAsync(x =>
+            x.OwnerUserId == s.OwnerUserId && x.PageKind == s.PageKind && x.IsOpen);
+        if (open >= MaxOpenSessionsPerPage)
+            return (false, $"Close a tab first — {MaxOpenSessionsPerPage} open tabs per page.", null);
+        s.CreatedUtc = s.LastUsedUtc = DateTime.UtcNow;
+        s.IsOpen = true;
+        db.SearchSessions.Add(s);
+        await db.SaveChangesAsync();
+        return (true, null, s);
+    }
+
+    /// <summary>Upserts a session descriptor; bumps LastUsedUtc. Refuses when the
+    /// caller does not own the session.</summary>
+    public async Task<(bool Ok, string? Error)> SaveSessionAsync(SearchSession s)
+    {
+        if (s.Id == 0) { var r = await CreateSessionAsync(s); return (r.Ok, r.Error); }
+        using var db = _factory.CreateDbContext();
+        var existing = await db.SearchSessions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == s.Id);
+        if (existing == null) return (false, "Session not found.");
+        if (existing.OwnerUserId != s.OwnerUserId) return (false, "Not your tab.");
+        s.CreatedUtc = existing.CreatedUtc;
+        s.LastUsedUtc = DateTime.UtcNow;
+        db.SearchSessions.Update(s);
+        await db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task DeleteSessionAsync(int id, string owner)
+    {
+        using var db = _factory.CreateDbContext();
+        var s = await db.SearchSessions.FirstOrDefaultAsync(x => x.Id == id && x.OwnerUserId == owner);
+        if (s != null) { db.SearchSessions.Remove(s); await db.SaveChangesAsync(); }
     }
 
     // ---------------- labels: named collections of objects ----------------

@@ -160,6 +160,63 @@ public class SavedSearch
     public DateTime CreatedUtc { get; set; }
 }
 
+// Persisted search-session descriptor backing the per-page search tabs.
+// Each open tab is one row: the query (filter text or advanced criteria),
+// sort, column layout, selected stable IDs, and expanded row IDs. Inactive
+// tabs render no grid component — activating one re-runs the query
+// server-side from this descriptor (infinite-scroll paging, never the full
+// result set). Scroll position is intentionally not restored.
+public class SearchSession
+{
+    public int Id { get; set; }
+    [Required] public string OwnerUserId { get; set; } = "";
+    // records | containers | locations | users | advanced
+    [Required] public string PageKind { get; set; } = "";
+    [Required] public string Title { get; set; } = "";
+    // Text filter for the four object pages; advanced pages use CriteriaJson.
+    public string Filter { get; set; } = "";
+    // Advanced-search criteria: {"logic":"AND","rows":[{"field":..,"op":..,"value":..}]}.
+    public string CriteriaJson { get; set; } = "";
+    public string? SortColumn { get; set; }
+    public bool SortDescending { get; set; }
+    public string ColumnKeysCsv { get; set; } = "";
+    public string SelectedIdsCsv { get; set; } = "";
+    public string ExpandedIdsCsv { get; set; } = "";
+    public bool IsOpen { get; set; } = true;
+    public DateTime CreatedUtc { get; set; }
+    public DateTime LastUsedUtc { get; set; }
+
+    /// <summary>Live per-tab state for the grid, built from this descriptor.</summary>
+    public Prim.Services.SearchTabState ToTabState() => new()
+    {
+        SortColumn = SortColumn,
+        SortDescending = SortDescending,
+        SelectedIds = ParseIds(SelectedIdsCsv),
+        ExpandedIds = ParseIds(ExpandedIdsCsv),
+        ColumnKeys = string.IsNullOrWhiteSpace(ColumnKeysCsv) ? null
+            : ColumnKeysCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+    };
+
+    /// <summary>Copies live grid state back into the descriptor for persistence.</summary>
+    public void ApplyTabState(Prim.Services.SearchTabState st)
+    {
+        SortColumn = st.SortColumn;
+        SortDescending = st.SortDescending;
+        SelectedIdsCsv = string.Join(",", st.SelectedIds.OrderBy(i => i));
+        ExpandedIdsCsv = string.Join(",", st.ExpandedIds.OrderBy(i => i));
+        ColumnKeysCsv = st.ColumnKeys == null ? "" : string.Join(",", st.ColumnKeys);
+    }
+
+    private static HashSet<int> ParseIds(string csv)
+    {
+        var set = new HashSet<int>();
+        foreach (var part in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (int.TryParse(part, out var id))
+                set.Add(id);
+        return set;
+    }
+}
+
 // Admin-controlled outage/announcement banner — TIS-1460.
 public class Announcement
 {

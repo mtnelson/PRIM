@@ -69,7 +69,9 @@
             _changeHome ? _newHome : null, _newHomeKind, _newHomeRefId,
             _changeAssignee ? _newAssignee : null, _newAssigneeKind, _newAssigneeRefId, _assigneeFollowsHome, App.CurrentUserId);
         Snackbar.Add($"Moved {n} item(s).", Severity.Success);
-        App.Log("Moved items", $"{n} {Kind.ToLower()}(s)");
+        var labels = new List<string>();
+        foreach (var id in Ids) labels.Add(await Prim.GetObjectLabelAsync(Kind, id));
+        App.LogItems("Moved items", labels);
         MudDialog.Close(DialogResult.Ok(true));
     }
 }

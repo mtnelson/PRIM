@@ -3,7 +3,7 @@
    AdvancedSearch, and Workspaces. *@
 @inject PrimService Prim
 
-<ObjectGrid @ref="_grid" T="RecordItem" Items="Items" Kind="Record" GridId="@GridId" Scope="@Scope"
+<ObjectGrid @ref="_grid" T="RecordItem" Items="Items" ItemsProvider="_provider" OnReset="ResetSupplemental" Kind="Record" GridId="@GridId" Scope="@Scope"
             GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
             GetBarcode="r => r.Barcode"
             EditItem="EditItem" DeleteItems="DeleteItems"
@@ -19,6 +19,9 @@
     private ObjectGrid<RecordItem>? _grid;
 
     [Parameter] public IEnumerable<RecordItem> Items { get; set; } = Enumerable.Empty<RecordItem>();
+    // When set, the grid infinite-scrolls through this provider (per-chunk
+    // enrichment included) instead of rendering Items.
+    [Parameter] public Func<GridPageRequest, Task<GridPageResult<RecordItem>>>? ItemsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "records";
     [Parameter] public string Scope { get; set; } = "records";
     [Parameter] public Func<RecordItem, Task<bool>>? EditItem { get; set; }
@@ -35,10 +38,37 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (ItemsProvider != null) return; // provider mode enriches per chunk
         var ids = Items.Select(r => r.Id).ToList();
         _labelPairs = await Prim.GetObjectLabelPairsAsync("Record", ids);
         _paths = await Prim.GetAncestorPathsAsync("Record", ids);
         _withChildren = await Prim.GetHasChildrenAsync("Record", ids);
+    }
+
+    private Func<GridPageRequest, Task<GridPageResult<RecordItem>>>? _provider
+        => ItemsProvider == null ? null : ProvideAsync;
+
+    private async Task<GridPageResult<RecordItem>> ProvideAsync(GridPageRequest req)
+    {
+        var page = await ItemsProvider!(req);
+        await EnrichChunkAsync(page.Rows);
+        return page;
+    }
+
+    // Loads paths/child-flags/labels for one chunk and merges them into the
+    // caches the row renderers read from.
+    public async Task EnrichChunkAsync(List<RecordItem> rows)
+    {
+        var ids = rows.Select(r => r.Id).ToList();
+        if (ids.Count == 0) return;
+        foreach (var kv in await Prim.GetObjectLabelPairsAsync("Record", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var kv in await Prim.GetAncestorPathsAsync("Record", ids)) _paths[kv.Key] = kv.Value;
+        foreach (var id in await Prim.GetHasChildrenAsync("Record", ids)) _withChildren.Add(id);
+    }
+
+    private void ResetSupplemental()
+    {
+        _paths.Clear(); _withChildren.Clear(); _labelPairs.Clear();
     }
 
     private Dictionary<string, string> RowWithPath(RecordItem r)
@@ -66,4 +96,5 @@
         _labelPairs.TryGetValue(r.Id, out var lp2) ? lp2 : new();
 
     public void ClearSelection() => _grid?.ClearSelection();
+    public Task ResetAsync() => _grid?.ResetAsync() ?? Task.CompletedTask;
 }

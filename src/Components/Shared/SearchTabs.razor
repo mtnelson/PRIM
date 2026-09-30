@@ -1,0 +1,24 @@
+@* Tab strip for persisted search sessions. The page owns the tab list and all
+   session logic; this component only renders the strip and routes clicks. *@
+<div class="d-flex align-center flex-wrap gap-1 mb-2">
+    @foreach (var t in Tabs)
+    {
+        var tab = t;
+        <MudChip T="string" Size="Size.Small"
+                 Color="@(tab.Id == ActiveId ? Color.Primary : Color.Default)"
+                 Variant="@(tab.Id == ActiveId ? Variant.Filled : Variant.Outlined)"
+                 OnClick="@(() => OnActivate.InvokeAsync(tab))"
+                 OnClose="@(() => OnClose.InvokeAsync(tab))">@tab.Title</MudChip>
+    }
+    <MudTooltip Text="Open a new search tab">
+        <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="OnAdd" />
+    </MudTooltip>
+</div>
+
+@code {
+    [Parameter] public List<SearchSession> Tabs { get; set; } = new();
+    [Parameter] public int ActiveId { get; set; }
+    [Parameter] public EventCallback<SearchSession> OnActivate { get; set; }
+    [Parameter] public EventCallback<SearchSession> OnClose { get; set; }
+    [Parameter] public EventCallback OnAdd { get; set; }
+}

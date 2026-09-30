@@ -13,6 +13,7 @@ public class PrimDbContext : DbContext
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<WorkspaceItem> WorkspaceItems => Set<WorkspaceItem>();
     public DbSet<SavedSearch> SavedSearches => Set<SavedSearch>();
+    public DbSet<SearchSession> SearchSessions => Set<SearchSession>();
     public DbSet<Announcement> Announcements => Set<Announcement>();
     public DbSet<UserGridLayout> UserGridLayouts => Set<UserGridLayout>();
     public DbSet<Label> Labels => Set<Label>();
@@ -26,6 +27,7 @@ public class PrimDbContext : DbContext
         m.Entity<RecordItem>().HasIndex(r => r.Barcode).IsUnique();
         m.Entity<AppUser>().HasIndex(u => u.UserId).IsUnique();
         m.Entity<WorkspaceItem>().HasIndex(w => new { w.OwnerUserId, w.Slot, w.ObjectKind, w.ObjectId }).IsUnique();
+        m.Entity<SearchSession>().HasIndex(s => new { s.OwnerUserId, s.PageKind, s.IsOpen });
         m.Entity<UserGridLayout>().HasIndex(g => new { g.UserId, g.GridId }).IsUnique();
         m.Entity<Label>().HasIndex(l => l.Name).IsUnique();
         m.Entity<ObjectLabel>().HasIndex(o => new { o.LabelId, o.ObjectKind, o.ObjectId }).IsUnique();

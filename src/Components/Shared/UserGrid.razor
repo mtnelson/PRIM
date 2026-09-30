@@ -11,7 +11,7 @@
             GetLabelChips="GetChips"
             CanMove="@CanMove" CanDelete="@CanDelete"
             ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
-            OnChanged="OnChanged" />
+            OnChanged="OnChanged" TabState="TabState" TabStateChanged="TabStateChanged" />
 
 @code {
     private ObjectGrid<AppUser>? _grid;
@@ -27,6 +27,9 @@
     [Parameter] public bool ShowRemoveFromSlot { get; set; }
     [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
+    // Search-tab state, passed through to the inner ObjectGrid.
+    [Parameter] public SearchTabState? TabState { get; set; }
+    [Parameter] public EventCallback TabStateChanged { get; set; }
 
     private HashSet<int> _withChildren = new();
     private Dictionary<int, List<(int Id, string Name)>> _labelPairs = new();

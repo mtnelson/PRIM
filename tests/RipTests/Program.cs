@@ -398,6 +398,53 @@ Check((await svc.GetUsersByIdsAsync(new[] { recMgrUser.Id })).Count == 1, "GetUs
 Check(await svc.GetObjectLabelAsync("Record", seedR1.Id) == "R-000001", "GetObjectLabelAsync record");
 Check(await svc.GetObjectLabelAsync("Bogus", 1) == "", "GetObjectLabelAsync unknown kind");
 
+// ---- labels: named collections of objects ----
+var lblA = await svc.GetOrCreateLabelAsync("Urgent", "harness");
+var lblA2 = await svc.GetOrCreateLabelAsync("urgent", "harness");
+Check(lblA.Id == lblA2.Id, "label dedupe is case-insensitive");
+await svc.SetObjectLabelsAsync("Record", seedR1.Id, new[] { "Urgent", "Cold Case" }, "harness");
+var lblNames = await svc.GetObjectLabelNamesAsync("Record", seedR1.Id);
+Check(lblNames.Count == 2 && lblNames.Contains("Urgent") && lblNames.Contains("Cold Case"), "labels assigned to record");
+var lblPairs = await svc.GetObjectLabelPairsAsync("Record", new[] { seedR1.Id, 999999 });
+Check(lblPairs[seedR1.Id].Count == 2 && !lblPairs.ContainsKey(999999), "label pairs keyed by object id");
+var lblMembers = await svc.GetLabelMembersAsync(lblA.Id);
+Check(lblMembers.Any(m => m.Kind == "Record" && m.Id == seedR1.Id && m.Label == "R-000001"), "label members include record");
+var lblCounts = await svc.GetLabelCountsAsync();
+Check(lblCounts[lblA.Id] == 1, "label member counts");
+await svc.SetObjectLabelsAsync("Record", seedR1.Id, new[] { "Cold Case" }, "harness");
+var lblNames2 = await svc.GetObjectLabelNamesAsync("Record", seedR1.Id);
+Check(lblNames2.Count == 1 && lblNames2[0] == "Cold Case", "label removed via set");
+var lblAudit = await svc.GetAuditAsync("Record", seedR1.Id);
+Check(lblAudit.Any(a => a.Action == "Updated" && a.FieldName == "Labels"), "audit Labels change event names the item");
+var auditBefore = (await svc.GetAuditAsync("Record", seedR1.Id)).Count;
+await svc.SetObjectLabelsAsync("Record", seedR1.Id, new[] { "Cold Case" }, "harness");
+Check((await svc.GetAuditAsync("Record", seedR1.Id)).Count == auditBefore, "label no-op writes no audit");
+var kidsLabeled = await svc.GetChildItemsAsync("Container", seedBox.Id);
+Check(kidsLabeled.First(k => k.Label == "R-000001").Cells!["Labels"] == "Cold Case", "child row Labels cell filled");
+await svc.SetObjectLabelsAsync("Container", seedBox.Id, new[] { "Urgent" }, "harness");
+Check((await svc.GetObjectLabelNamesAsync("Container", seedBox.Id)).Contains("Urgent"), "labels on container");
+await svc.RenameLabelAsync(lblA.Id, "Priority", "harness");
+Check((await svc.GetLabelsAsync()).Any(l => l.Name == "Priority"), "label renamed");
+bool dupRename = false;
+try { await svc.RenameLabelAsync(lblA.Id, "cold case", "harness"); } catch { dupRename = true; }
+Check(dupRename, "rename to existing name rejected");
+await svc.DeleteLabelAsync(lblA.Id, "harness");
+Check((await svc.GetLabelsAsync()).All(l => l.Id != lblA.Id)
+      && (await svc.GetObjectLabelNamesAsync("Container", seedBox.Id)).Count == 0,
+    "label delete removes assignments");
+var seedR2 = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000002");
+using (var cdb = factory.CreateDbContext())
+{
+    var rec = cdb.Records.First(r => r.Id == seedR2.Id);
+    rec.Labels = "Alpha, Beta, alpha";
+    cdb.SaveChanges();
+}
+using (var cdb = factory.CreateDbContext()) { SeedData.BackfillLabels(cdb); }
+var back = await svc.GetObjectLabelNamesAsync("Record", seedR2.Id);
+Check(back.Count == 2 && back.Contains("Alpha") && back.Contains("Beta"), "legacy CSV backfilled and deduped");
+using (var cdb = factory.CreateDbContext()) { SeedData.BackfillLabels(cdb); }
+Check((await svc.GetObjectLabelNamesAsync("Record", seedR2.Id)).Count == 2, "backfill idempotent");
+
 // ---- HotkeyManager: stacked handlers per (scope, combo) ----
 {
     var hm = new HotkeyManager();

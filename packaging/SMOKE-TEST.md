@@ -123,8 +123,19 @@ Click each shortcut; each page renders its grid/content with no error:
       paste with headers, one spreadsheet column per grid column.
 - [ ] Right-click a row → **Copy** pastes the same full grid data.
 - [ ] Label dialog: **Print** opens the print preview.
+- [ ] Activity log names the specific items for exports, moves, deletes,
+      test-data generation (long lists show the first 8 plus "+N more").
 
-## 8. Shutdown
+## 8. Grid scrolling
+
+- [ ] Records grid with all columns visible: a horizontal scrollbar appears
+      and every column is reachable by scrolling (columns no longer squeeze
+      to fit the window).
+- [ ] Expand a compressed record: the child rows show every record column.
+- [ ] Admin → Deleted Records: every record column plus Reason, Merged Into,
+      Deleted By, with horizontal scrolling.
+
+## 9. Shutdown
 
 - [ ] Close the "PRIM Server" console window; the browser can no longer
       reach the site (server stopped cleanly).

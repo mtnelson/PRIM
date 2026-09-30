@@ -358,6 +358,10 @@ Check(kidRec.Columns!.Count == GridColumns.RecordColumns().Count
       && kidRec.Cells!["Barcode"] == child.Barcode
       && kidRec.Columns.Select(c => c.Key).SequenceEqual(GridColumns.RecordColumns().Select(c => c.Key)),
     "record child exposes every record column");
+var kidBoxRec = kidsOfBox.First(k => k.Kind == "Record");
+Check(kidBoxRec.Columns!.Select(c => c.Key).SequenceEqual(GridColumns.RecordColumns().Select(c => c.Key))
+      && kidBoxRec.Cells!.Count == GridColumns.RecordColumns().Count,
+    "container child records expose every record column");
 var kidLoc = kidsOfShelf.First(k => k.Kind == "Location");
 Check(kidLoc.Cells!["LocationName"] == kidLoc.Label
       && kidLoc.Columns!.Count == GridColumns.LocationColumns().Count,
@@ -527,8 +531,8 @@ var allRecs = await svc.GetRecordsAsync();
 {
     var before = (await svc.GetRecordsAsync()).Count;
     var maxNumBefore = (await svc.GetRecordsAsync()).Select(r => r.RecordNumber).Max();
-    var n = await svc.SeedTestRecordsAsync(25, "harness");
-    Check(n == 25, "SeedTestRecordsAsync(25) returns 25");
+    var seededNums = await svc.SeedTestRecordsAsync(25, "harness");
+    Check(seededNums.Count == 25, "SeedTestRecordsAsync(25) returns 25 record numbers");
     var afterRecs = await svc.GetRecordsAsync();
     Check(afterRecs.Count == before + 25, "seed adds exactly 25 records", $"before={before} after={afterRecs.Count}");
     var seeded = afterRecs.Where(r => string.Compare(r.RecordNumber, maxNumBefore, StringComparison.Ordinal) > 0).ToList();
@@ -589,8 +593,8 @@ var allRecs = await svc.GetRecordsAsync();
         while (m) { var p = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, AfterId = c });
             if (p.Rows.Count > 0) { maxIdBefore = Math.Max(maxIdBefore, p.Rows[^1].Id); c = p.Rows[^1].Id; } m = p.HasMore; }
     }
-    var added = await svc.SeedTestRecordsAsync(1500, "harness");
-    Check(added == 1500, "seed 1500 returns 1500", $"got {added}");
+    var addedNums = await svc.SeedTestRecordsAsync(1500, "harness");
+    Check(addedNums.Count == 1500, "seed 1500 returns 1500 numbers", $"got {addedNums.Count}");
 
     var seen = new List<int>(); var chunkSizes = new List<int>();
     int? cur = null; bool more = true;

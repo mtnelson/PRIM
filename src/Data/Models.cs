@@ -37,6 +37,7 @@ public class RecordItem
     public string? AssigneeKind { get; set; }            // Container | Location | User
     public int? HomeRefId { get; set; }
     [Required] public string Assignee { get; set; } = "";
+    public int? AssigneeRefId { get; set; }             // navigable assignee target (mirrors HomeRefId)
 
     public int? ParentRecordId { get; set; }            // child of a Compressed record (expandable tree)
 
@@ -71,6 +72,7 @@ public class Container
     public string? AssigneeKind { get; set; }
     public int? HomeRefId { get; set; }
     [Required] public string Assignee { get; set; } = "";
+    public int? AssigneeRefId { get; set; }             // navigable assignee target (mirrors HomeRefId)
     public int? ParentContainerId { get; set; }           // nesting
     public int? LocationId { get; set; }                 // sits inside a location
     public DateTime CreatedUtc { get; set; }

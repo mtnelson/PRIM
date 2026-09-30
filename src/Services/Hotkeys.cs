@@ -48,7 +48,10 @@ public static class HotkeyCatalog
 public class HotkeyManager
 {
     private readonly Stack<string> _scopes = new();
-    private readonly Dictionary<(string Scope, string Combo), Func<Task>> _handlers = new();
+    // Several grids can share one scope (Dashboard, Workspaces). Handlers stack
+    // per (scope, combo); the most recently registered one fires, and each
+    // registration returns a token so a disposing component removes only its own.
+    private readonly Dictionary<(string Scope, string Combo), List<(Guid Token, Func<Task> Handler)>> _handlers = new();
 
     public string CurrentScope => _scopes.TryPeek(out var s) ? s : "app";
 
@@ -59,14 +62,29 @@ public class HotkeyManager
         if (_scopes.Count > 0) _scopes.Pop();
     }
 
-    public void Register(string scope, string combo, Func<Task> handler)
+    public IDisposable Register(string scope, string combo, Func<Task> handler)
     {
-        _handlers[(scope, combo)] = handler;
+        var key = (scope, combo);
+        var token = Guid.NewGuid();
+        if (!_handlers.TryGetValue(key, out var list))
+            _handlers[key] = list = new();
+        list.Add((token, handler));
         CombosDirty = true;
+        return new Registration(this, key, token);
     }
 
-    public void Register(string scope, string combo, Action handler) =>
+    public IDisposable Register(string scope, string combo, Action handler) =>
         Register(scope, combo, () => { handler(); return Task.CompletedTask; });
+
+    private void Unregister((string Scope, string Combo) key, Guid token)
+    {
+        if (_handlers.TryGetValue(key, out var list))
+        {
+            list.RemoveAll(e => e.Token == token);
+            if (list.Count == 0) _handlers.Remove(key);
+        }
+        CombosDirty = true;
+    }
 
     public void UnregisterScope(string scope)
     {
@@ -93,15 +111,27 @@ public class HotkeyManager
     /// <summary>
     /// Dispatches a key combo captured by prim.js. Returns true when a handler
     /// ran (JS then calls preventDefault). Checks the top scope, then "app".
+    /// When several components registered the same combo, the most recent wins.
     /// </summary>
     public async Task<bool> Handle(string combo)
     {
-        if (_handlers.TryGetValue((CurrentScope, combo), out var h) ||
-            _handlers.TryGetValue(("app", combo), out h))
+        if ((_handlers.TryGetValue((CurrentScope, combo), out var list) && list.Count > 0) ||
+            (_handlers.TryGetValue(("app", combo), out list) && list.Count > 0))
         {
-            await h();
+            await list[^1].Handler();
             return true;
         }
         return false;
+    }
+
+    private sealed class Registration(HotkeyManager mgr, (string Scope, string Combo) key, Guid token) : IDisposable
+    {
+        private bool _disposed;
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            mgr.Unregister(key, token);
+        }
     }
 }

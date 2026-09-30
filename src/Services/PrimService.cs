@@ -4,10 +4,15 @@ using Prim.Data;
 
 namespace Prim.Services;
 
+/// <summary>One breadcrumb segment in an object's ancestor path (root first).</summary>
+public record PathSeg(string Kind, int Id, string Label);
+
+/// <summary>One child row rendered under an expanded grid row.</summary>
+public record ChildItem(string Kind, int Id, string Label, string Detail, bool HasChildren);
+
 /// <summary>CRUD + audit + search over the four PRIM object types.</summary>
 public class PrimService
-{
-    private readonly IDbContextFactory<PrimDbContext> _factory;
+{    private readonly IDbContextFactory<PrimDbContext> _factory;
     public PrimService(IDbContextFactory<PrimDbContext> factory) => _factory = factory;
 
     // ---------------- reads ----------------
@@ -210,6 +215,8 @@ public class PrimService
         if (homeErr != null) return (false, homeErr);
         var assigneeErr = HomeRules.ValidateHome("Record", input.AssigneeKind, "Assignee");
         if (assigneeErr != null) return (false, assigneeErr);
+        input.AssigneeRefId ??= await ResolveAssigneeRefAsync(db, input.AssigneeKind, input.Assignee);
+        input.HomeRefId ??= await ResolveAssigneeRefAsync(db, input.HomeKind, input.Home);
 
         // Compressed-record children: only Compressed records may have child records.
         var childErr = await ValidateRecordParentAsync(db, input);
@@ -266,6 +273,8 @@ public class PrimService
         if (homeErr != null) return (false, homeErr);
         var assigneeErr = HomeRules.ValidateHome("Container", input.AssigneeKind, "Assignee");
         if (assigneeErr != null) return (false, assigneeErr);
+        input.AssigneeRefId ??= await ResolveAssigneeRefAsync(db, input.AssigneeKind, input.Assignee);
+        input.HomeRefId ??= await ResolveAssigneeRefAsync(db, input.HomeKind, input.Home);
 
         if (input.Id == 0)
         {
@@ -354,7 +363,7 @@ public class PrimService
     // TIS-2219 Move Items: change Home and/or Assignee, multi-row.
     public async Task<int> MoveItemsAsync(string kind, IEnumerable<int> ids, string? newHome,
         string? newHomeKind, int? newHomeRefId, string? newAssignee, string? newAssigneeKind,
-        bool assigneeFollowsHome, string actor)
+        int? newAssigneeRefId, bool assigneeFollowsHome, string actor)
     {
         if (newHome != null)
         {
@@ -379,8 +388,9 @@ public class PrimService
                 {
                     r.Assignee = newHome;
                     r.AssigneeKind = newHomeKind;
+                    r.AssigneeRefId = newHomeRefId;
                 }
-                else if (newAssignee != null) { r.Assignee = newAssignee; r.AssigneeKind = newAssigneeKind; }
+                else if (newAssignee != null) { r.Assignee = newAssignee; r.AssigneeKind = newAssigneeKind; r.AssigneeRefId = newAssigneeRefId; }
                 r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
                 await AuditAsync(db, "Record", r.Id, r.RecordNumber, "Moved", actor, "Movement", o, $"Home={r.Home}, Assignee={r.Assignee}");
                 n++;
@@ -393,7 +403,7 @@ public class PrimService
             {
                 var o = $"Home={c.Home}, Assignee={c.Assignee}";
                 if (newHome != null) { c.Home = newHome; c.HomeKind = newHomeKind; c.HomeRefId = newHomeRefId; }
-                if (newAssignee != null) { c.Assignee = newAssignee; c.AssigneeKind = newAssigneeKind; }
+                if (newAssignee != null) { c.Assignee = newAssignee; c.AssigneeKind = newAssigneeKind; c.AssigneeRefId = newAssigneeRefId; }
                 c.LastUpdatedUtc = DateTime.UtcNow; c.LastUpdatedBy = actor; c.RowVersion++;
                 await AuditAsync(db, "Container", c.Id, c.ContainerName, "Moved", actor, "Movement", o, $"Home={c.Home}, Assignee={c.Assignee}");
                 n++;
@@ -498,6 +508,247 @@ public class PrimService
         using var db = _factory.CreateDbContext();
         return await db.Records.Where(r => !r.Deleted && r.ParentRecordId == parentId)
             .OrderBy(r => r.RecordNumber).ToListAsync();
+    }
+
+    // ---------------- hierarchy: expandable child rows + breadcrumb paths ----------------
+
+    /// <summary>Root-first ancestor path for each requested object, including the object itself.</summary>
+    public async Task<Dictionary<int, List<PathSeg>>> GetAncestorPathsAsync(string kind, IEnumerable<int> ids)
+    {
+        using var db = _factory.CreateDbContext();
+        var result = new Dictionary<int, List<PathSeg>>();
+        var idList = ids.Distinct().ToList();
+        if (idList.Count == 0) return result;
+
+        var recMap = await db.Records.Where(r => !r.Deleted)
+            .ToDictionaryAsync(r => r.Id, r => (r.RecordNumber, r.HomeKind, r.HomeRefId, r.ParentRecordId));
+        var contMap = await db.Containers
+            .ToDictionaryAsync(c => c.Id, c => (c.ContainerName, c.ParentContainerId, c.HomeKind, c.HomeRefId, c.LocationId));
+        var locMap = await db.Locations
+            .ToDictionaryAsync(l => l.Id, l => (l.LocationName, l.ParentId));
+        var userMap = await db.Users
+            .ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+
+        string? LabelOf(string k, int id) => k switch
+        {
+            "Record" => recMap.TryGetValue(id, out var r) ? r.RecordNumber : null,
+            "Container" => contMap.TryGetValue(id, out var c) ? c.ContainerName : null,
+            "Location" => locMap.TryGetValue(id, out var l) ? l.LocationName : null,
+            "User" => userMap.TryGetValue(id, out var u) ? u : null,
+            _ => null
+        };
+        (string Kind, int Id)? ParentOf(string k, int id) => k switch
+        {
+            // A record enclosed in a compressed record paths through that parent;
+            // otherwise the path follows the storage home.
+            "Record" => recMap.TryGetValue(id, out var r)
+                ? r.ParentRecordId != null ? ("Record", r.ParentRecordId.Value)
+                  : r.HomeKind != null && r.HomeRefId != null ? (r.HomeKind, r.HomeRefId.Value)
+                  : ((string, int)?)null
+                : null,
+            "Container" => contMap.TryGetValue(id, out var c)
+                ? c.ParentContainerId != null ? ("Container", c.ParentContainerId.Value)
+                  : c.HomeKind != null && c.HomeRefId != null ? (c.HomeKind, c.HomeRefId.Value)
+                  : c.LocationId != null ? ("Location", c.LocationId.Value)
+                  : ((string, int)?)null
+                : null,
+            "Location" => locMap.TryGetValue(id, out var l) && l.ParentId != null
+                ? ("Location", l.ParentId.Value) : null,
+            _ => null
+        };
+
+        foreach (var id in idList)
+        {
+            var segs = new List<PathSeg>();
+            var visited = new HashSet<(string, int)>();
+            var cur = (Kind: kind, Id: id);
+            for (var depth = 0; depth < 50; depth++)
+            {
+                if (!visited.Add((cur.Kind, cur.Id))) break;      // cycle guard
+                var label = LabelOf(cur.Kind, cur.Id);
+                if (label == null) break;                          // dangling reference
+                segs.Add(new PathSeg(cur.Kind, cur.Id, label));
+                var parent = ParentOf(cur.Kind, cur.Id);
+                if (parent == null) break;
+                cur = parent.Value;
+            }
+            segs.Reverse();
+            result[id] = segs;
+        }
+        return result;
+    }
+
+    /// <summary>Ids (of the requested kind) that have at least one child item.</summary>
+    public async Task<HashSet<int>> GetHasChildrenAsync(string kind, IEnumerable<int> ids)
+    {
+        using var db = _factory.CreateDbContext();
+        var idList = ids.ToList();
+        var have = new HashSet<int>();
+        if (idList.Count == 0) return have;
+
+        if (kind == "Record")
+        {
+            var keys = await db.Records
+                .Where(r => !r.Deleted && r.ParentRecordId != null && idList.Contains(r.ParentRecordId.Value))
+                .Select(r => r.ParentRecordId!.Value).Distinct().ToListAsync();
+            foreach (var k in keys) have.Add(k);
+            return have;
+        }
+
+        // Containers, Locations, Users: children are homed records/containers,
+        // plus nested containers (Container) or child locations (Location).
+        var recKeys = await db.Records
+            .Where(r => !r.Deleted && r.HomeKind == kind && r.HomeRefId != null && idList.Contains(r.HomeRefId.Value))
+            .Select(r => r.HomeRefId!.Value).Distinct().ToListAsync();
+        var contHomeKeys = await db.Containers
+            .Where(c => c.HomeKind == kind && c.HomeRefId != null && idList.Contains(c.HomeRefId.Value))
+            .Select(c => c.HomeRefId!.Value).Distinct().ToListAsync();
+        foreach (var k in recKeys.Concat(contHomeKeys)) have.Add(k);
+
+        if (kind == "Container")
+        {
+            var nested = await db.Containers
+                .Where(c => c.ParentContainerId != null && idList.Contains(c.ParentContainerId.Value))
+                .Select(c => c.ParentContainerId!.Value).Distinct().ToListAsync();
+            foreach (var k in nested) have.Add(k);
+        }
+        else if (kind == "Location")
+        {
+            var childLocs = await db.Locations
+                .Where(l => l.ParentId != null && idList.Contains(l.ParentId.Value))
+                .Select(l => l.ParentId!.Value).Distinct().ToListAsync();
+            foreach (var k in childLocs) have.Add(k);
+        }
+        return have;
+    }
+
+    /// <summary>Direct children of an object for the expandable grid rows.</summary>
+    public async Task<List<ChildItem>> GetChildItemsAsync(string kind, int id)
+    {
+        using var db = _factory.CreateDbContext();
+        var items = new List<ChildItem>();
+        if (kind == "Record")
+        {
+            var kids = await db.Records.Where(r => !r.Deleted && r.ParentRecordId == id)
+                .OrderBy(r => r.RecordNumber).ToListAsync();
+            var withKids = await GetHasChildrenAsync("Record", kids.Select(r => r.Id));
+            items.AddRange(kids.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
+                $"Record · {r.RecordType} · {r.Barcode}", withKids.Contains(r.Id))));
+            return items;
+        }
+        if (kind == "Container")
+        {
+            var recs = await db.Records.Where(r => !r.Deleted && r.HomeKind == "Container" && r.HomeRefId == id)
+                .OrderBy(r => r.RecordNumber).ToListAsync();
+            var conts = await db.Containers
+                .Where(c => c.ParentContainerId == id || (c.HomeKind == "Container" && c.HomeRefId == id))
+                .OrderBy(c => c.ContainerName).ToListAsync();
+            var withKidsR = await GetHasChildrenAsync("Record", recs.Select(r => r.Id));
+            var withKidsC = await GetHasChildrenAsync("Container", conts.Select(c => c.Id));
+            items.AddRange(recs.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
+                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id))));
+            items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
+                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id))));
+            return items;
+        }
+        if (kind == "Location")
+        {
+            var recs = await db.Records.Where(r => !r.Deleted && r.HomeKind == "Location" && r.HomeRefId == id)
+                .OrderBy(r => r.RecordNumber).ToListAsync();
+            var conts = await db.Containers.Where(c => c.HomeKind == "Location" && c.HomeRefId == id)
+                .OrderBy(c => c.ContainerName).ToListAsync();
+            var locs = await db.Locations.Where(l => l.ParentId == id)
+                .OrderBy(l => l.LocationName).ToListAsync();
+            var withKidsR = await GetHasChildrenAsync("Record", recs.Select(r => r.Id));
+            var withKidsC = await GetHasChildrenAsync("Container", conts.Select(c => c.Id));
+            var withKidsL = await GetHasChildrenAsync("Location", locs.Select(l => l.Id));
+            items.AddRange(recs.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
+                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id))));
+            items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
+                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id))));
+            items.AddRange(locs.Select(l => new ChildItem("Location", l.Id, l.LocationName,
+                $"Location · {l.LocationType}", withKidsL.Contains(l.Id))));
+            return items;
+        }
+        if (kind == "User")
+        {
+            var recs = await db.Records.Where(r => !r.Deleted && r.HomeKind == "User" && r.HomeRefId == id)
+                .OrderBy(r => r.RecordNumber).ToListAsync();
+            var conts = await db.Containers.Where(c => c.HomeKind == "User" && c.HomeRefId == id)
+                .OrderBy(c => c.ContainerName).ToListAsync();
+            var withKidsR = await GetHasChildrenAsync("Record", recs.Select(r => r.Id));
+            var withKidsC = await GetHasChildrenAsync("Container", conts.Select(c => c.Id));
+            items.AddRange(recs.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
+                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id))));
+            items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
+                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id))));
+            return items;
+        }
+        return items;
+    }
+
+    // ---------------- reads by id (workspace resolution) ----------------
+    public async Task<List<RecordItem>> GetRecordsByIdsAsync(IEnumerable<int> ids)
+    {
+        using var db = _factory.CreateDbContext();
+        var list = ids.ToList();
+        return await db.Records.Where(r => !r.Deleted && list.Contains(r.Id))
+            .OrderBy(r => r.RecordNumber).ToListAsync();
+    }
+
+    public async Task<List<Container>> GetContainersByIdsAsync(IEnumerable<int> ids)
+    {
+        using var db = _factory.CreateDbContext();
+        var list = ids.ToList();
+        return await db.Containers.Where(c => list.Contains(c.Id))
+            .OrderBy(c => c.ContainerName).ToListAsync();
+    }
+
+    public async Task<List<Location>> GetLocationsByIdsAsync(IEnumerable<int> ids)
+    {
+        using var db = _factory.CreateDbContext();
+        var list = ids.ToList();
+        return await db.Locations.Where(l => list.Contains(l.Id))
+            .OrderBy(l => l.LocationName).ToListAsync();
+    }
+
+    public async Task<List<AppUser>> GetUsersByIdsAsync(IEnumerable<int> ids)
+    {
+        using var db = _factory.CreateDbContext();
+        var list = ids.ToList();
+        return await db.Users.Where(u => list.Contains(u.Id))
+            .OrderBy(u => u.DisplayName).ToListAsync();
+    }
+
+    /// <summary>Display label for any object (used when focusing an object not on the current page).</summary>
+    public async Task<string> GetObjectLabelAsync(string kind, int id)
+    {
+        using var db = _factory.CreateDbContext();
+        return kind switch
+        {
+            "Record" => await db.Records.Where(r => r.Id == id).Select(r => r.RecordNumber).FirstOrDefaultAsync() ?? "",
+            "Container" => await db.Containers.Where(c => c.Id == id).Select(c => c.ContainerName).FirstOrDefaultAsync() ?? "",
+            "Location" => await db.Locations.Where(l => l.Id == id).Select(l => l.LocationName).FirstOrDefaultAsync() ?? "",
+            "User" => await db.Users.Where(u => u.Id == id).Select(u => u.DisplayName).FirstOrDefaultAsync() ?? "",
+            _ => ""
+        };
+    }
+
+    // Best-effort assignee name -> id resolution, so assignee links navigate
+    // even when the caller only supplied a display name.
+    private async Task<int?> ResolveAssigneeRefAsync(PrimDbContext db, string? kind, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(kind) || string.IsNullOrWhiteSpace(name)) return null;
+        return kind switch
+        {
+            "User" => await db.Users.Where(u => u.UserId == name || u.DisplayName == name)
+                .OrderBy(u => u.Id).Select(u => (int?)u.Id).FirstOrDefaultAsync(),
+            "Container" => await db.Containers.Where(c => c.ContainerName == name)
+                .OrderBy(c => c.Id).Select(c => (int?)c.Id).FirstOrDefaultAsync(),
+            "Location" => await db.Locations.Where(l => l.LocationName == name)
+                .OrderBy(l => l.Id).Select(l => (int?)l.Id).FirstOrDefaultAsync(),
+            _ => null
+        };
     }
 
     // ---------------- per-user grid column layouts ----------------

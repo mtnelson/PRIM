@@ -57,6 +57,30 @@ public class AppState
 
     public string? ActiveAnnouncement { get; set; }
 
+    // Cross-page object navigation ("focus"): a grid link, breadcrumb segment,
+    // or child row requests focus on an object; the matching page's grid takes
+    // the request, selects the row, opens the detail pane, and optionally
+    // expands its children. Survives the NavigationManager hop because only
+    // the matching kind consumes it.
+    public record FocusRequest(string Kind, int Id, bool Expand);
+    private FocusRequest? _pendingFocus;
+    public void RequestFocus(string kind, int id, bool expand = false)
+    {
+        _pendingFocus = new FocusRequest(kind, id, expand);
+        Notify();
+    }
+    public bool TryTakeFocus(string kind, out FocusRequest? request)
+    {
+        request = null;
+        if (_pendingFocus is { } p && p.Kind == kind)
+        {
+            request = p;
+            _pendingFocus = null;
+            return true;
+        }
+        return false;
+    }
+
     // View pane selection (CM-style right pane, selection-driven).
     public (string Kind, int Id, string Label)? ViewPaneSelection { get; private set; }
     public bool ViewPaneOpen { get; set; } = true;

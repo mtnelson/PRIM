@@ -11,7 +11,7 @@ public static class GridColumns
         ("FieldOffice","Field Office"), ("CaseNumber","Case Number"), ("SubfileId","Subfile ID"),
         ("Volume","Volume"), ("SerialStart","Serial Start"), ("SerialEnd","Serial End"),
         ("AuxiliaryOffice","Auxiliary Office"), ("Home","Home"), ("Assignee","Assignee"),
-        ("Barcode","Barcode"), ("State","State"), ("Subject","Subject"), ("Notes","Notes"),
+        ("Path","Path"), ("Barcode","Barcode"), ("State","State"), ("Subject","Subject"), ("Notes","Notes"),
     };
 
     public static Dictionary<string,string> RecordRow(RecordItem r) => new()
@@ -21,14 +21,14 @@ public static class GridColumns
         ["CaseNumber"] = r.CaseNumber, ["SubfileId"] = r.SubfileId ?? "",
         ["Volume"] = r.Volume, ["SerialStart"] = r.SerialStart ?? "", ["SerialEnd"] = r.SerialEnd ?? "",
         ["AuxiliaryOffice"] = r.AuxiliaryOffice ?? "", ["Home"] = r.Home, ["Assignee"] = r.Assignee,
-        ["Barcode"] = r.Barcode, ["State"] = r.State, ["Subject"] = r.Subject ?? "", ["Notes"] = r.Notes ?? "",
+        ["Path"] = "", ["Barcode"] = r.Barcode, ["State"] = r.State, ["Subject"] = r.Subject ?? "", ["Notes"] = r.Notes ?? "",
     };
 
     public static List<(string Key, string Label)> ContainerColumns() => new()
     {
         ("ContainerName","Container Name"), ("ContainerType","Container Type"), ("FieldOffice","Field Office"),
         ("ContainerCode","Container Code"), ("FormattedNumber","Formatted Number"),
-        ("Description","Description"), ("Home","Home"), ("Assignee","Assignee"), ("Barcode","Barcode"),
+        ("Description","Description"), ("Home","Home"), ("Assignee","Assignee"), ("Path","Path"), ("Barcode","Barcode"),
     };
 
     public static Dictionary<string,string> ContainerRow(Container c) => new()
@@ -36,19 +36,19 @@ public static class GridColumns
         ["ContainerName"] = c.ContainerName, ["ContainerType"] = c.ContainerType,
         ["FieldOffice"] = c.FieldOffice, ["ContainerCode"] = c.ContainerCode,
         ["FormattedNumber"] = c.FormattedNumber, ["Description"] = c.Description ?? "",
-        ["Home"] = c.Home, ["Assignee"] = c.Assignee, ["Barcode"] = c.Barcode,
+        ["Home"] = c.Home, ["Assignee"] = c.Assignee, ["Path"] = "", ["Barcode"] = c.Barcode,
     };
 
     public static List<(string Key, string Label)> LocationColumns() => new()
     {
         ("LocationName","Location Name"), ("LocationType","Location Type"),
-        ("Description","Description"), ("Barcode","Barcode"),
+        ("Description","Description"), ("Path","Path"), ("Barcode","Barcode"),
     };
 
     public static Dictionary<string,string> LocationRow(Location l) => new()
     {
         ["LocationName"] = l.LocationName, ["LocationType"] = l.LocationType,
-        ["Description"] = l.Description ?? "", ["Barcode"] = l.Barcode,
+        ["Description"] = l.Description ?? "", ["Path"] = "", ["Barcode"] = l.Barcode,
     };
 
     public static List<(string Key, string Label)> UserColumns() => new()

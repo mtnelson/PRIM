@@ -39,6 +39,9 @@ public static class SeedData
         AddColumn(db, "Records", "ParentRecordId", "INTEGER");
         AddColumn(db, "Records", "AssigneeKind", "TEXT");
         AddColumn(db, "Containers", "AssigneeKind", "TEXT");
+        AddColumn(db, "Records", "AssigneeRefId", "INTEGER");
+        AddColumn(db, "Containers", "AssigneeRefId", "INTEGER");
+        BackfillRefIds(db);
         // Existing rows predate the AssigneeKind column: their assignees were
         // always user IDs, so default to "User" (matches fresh seed data).
 #pragma warning disable EF1002
@@ -58,6 +61,53 @@ public static class SeedData
             CREATE UNIQUE INDEX IF NOT EXISTS IX_UserGridLayouts_UserId_GridId
             ON UserGridLayouts (UserId, GridId)
             """);
+    }
+
+    // Existing rows predate AssigneeRefId / missing HomeRefId: resolve the stored
+    // home/assignee names against Users/Containers/Locations so old links navigate.
+    // Best-effort and idempotent; unresolvable names keep a null ref (link
+    // renders as plain text) until the item is next saved.
+    private static void BackfillRefIds(PrimDbContext db)
+    {
+        var users = db.Users.ToList();
+        var containers = db.Containers.ToList();
+        var locations = db.Locations.ToList();
+        int? FindUser(string name) =>
+            users.FirstOrDefault(u => u.UserId == name || u.DisplayName == name)?.Id;
+        int? FindContainer(string name) =>
+            containers.FirstOrDefault(c => c.ContainerName == name)?.Id;
+        int? FindLocation(string name) =>
+            locations.FirstOrDefault(l => l.LocationName == name)?.Id;
+
+        int? Resolve(string? kind, string name) => kind switch
+        {
+            "User" => FindUser(name),
+            "Container" => FindContainer(name),
+            "Location" => FindLocation(name),
+            _ => null
+        };
+
+        foreach (var r in db.Records.Where(r => r.AssigneeRefId == null && r.Assignee != null))
+        {
+            var id = Resolve(r.AssigneeKind, r.Assignee);
+            if (id != null) r.AssigneeRefId = id;
+        }
+        foreach (var c in db.Containers.Where(c => c.AssigneeRefId == null && c.Assignee != null))
+        {
+            var id = Resolve(c.AssigneeKind, c.Assignee);
+            if (id != null) c.AssigneeRefId = id;
+        }
+        foreach (var r in db.Records.Where(r => r.HomeRefId == null && r.Home != null))
+        {
+            var id = Resolve(r.HomeKind, r.Home);
+            if (id != null) r.HomeRefId = id;
+        }
+        foreach (var c in db.Containers.Where(c => c.HomeRefId == null && c.Home != null))
+        {
+            var id = Resolve(c.HomeKind, c.Home);
+            if (id != null) c.HomeRefId = id;
+        }
+        db.SaveChanges();
     }
 
     private static void AddColumn(PrimDbContext db, string table, string column, string type)
@@ -158,5 +208,8 @@ public static class SeedData
 
         db.Announcements.Add(new Announcement { Message = "", IsActive = false, UpdatedBy = "admin01", UpdatedUtc = now });
         db.SaveChanges();
+        // Seed rows omit AssigneeRefId (and R-000004's user home lacks HomeRefId);
+        // resolve them the same way old databases are backfilled.
+        BackfillRefIds(db);
     }
 }

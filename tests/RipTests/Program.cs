@@ -349,6 +349,19 @@ var kidsOfShelf = await svc.GetChildItemsAsync("Location", shelfLoc.Id);Check(ki
 var kidsOfMgr = await svc.GetChildItemsAsync("User", recMgrUser.Id);
 Check(kidsOfMgr.Any(k => k.Kind == "Record" && k.Label == "R-000004"),
     "child items of user include homed records", string.Join(",", kidsOfMgr.Select(k => k.Label)));
+// ---- child rows carry every grid column ----
+Check(kidsOfParent.All(k => k.Cells != null && k.Columns != null && k.Columns.Count > 0),
+    "child items carry Cells + Columns");
+var kidRec = kidsOfParent[0];
+Check(kidRec.Columns!.Count == GridColumns.RecordColumns().Count
+      && kidRec.Cells!["RecordNumber"] == kidRec.Label
+      && kidRec.Cells!["Barcode"] == child.Barcode
+      && kidRec.Columns.Select(c => c.Key).SequenceEqual(GridColumns.RecordColumns().Select(c => c.Key)),
+    "record child exposes every record column");
+var kidLoc = kidsOfShelf.First(k => k.Kind == "Location");
+Check(kidLoc.Cells!["LocationName"] == kidLoc.Label
+      && kidLoc.Columns!.Count == GridColumns.LocationColumns().Count,
+    "location child exposes every location column");
 
 // ---- GetAncestorPathsAsync: full chain + cycle guard ----
 var paths = await svc.GetAncestorPathsAsync("Record", new[] { seedR1.Id });

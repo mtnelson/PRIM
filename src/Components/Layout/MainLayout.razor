@@ -65,6 +65,7 @@ else
                 <MudNavLink Href="@RecentHref(r)" Icon="@Icons.Material.Filled.History">@r.Label</MudNavLink>
             }
         </MudNavMenu>
+        <div class="px-3 pb-2"><VersionTag /></div>
     </MudDrawer>
 
     <MudDrawer @bind-Open="_viewOpen" Anchor="Anchor.Right" Elevation="1" Width="400px" Variant="DrawerVariant.Persistent">

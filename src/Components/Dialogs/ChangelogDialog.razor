@@ -1,0 +1,81 @@
+@* Renders wwwroot/changelog.md with a minimal markdown subset (# / ## / - / text). *@
+@inject IWebHostEnvironment Env
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">PRIM Changelog</MudText>
+    </TitleContent>
+    <DialogContent>
+        @foreach (var b in _blocks)
+        {
+            @switch (b.Kind)
+            {
+                case "h1":
+                    <MudText Typo="Typo.h5" Class="mb-2">@b.Text</MudText>
+                    break;
+                case "h2":
+                    <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1"><b>@b.Text</b></MudText>
+                    break;
+                case "ul":
+                    <ul class="mb-2" style="padding-left:1.2rem">
+                        @foreach (var item in b.Items ?? Enumerable.Empty<string>())
+                        {
+                            <li><MudText Typo="Typo.body2" Inline="true">@item</MudText></li>
+                        }
+                    </ul>
+                    break;
+                default:
+                    if (!string.IsNullOrWhiteSpace(b.Text))
+                    {
+                        <MudText Typo="Typo.body2" Class="mb-1">@b.Text</MudText>
+                    }
+                    break;
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Close()">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private readonly List<Block> _blocks = new();
+    private record Block(string Kind, string Text = "", List<string>? Items = null);
+
+    protected override void OnInitialized()
+    {
+        try
+        {
+            var path = Path.Combine(Env.WebRootPath, "changelog.md");
+            if (!File.Exists(path))
+            {
+                _blocks.Add(new Block("p", "No changelog found."));
+                return;
+            }
+            List<string>? pending = null;
+            void Flush()
+            {
+                if (pending is { Count: > 0 }) _blocks.Add(new Block("ul", Items: pending));
+                pending = null;
+            }
+            foreach (var raw in File.ReadAllLines(path))
+            {
+                var line = raw.TrimEnd();
+                if (line.StartsWith("# ")) { Flush(); _blocks.Add(new Block("h1", line[2..].Trim())); }
+                else if (line.StartsWith("## ")) { Flush(); _blocks.Add(new Block("h2", line[3..].Trim())); }
+                else if (line.StartsWith("- ")) { pending ??= new List<string>(); pending.Add(line[2..].Trim()); }
+                else if (string.IsNullOrWhiteSpace(line)) { Flush(); }
+                else { Flush(); _blocks.Add(new Block("p", line.Trim())); }
+            }
+            Flush();
+            if (_blocks.Count == 0) _blocks.Add(new Block("p", "Changelog is empty."));
+        }
+        catch
+        {
+            _blocks.Clear();
+            _blocks.Add(new Block("p", "Could not read the changelog."));
+        }
+    }
+}

@@ -3,6 +3,10 @@ namespace Prim.Services;
 /// <summary>Per-circuit UI state: current user, recent items, activity log (TIS-349).</summary>
 public class AppState
 {
+    /// <summary>Application version, from the assembly (set via &lt;Version&gt; in Prim.csproj).</summary>
+    public static string AppVersion =>
+        typeof(AppState).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
     public string CurrentUserId { get; private set; } = "";
     public string CurrentDisplayName { get; private set; } = "";
     public string CurrentRole { get; private set; } = "";

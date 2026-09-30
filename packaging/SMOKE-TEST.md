@@ -71,6 +71,33 @@ Click each shortcut; each page renders its grid/content with no error:
 - [ ] Advanced Search: add two criteria with AND, run; switch to OR, run.
       Both return sensible results.
 
+## 4b. Test data and infinite scroll
+
+- [ ] Admin → **Test Data** → **Generate 1,500 Test Records**: confirms and
+      reports 1,500 created (one-time; rows are prefixed `[TEST]`).
+- [ ] Records grid: scroll to the bottom — more rows load automatically
+      (500 at a time), no pagination buttons, no manual "load more".
+- [ ] With 1,500+ records, Ctrl+A selects only the rows loaded so far;
+      the selection counter shows how many are loaded.
+- [ ] Type in the filter box: the grid resets to the first 500 matches;
+      debounced, no full-table freeze.
+
+## 4c. Search tabs
+
+- [ ] Records page: a tab strip sits above the grid with one tab
+      ("All records"). Click **+** to open a second tab; search for
+      something different in each.
+- [ ] Click back to the first tab: its filter, sort, column layout, and
+      selected rows are restored (results re-run server-side).
+- [ ] Select rows and expand a child caret in one tab, switch to another
+      tab and back: selections and expansions are still there.
+- [ ] Open tabs up to the limit: the 11th is refused with a message.
+- [ ] Close a tab with its ×; the others are unaffected.
+- [ ] Navigate away (Dashboard) and back, or restart the app: open tabs
+      persist with their searches.
+- [ ] Containers, Locations, Users, and Advanced Search each have their
+      own independent tab strip.
+
 ## 5. Containers / Locations / Users
 
 - [ ] Containers: right-click menu works; New Container dialog opens/cancels.

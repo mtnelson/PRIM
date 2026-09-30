@@ -20,12 +20,20 @@
     assignees of records and containers. Right-click a row for actions. Users are deactivated, not deleted.
 </MudText>
 
+<SearchTabs Tabs="_tabs" ActiveId="_activeTab?.Id ?? 0"
+            OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
+
 <UserGrid @ref="_grid" ItemsProvider="ProvideUsers" GridId="users" Scope="users"
-          EditItem="EditUser" OnChanged="OnGridChanged" CanMove="false" />
+          EditItem="EditUser" OnChanged="OnGridChanged" CanMove="false" TabState="_tabState" TabStateChanged="OnTabStateChanged" />
 
 @code {
     private UserGrid? _grid;
     private bool _showInactive;
+    // Search-session tabs: one persisted descriptor per open tab (see Records.razor).
+    private List<SearchSession> _tabs = new();
+    private SearchSession? _activeTab;
+    private SearchTabState? _tabState;
+
 
     private Task<GridPageResult<AppUser>> ProvideUsers(GridPageRequest req)
         => Prim.GetUsersPageAsync(req, _showInactive);
@@ -34,6 +42,7 @@
     {
         _showInactive = v;
         if (_grid != null) await _grid.ResetAsync();
+        await SaveActiveTabAsync();
     }
 
     protected override void OnInitialized()
@@ -43,7 +52,99 @@
         Hotkeys.Register("users", "F9", Refresh);
     }
 
-    public void Dispose() => Hotkeys.UnregisterScope("users");
+    protected override async Task OnInitializedAsync()
+    {
+        _tabs = await Prim.GetOpenSessionsAsync(App.CurrentUserId, "users");
+        if (_tabs.Count == 0)
+        {
+            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            {
+                OwnerUserId = App.CurrentUserId, PageKind = "users",
+                Title = "All users", Filter = "",
+            });
+            if (ok && s != null) _tabs.Add(s);
+        }
+        _activeTab = _tabs.FirstOrDefault();
+        if (_activeTab != null)
+        {
+        _showInactive = _activeTab.Filter == "ShowInactive";
+            _tabState = _activeTab.ToTabState();
+        }
+    }
+
+    public void Dispose()
+    {
+        Hotkeys.UnregisterScope("users");
+        // Best-effort: persist the active tab's state when leaving the page.
+        _ = SaveActiveTabAsync().ContinueWith(t => { var _ = t.Exception; },
+            TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+
+    private async Task ActivateTab(SearchSession tab)
+    {
+        if (_activeTab?.Id == tab.Id) return;
+        await SaveActiveTabAsync();
+        _activeTab = tab;
+        _showInactive = tab.Filter == "ShowInactive";
+        _tabState = tab.ToTabState();
+    }
+
+    private async Task NewTab()
+    {
+        await SaveActiveTabAsync();
+        var (ok, err, s) = await Prim.CreateSessionAsync(new SearchSession
+        {
+            OwnerUserId = App.CurrentUserId, PageKind = "users",
+            Title = "All users", Filter = "",
+        });
+        if (!ok || s == null) { Snackbar.Add(err ?? "Could not open a tab.", Severity.Warning); return; }
+        _tabs.Add(s);
+        _activeTab = s;
+        _showInactive = false;
+        _tabState = s.ToTabState();
+    }
+
+    private async Task CloseTab(SearchSession tab)
+    {
+        await Prim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
+        _tabs.RemoveAll(t => t.Id == tab.Id);
+        if (_activeTab?.Id == tab.Id)
+            await ActivateMostRecentAsync();
+    }
+
+    private async Task ActivateMostRecentAsync()
+    {
+        if (_tabs.Count == 0)
+        {
+            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            {
+                OwnerUserId = App.CurrentUserId, PageKind = "users",
+                Title = "All users", Filter = "",
+            });
+            if (ok && s != null) _tabs.Add(s);
+        }
+        _activeTab = _tabs.OrderByDescending(t => t.LastUsedUtc).FirstOrDefault();
+        if (_activeTab != null)
+        {
+        _showInactive = _activeTab.Filter == "ShowInactive";
+            _tabState = _activeTab.ToTabState();
+        }
+    }
+
+    private Task OnTabStateChanged() => SaveActiveTabAsync();
+
+    private async Task SaveActiveTabAsync()
+    {
+        if (_activeTab == null || _tabState == null) return;
+        _activeTab.Filter = _showInactive ? "ShowInactive" : "";
+        _activeTab.Title = _showInactive ? "Users (incl. inactive)" : "All users";
+        _activeTab.ApplyTabState(_tabState);
+        await Prim.SaveSessionAsync(_activeTab);
+    }
+
+    private static string Truncate(string s, int n)
+        => s.Length <= n ? s : s[..(n - 1)] + "\u2026";
 
     private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Users refreshed.", Severity.Info); }
 

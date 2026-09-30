@@ -88,6 +88,30 @@ public static class SeedData
             CREATE INDEX IF NOT EXISTS IX_ObjectLabels_Object
             ON ObjectLabels (ObjectKind, ObjectId)
             """);
+        // Search-session tabs (per-page open search descriptors). Fresh DBs
+        // get the table from EnsureCreated; existing DBs are backfilled here.
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS SearchSessions (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                OwnerUserId TEXT NOT NULL,
+                PageKind TEXT NOT NULL,
+                Title TEXT NOT NULL,
+                Filter TEXT NOT NULL,
+                CriteriaJson TEXT NOT NULL,
+                SortColumn TEXT,
+                SortDescending INTEGER NOT NULL,
+                ColumnKeysCsv TEXT NOT NULL,
+                SelectedIdsCsv TEXT NOT NULL,
+                ExpandedIdsCsv TEXT NOT NULL,
+                IsOpen INTEGER NOT NULL,
+                CreatedUtc TEXT NOT NULL,
+                LastUsedUtc TEXT NOT NULL
+            )
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_SearchSessions_Owner_Page_Open
+            ON SearchSessions (OwnerUserId, PageKind, IsOpen)
+            """);
         BackfillLabels(db);
     }
 

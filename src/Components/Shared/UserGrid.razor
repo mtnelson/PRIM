@@ -2,7 +2,7 @@
    containers assigned/homed to the user). Used by Users and Workspaces. *@
 @inject PrimService Prim
 
-<ObjectGrid @ref="_grid" T="AppUser" Items="Items" Kind="User" GridId="@GridId" Scope="@Scope"
+<ObjectGrid @ref="_grid" T="AppUser" Items="Items" ItemsProvider="_provider" OnReset="ResetSupplemental" Kind="User" GridId="@GridId" Scope="@Scope"
             GetInfo="@(u => ("User", u.Id, u.DisplayName))"
             GetBarcode="@(u => "")"
             EditItem="EditItem" DeleteItems="DeleteItems"
@@ -17,6 +17,7 @@
     private ObjectGrid<AppUser>? _grid;
 
     [Parameter] public IEnumerable<AppUser> Items { get; set; } = Enumerable.Empty<AppUser>();
+    [Parameter] public Func<GridPageRequest, Task<GridPageResult<AppUser>>>? ItemsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "users";
     [Parameter] public string Scope { get; set; } = "users";
     [Parameter] public Func<AppUser, Task<bool>>? EditItem { get; set; }
@@ -32,6 +33,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (ItemsProvider != null) return; // provider mode enriches per chunk
         _withChildren = await Prim.GetHasChildrenAsync("User", Items.Select(u => u.Id));
         _labelPairs = await Prim.GetObjectLabelPairsAsync("User", Items.Select(u => u.Id));
     }
@@ -50,5 +52,29 @@
 
     private Task<List<ChildItem>> GetKids(AppUser u) => Prim.GetChildItemsAsync("User", u.Id);
 
+    private Func<GridPageRequest, Task<GridPageResult<AppUser>>>? _provider
+        => ItemsProvider == null ? null : ProvideAsync;
+
+    private async Task<GridPageResult<AppUser>> ProvideAsync(GridPageRequest req)
+    {
+        var page = await ItemsProvider!(req);
+        await EnrichChunkAsync(page.Rows);
+        return page;
+    }
+
+    public async Task EnrichChunkAsync(List<AppUser> rows)
+    {
+        var ids = rows.Select(r => r.Id).ToList();
+        if (ids.Count == 0) return;
+        foreach (var kv in await Prim.GetObjectLabelPairsAsync("User", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var id in await Prim.GetHasChildrenAsync("User", ids)) _withChildren.Add(id);
+    }
+
+    private void ResetSupplemental()
+    {
+        _withChildren.Clear(); _labelPairs.Clear();
+    }
+
     public void ClearSelection() => _grid?.ClearSelection();
+    public Task ResetAsync() => _grid?.ResetAsync() ?? Task.CompletedTask;
 }

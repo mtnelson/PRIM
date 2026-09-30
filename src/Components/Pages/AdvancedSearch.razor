@@ -46,7 +46,7 @@
 @if (_searched)
 {
     <MudText Typo="Typo.subtitle1" Class="mb-2">@_resultsTitle</MudText>
-    <RecordGrid @ref="_grid" Items="_records" GridId="advanced" Scope="advanced"
+    <RecordGrid @ref="_grid" ItemsProvider="ProvideSearchResults" GridId="advanced" Scope="advanced"
                 EditItem="EditRecord" DeleteItems="DeleteRecords"
                 OnChanged="RunSearch">
     </RecordGrid>
@@ -72,8 +72,13 @@
     private string _logic = "AND";
     private bool _searched = false;
     private string _resultsTitle = "";
-    private List<RecordItem> _records = new();
+    private List<(string Field, string Op, string Value)> _criteria = new();
     private RecordGrid? _grid;
+
+    // Server-side provider: filtering and paging both happen in the database;
+    // the grid fetches 500-row chunks as the user scrolls.
+    private Task<GridPageResult<RecordItem>> ProvideSearchResults(GridPageRequest req) =>
+        Prim.AdvancedSearchRecordsPageAsync(_criteria, _logic, req);
 
     private List<(string Key, string Label)> _advFields = new()
     {
@@ -90,11 +95,11 @@
         var rows = _rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
         if (rows.Count == 0) { Snackbar.Add("Enter at least one criterion.", Severity.Info); return; }
 
-        _records = await Prim.AdvancedSearchRecordsAsync(
-            rows.Select(r => (r.Field, r.Op, r.Value)).ToList(), _logic);
-        _resultsTitle = $"{_records.Count} record(s) found";
+        _criteria = rows.Select(r => (r.Field, r.Op, r.Value)).ToList();
+        var count = await Prim.AdvancedSearchRecordsCountAsync(_criteria, _logic);
+        _resultsTitle = $"{count} record(s) found";
         _searched = true;
-        _grid?.ClearSelection();
+        if (_grid != null) await _grid.ResetAsync();
         App.Log("Advanced search", _resultsTitle);
     }
 

@@ -61,6 +61,66 @@ public static class SeedData
             CREATE UNIQUE INDEX IF NOT EXISTS IX_UserGridLayouts_UserId_GridId
             ON UserGridLayouts (UserId, GridId)
             """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS Labels (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                CreatedUtc TEXT NOT NULL,
+                CreatedBy TEXT NOT NULL
+            )
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_Labels_Name ON Labels (Name)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS ObjectLabels (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                LabelId INTEGER NOT NULL,
+                ObjectKind TEXT NOT NULL,
+                ObjectId INTEGER NOT NULL
+            )
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_ObjectLabels_Label_Object
+            ON ObjectLabels (LabelId, ObjectKind, ObjectId)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_ObjectLabels_Object
+            ON ObjectLabels (ObjectKind, ObjectId)
+            """);
+        BackfillLabels(db);
+    }
+
+    // One-time promotion of the legacy RecordItem.Labels comma-separated text
+    // into the Labels / ObjectLabels tables. Idempotent: skips records whose
+    // labels are already fully assigned.
+    public static void BackfillLabels(PrimDbContext db)
+    {
+        var existing = db.Labels.ToDictionary(l => l.Name, StringComparer.OrdinalIgnoreCase);
+        var assigned = db.ObjectLabels
+            .Where(o => o.ObjectKind == "Record")
+            .Select(o => new { o.LabelId, o.ObjectId })
+            .ToList();
+        var assignedSet = assigned.Select(a => (a.LabelId, a.ObjectId)).ToHashSet();
+        var records = db.Records.Where(r => r.Labels != null && r.Labels != "").ToList();
+        foreach (var r in records)
+        {
+            var names = r.Labels!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(n => n.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var name in names)
+            {
+                if (!existing.TryGetValue(name, out var label))
+                {
+                    label = new Label { Name = name, CreatedUtc = DateTime.UtcNow, CreatedBy = "backfill" };
+                    db.Labels.Add(label);
+                    db.SaveChanges();
+                    existing[name] = label;
+                }
+                if (assignedSet.Add((label.Id, r.Id)))
+                    db.ObjectLabels.Add(new ObjectLabel { LabelId = label.Id, ObjectKind = "Record", ObjectId = r.Id });
+            }
+        }
+        db.SaveChanges();
     }
 
     // Existing rows predate AssigneeRefId / missing HomeRefId: resolve the stored

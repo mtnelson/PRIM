@@ -198,8 +198,9 @@ public partial class Dashboard : ComponentBase, IDisposable
         bool? ok = await DialogService.ShowMessageBox("Delete containers?",
             $"Delete {ids.Count} container(s)? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return false;
+        await using var busy = BusyToast.Show(Snackbar, $"Deleting {ids.Count:N0} container(s)…");
         var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
-        Snackbar.Add($"Deleted {n} container(s).", Severity.Success);
+        busy.Complete($"Deleted {n:N0} container(s).");
         var names = new List<string>();
         foreach (var id in ids) names.Add(await Prim.GetObjectLabelAsync("Container", id));
         App.LogItems("Deleted containers", names);

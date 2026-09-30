@@ -626,6 +626,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
                 Snackbar.Add($"Select-all capped at {MaxSelectAllRows:N0} rows — refine the filter to narrow it.", Severity.Warning);
             var seq = _querySeq;
             int? afterId = null;
+            await using var busy = BusyToast.Show(Snackbar, $"Selecting {target:N0} row(s)…");
             for (var i = 0; i * PageSize < target; i++)
             {
                 if (seq != _querySeq || _disposed) break;
@@ -634,8 +635,10 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
                 // Keyset cursor only valid for default Id ordering.
                 afterId = string.IsNullOrEmpty(_sortCol) && rows.Count > 0
                     ? GetInfo(rows[^1]).Id : null;
+                if ((i + 1) % 10 == 0) busy.Update($"Selecting… {_selected.Count:N0} of {target:N0} row(s)");
                 if (rows.Count < PageSize) break;
             }
+            busy.Complete($"Selected {_selected.Count:N0} row(s).");
         }
         UpdateMenuHeader();
         StateHasChanged();
@@ -694,15 +697,18 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
     private async Task MenuAddToSlot(string slot)
     {
         var t = Targets(); if (t.Count == 0) return;
+        await using var busy = BusyToast.Show(Snackbar, $"Adding {t.Count:N0} item(s) to {slot}…");
         int n = 0;
         var labels = new List<string>();
+        int i = 0;
         foreach (var x in t)
         {
             var (kind, id, label) = GetInfo(x);
             if (await Prim.AddToWorkspaceAsync(App.CurrentUserId, slot, kind, id, label)) n++;
             labels.Add(label);
+            if (++i % 500 == 0) busy.Update($"Adding {i:N0} of {t.Count:N0} item(s) to {slot}…");
         }
-        Snackbar.Add($"Added {n} item(s) to {slot}.", Severity.Success);
+        busy.Complete($"Added {n:N0} item(s) to {slot}.");
         App.LogItems("Added to " + slot, labels);
     }
 
@@ -737,13 +743,14 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
             ["OnExport"] = (Func<List<string>, Task>)(async keys =>
             {
                 var sel = cols.Where(c => keys.Contains(c.Key)).ToList();
+                await using var busy = BusyToast.Show(Snackbar, $"Exporting {rows.Count:N0} row(s)…");
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine(string.Join(",", sel.Select(c => Csv(c.Label))));
                 foreach (var row in rows)
                     sb.AppendLine(string.Join(",", sel.Select(c => Csv(row.GetValueOrDefault(c.Key, "")))));
                 await PrimJs.TryInvokeVoidAsync(JS, "prim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
+                busy.Complete($"Exported {rows.Count:N0} row(s).");
                 App.LogItems("Exported CSV", t.Select(x => GetInfo(x).Label));
-                Snackbar.Add($"Exported {rows.Count} row(s).", Severity.Success);
             })
         };
         await DialogService.ShowAsync<ExportDialog>("Export to CSV", p, new DialogOptions { MaxWidth = MaxWidth.Small });
@@ -765,6 +772,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
             return;
         }
         if (RowToDict is null || _effective.Count == 0) return;
+        await using var busy = BusyToast.Show(Snackbar, $"Copying {t.Count:N0} row(s)…");
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(string.Join("\t", _effective.Select(c => c.Label)));
         foreach (var x in t)
@@ -773,7 +781,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
             sb.AppendLine(string.Join("\t", _effective.Select(c => d.GetValueOrDefault(c.Key, ""))));
         }
         var ok = await PrimJs.TryInvokeAsync<bool>(JS, "prim.copyText", sb.ToString());
-        Snackbar.Add(ok ? $"Copied {t.Count} row(s) with headers." : "Clipboard unavailable.",
+        busy.Complete(ok ? $"Copied {t.Count:N0} row(s) with headers." : "Clipboard unavailable.",
             ok ? Severity.Success : Severity.Warning);
     }
 }

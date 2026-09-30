@@ -17,11 +17,22 @@
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickAssignee" />
             <MudText Typo="Typo.caption">@_newAssigneeKind</MudText>
         }
+        @if (_busy) { <MudProgressLinear Indeterminate="true" Class="mt-3" /> }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton OnClick="() => MudDialog.Cancel()" Disabled="_busy">Cancel</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save"
-                   Disabled="!((_changeHome && _newHome != null) || (_changeAssignee && _newAssignee != null))">Move</MudButton>
+                   Disabled="_busy || !((_changeHome && _newHome != null) || (_changeAssignee && _newAssignee != null))">
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                <span>Moving…</span>
+            }
+            else
+            {
+                <span>Move</span>
+            }
+        </MudButton>
     </DialogActions>
 </MudDialog>
 

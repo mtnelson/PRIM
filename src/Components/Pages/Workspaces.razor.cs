@@ -74,12 +74,16 @@ public partial class Workspaces : ComponentBase, IDisposable
     // never the underlying object.
     private async Task RemoveSelected(string slot, string kind, List<int> ids)
     {
+        await using var busy = BusyToast.Show(Snackbar, $"Removing {ids.Count:N0} item(s) from {slot}…");
         var labels = new List<string>();
+        int i = 0;
         foreach (var id in ids)
         {
             labels.Add(await Prim.GetObjectLabelAsync(kind, id));
             await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, kind, id);
+            if (++i % 500 == 0) busy.Update($"Removing {i:N0} of {ids.Count:N0} item(s) from {slot}…");
         }
+        busy.Complete($"Removed {ids.Count:N0} item(s) from {slot}.");
         App.LogItems("Removed from " + slot, labels);
         await Load();
     }

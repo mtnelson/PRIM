@@ -1,5 +1,8 @@
 # PRIM Changelog
 
+## v0.10.4 — 2026-09-30
+- Working indicators on every bulk operation (Danny's feedback): adding many records to a workspace, removing them, bulk delete, bulk move, CSV export, clipboard copy, and server-side select-all now show a persistent "working" toast with live progress (e.g. "Adding 3,000 of 50,000…"). The toast only appears if the operation takes longer than a moment, so quick actions never flash it. The Delete and Move dialogs now disable their buttons and show "Deleting…"/"Moving…" with a spinner and progress bar while they work.
+
 ## v0.10.3 — 2026-09-30
 - All data grids now use infinite scroll: the dashboard and workspace grids (which previously grew the page without any scrollbar) are virtualized with a compact 400px scroll height, matching the main screens' virtualized scrolling.
 - Loading indicators everywhere data takes time: grid rows show a spinner while a chunk is being fetched; Dashboard, Workspaces, and Advanced Search show an indeterminate progress bar while loading or searching, with their buttons disabled and relabeled ("Searching…"); Admin → Audit Retention buttons show "Archiving…"/"Exporting…" with a spinner; the test-data Generate button shows a spinner while generating.

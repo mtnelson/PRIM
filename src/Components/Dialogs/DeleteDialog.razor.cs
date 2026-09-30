@@ -24,20 +24,27 @@ public partial class DeleteDialog : ComponentBase
 
     private string _reason = "Duplicate entry";
     private string? _mergedInto, _otherText, _error;
+    private bool _busy;
 
     private async Task Submit()
     {
+        if (_busy) return;
         _error = null;
         if (_reason == "Merged with case file" && string.IsNullOrWhiteSpace(_mergedInto))
         { _error = "Merged Into barcode is required."; return; }
         if (_reason == "Other" && string.IsNullOrWhiteSpace(_otherText))
         { _error = "A reason is required."; return; }
 
-        var n = await Prim.DeleteRecordsAsync(Ids, _reason, _mergedInto, _otherText, App.CurrentUserId);
-        Snackbar.Add($"Deleted {n} record(s).", Severity.Success);
-        var labels = new List<string>();
-        foreach (var id in Ids) labels.Add(await Prim.GetObjectLabelAsync("Record", id));
-        App.LogItems($"Deleted records ({_reason})", labels);
-        MudDialog.Close(DialogResult.Ok(true));
+        _busy = true;
+        try
+        {
+            var n = await Prim.DeleteRecordsAsync(Ids, _reason, _mergedInto, _otherText, App.CurrentUserId);
+            Snackbar.Add($"Deleted {n} record(s).", Severity.Success);
+            var labels = new List<string>();
+            foreach (var id in Ids) labels.Add(await Prim.GetObjectLabelAsync("Record", id));
+            App.LogItems($"Deleted records ({_reason})", labels);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        finally { _busy = false; }
     }
 }

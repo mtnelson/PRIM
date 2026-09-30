@@ -22,10 +22,21 @@
             <MudTextField T="string" Label="Reason *" @bind-Value="_otherText" Required="true" Lines="2" Class="mt-2" />
         }
         @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
+        @if (_busy) { <MudProgressLinear Indeterminate="true" Class="mt-3" /> }
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
-        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Submit">Delete</MudButton>
+        <MudButton OnClick="() => MudDialog.Cancel()" Disabled="_busy">Cancel</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Submit" Disabled="_busy">
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                <span>Deleting…</span>
+            }
+            else
+            {
+                <span>Delete</span>
+            }
+        </MudButton>
     </DialogActions>
 </MudDialog>
 

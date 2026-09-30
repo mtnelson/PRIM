@@ -97,6 +97,20 @@ Click each shortcut; each page renders its grid/content with no error:
       "Searching…".
 - [ ] Admin → Audit Retention: "Archive now" / "Export archive to file"
       show "Archiving…"/"Exporting…" plus a spinner while running.
+- [ ] Bulk-operation indicators (v0.10.4): right-click → **Send to workspace**
+      on a large selection (e.g. Ctrl+A) pops a "Adding N item(s)…" toast
+      with live progress ("Adding 3,000 of 50,000…"), then "Added N…".
+      No toast flash for a 1–2 item selection (fast ops stay silent).
+- [ ] Workspaces: right-click → **Remove from workspace** on a large
+      selection shows the same working toast with progress.
+- [ ] Records → right-click → **Delete** on many rows: the dialog buttons
+      disable, show "Deleting…" with a spinner and progress bar until done.
+- [ ] Records → right-click → **Move** on many rows: same in-dialog
+      "Moving…" busy state.
+- [ ] Right-click → **Export to CSV** and **Copy** on a large selection show
+      the working toast while building the file/text.
+- [ ] Ctrl+A on a large filtered set shows "Selecting… N of M rows" then
+      "Selected N rows."
 - [ ] Admin → Test Data: the Generate button shows a spinner and
       "Generating…" while running.
 

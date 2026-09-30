@@ -28,6 +28,7 @@ public partial class MoveDialog : ComponentBase
     private bool _changeHome, _changeAssignee, _assigneeFollowsHome = true;
     private string? _newHome, _newHomeKind, _newAssignee, _newAssigneeKind;
     private int? _newHomeRefId, _newAssigneeRefId;
+    private bool _busy;
 
     private async Task PickHome()
     {
@@ -54,13 +55,19 @@ public partial class MoveDialog : ComponentBase
 
     private async Task Save()
     {
-        var n = await Prim.MoveItemsAsync(Kind, Ids,
-            _changeHome ? _newHome : null, _newHomeKind, _newHomeRefId,
-            _changeAssignee ? _newAssignee : null, _newAssigneeKind, _newAssigneeRefId, _assigneeFollowsHome, App.CurrentUserId);
-        Snackbar.Add($"Moved {n} item(s).", Severity.Success);
-        var labels = new List<string>();
-        foreach (var id in Ids) labels.Add(await Prim.GetObjectLabelAsync(Kind, id));
-        App.LogItems("Moved items", labels);
-        MudDialog.Close(DialogResult.Ok(true));
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            var n = await Prim.MoveItemsAsync(Kind, Ids,
+                _changeHome ? _newHome : null, _newHomeKind, _newHomeRefId,
+                _changeAssignee ? _newAssignee : null, _newAssigneeKind, _newAssigneeRefId, _assigneeFollowsHome, App.CurrentUserId);
+            Snackbar.Add($"Moved {n} item(s).", Severity.Success);
+            var labels = new List<string>();
+            foreach (var id in Ids) labels.Add(await Prim.GetObjectLabelAsync(Kind, id));
+            App.LogItems("Moved items", labels);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        finally { _busy = false; }
     }
 }

@@ -13,7 +13,7 @@ No installs needed — the portable package is self-contained (no .NET SDK,
 no network dependencies).
 
 1. **Download** the portable zip (53 MB):
-   <https://muse.ai/files/588249304382024/841302629040376/66en34f68vtbwa7n2g34f0ge/PRIM-portable-win-x64.zip>
+   <https://muse.ai/files/588249304382024/2152147542180674/llrykgedrkgjvb4or3qosg1m/PRIM-portable-win-x64.zip>
 2. **Unzip** to any folder, e.g. `C:\PRIM\` (avoid `C:\Program Files\` unless
    running as administrator — the app writes its database next to the exe).
 3. **Double-click `Start PRIM.bat`**. Your browser opens to

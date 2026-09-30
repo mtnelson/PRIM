@@ -308,17 +308,20 @@
 
     private static string Csv(string s) => "\"" + s.Replace("\"", "\"\"") + "\"";
 
-    private async Task MenuCopy()
-    {
-        var t = Targets(); if (t.Count == 0) return;
-        var ok = await PrimJs.TryInvokeAsync<bool>(JS, "prim.copyText", string.Join("\n", t.Select(x => GetInfo(x).Label)));
-        Snackbar.Add(ok ? $"Copied {t.Count} item(s)." : "Clipboard unavailable.", ok ? Severity.Success : Severity.Warning);
-    }
+    // Context-menu Copy: same full-grid TSV as Ctrl+C, so paste lands in
+    // spreadsheet columns exactly as displayed.
+    private Task MenuCopy() => CopyWithHeaders();
 
     // Ctrl+C on the grid: rows WITH column headers, tab-separated for spreadsheets.
     private async Task CopyWithHeaders()
     {
-        var t = Targets(); if (t.Count == 0 || RowToDict is null || _effective.Count == 0) return;
+        var t = Targets();
+        if (t.Count == 0)
+        {
+            Snackbar.Add("Select one or more rows to copy.", Severity.Info);
+            return;
+        }
+        if (RowToDict is null || _effective.Count == 0) return;
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(string.Join("\t", _effective.Select(c => c.Label)));
         foreach (var x in t)

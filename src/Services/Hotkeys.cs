@@ -59,16 +59,35 @@ public class HotkeyManager
         if (_scopes.Count > 0) _scopes.Pop();
     }
 
-    public void Register(string scope, string combo, Func<Task> handler) =>
+    public void Register(string scope, string combo, Func<Task> handler)
+    {
         _handlers[(scope, combo)] = handler;
+        CombosDirty = true;
+    }
 
     public void Register(string scope, string combo, Action handler) =>
-        _handlers[(scope, combo)] = () => { handler(); return Task.CompletedTask; };
+        Register(scope, combo, () => { handler(); return Task.CompletedTask; });
 
     public void UnregisterScope(string scope)
     {
         foreach (var k in _handlers.Keys.Where(k => k.Scope == scope).ToList())
             _handlers.Remove(k);
+        CombosDirty = true;
+    }
+
+    /// <summary>
+    /// Distinct combos currently registered. The browser needs the list up
+    /// front so it can preventDefault() synchronously in the keydown handler;
+    /// doing it after the .NET round-trip is too late and the native action
+    /// (copy cell text, find bar, print dialog, ...) fires anyway.
+    /// TakeCombos clears the dirty flag.
+    /// </summary>
+    public bool CombosDirty { get; private set; } = true;
+
+    public string[] TakeCombos()
+    {
+        CombosDirty = false;
+        return _handlers.Keys.Select(k => k.Combo).Distinct().ToArray();
     }
 
     /// <summary>

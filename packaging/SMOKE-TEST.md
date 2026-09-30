@@ -70,7 +70,9 @@ Click each shortcut; each page renders its grid/content with no error:
 ## 7. Export / print
 
 - [ ] Records grid: export CSV downloads a file with the grid rows.
-- [ ] Copy-to-clipboard action copies the record summary.
+- [ ] Select rows, press **Ctrl+C**, paste into Excel: all displayed columns
+      paste with headers, one spreadsheet column per grid column.
+- [ ] Right-click a row → **Copy** pastes the same full grid data.
 - [ ] Label dialog: **Print** opens the print preview.
 
 ## 8. Shutdown

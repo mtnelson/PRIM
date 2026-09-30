@@ -32,6 +32,17 @@ window.prim = {
     },
     hotkeys: {
         _inited: false,
+        _combos: {},
+        // Combos the app handles (synced from .NET). The browser default for
+        // these must be prevented SYNCHRONOUSLY in the keydown handler — doing
+        // it after the .NET round-trip is too late and the native action
+        // (copy cell text, select-all page text, find bar, print dialog)
+        // fires anyway.
+        setCombos: function (arr) {
+            const s = {};
+            (arr || []).forEach(c => { s[c] = 1; });
+            window.prim.hotkeys._combos = s;
+        },
         init: function (dotNet) {
             if (window.prim.hotkeys._inited) return;
             window.prim.hotkeys._inited = true;
@@ -41,14 +52,21 @@ window.prim = {
                     (e.target && e.target.isContentEditable);
                 // Escape always goes to the app (close dialog / clear selection).
                 if (e.key === 'Escape') {
-                    dotNet.invokeMethodAsync('OnHotkey', 'Escape').then(h => { if (h) e.preventDefault(); });
+                    if (window.prim.hotkeys._combos['Escape']) e.preventDefault();
+                    dotNet.invokeMethodAsync('OnHotkey', 'Escape');
                     return;
                 }
                 // Never fight text inputs: typing shortcuts belong to the browser.
                 if (editable) return;
                 const combo = window.prim.hotkeys.combo(e);
                 if (!combo) return;
-                dotNet.invokeMethodAsync('OnHotkey', combo).then(h => { if (h) e.preventDefault(); });
+                // If the user selected actual text, Ctrl+C / Ctrl+A belong to
+                // the browser (copy/select that text), not to the grid.
+                const sel = window.getSelection && window.getSelection();
+                const hasTextSel = sel && !sel.isCollapsed;
+                if (hasTextSel && (combo === 'Ctrl+C' || combo === 'Ctrl+A')) return;
+                if (window.prim.hotkeys._combos[combo]) e.preventDefault();
+                dotNet.invokeMethodAsync('OnHotkey', combo);
             });
         },
         combo: function (e) {

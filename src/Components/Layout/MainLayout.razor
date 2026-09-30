@@ -149,6 +149,10 @@ else
             _self = DotNetObjectReference.Create(this);
             await PrimJs.TryInvokeVoidAsync(JS, "prim.hotkeys.init", _self);
         }
+        // Keep the browser's synchronous preventDefault set in sync: pages
+        // register/unregister hotkeys as they navigate.
+        if (Hotkeys.CombosDirty)
+            await PrimJs.TryInvokeVoidAsync(JS, "prim.hotkeys.setCombos", Hotkeys.TakeCombos());
     }
 
     [JSInvokable]

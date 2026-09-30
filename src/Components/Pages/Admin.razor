@@ -22,11 +22,11 @@
                 @foreach (var col in _deletedCols)
                 {
                     var c = col;
-                    <TemplateColumn T="DeletedRow" Title="@c.Label">
+                    <TemplateColumn T="DeletedRow" Title="@c.Label" Width="@GridColumns.ColWidth(c.Key)">
                         <CellTemplate>@context.Item.Cells.GetValueOrDefault(c.Key, "")</CellTemplate>
                     </TemplateColumn>
                 }
-                <TemplateColumn T="DeletedRow" Title="">
+                <TemplateColumn T="DeletedRow" Title="" Width="110px">
                     <CellTemplate>
                         <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
                                    OnClick="() => Restore(context.Item.Item)">Restore</MudButton>
@@ -168,9 +168,9 @@
         _seeding = true;
         try
         {
-            var n = await Prim.SeedTestRecordsAsync(1500, App.CurrentUserId);
-            Snackbar.Add($"Generated {n} test records.", Severity.Success);
-            App.Log("Generated test records", $"{n} records");
+            var numbers = await Prim.SeedTestRecordsAsync(1500, App.CurrentUserId);
+            Snackbar.Add($"Generated {numbers.Count} test records.", Severity.Success);
+            App.LogItems("Generated test records", numbers);
         }
         catch (Exception ex)
         {

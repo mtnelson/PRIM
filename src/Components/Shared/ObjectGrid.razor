@@ -47,7 +47,8 @@
                 @foreach (var col in _effective)
                 {
                     var c = col;
-                    <TemplateColumn T="T" Title="@c.Label" Sortable="@IsColSortable(c.Key)" SortBy="@GetSortFunc(c.Key)">
+                    <TemplateColumn T="T" Title="@c.Label" Sortable="@IsColSortable(c.Key)" SortBy="@GetSortFunc(c.Key)"
+                                    Width="@GridColumns.ColWidth(c.Key)">
                         <CellTemplate>
                             @{
                                 var item = context.Item;
@@ -743,7 +744,7 @@
                 foreach (var row in rows)
                     sb.AppendLine(string.Join(",", sel.Select(c => Csv(row.GetValueOrDefault(c.Key, "")))));
                 await PrimJs.TryInvokeVoidAsync(JS, "prim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
-                App.Log("Exported CSV", $"{Kind}: {rows.Count} row(s)");
+                App.LogItems("Exported CSV", t.Select(x => GetInfo(x).Label));
                 Snackbar.Add($"Exported {rows.Count} row(s).", Severity.Success);
             })
         };

@@ -38,7 +38,7 @@
 
     private bool _changeHome, _changeAssignee, _assigneeFollowsHome = true;
     private string? _newHome, _newHomeKind, _newAssignee, _newAssigneeKind;
-    private int? _newHomeRefId;
+    private int? _newHomeRefId, _newAssigneeRefId;
 
     private async Task PickHome()
     {
@@ -59,7 +59,7 @@
         var res = await d.Result;
         if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
         {
-            _newAssigneeKind = pick.Item1; _newAssignee = pick.Item3;
+            _newAssigneeKind = pick.Item1; _newAssigneeRefId = pick.Item2; _newAssignee = pick.Item3;
         }
     }
 
@@ -67,7 +67,7 @@
     {
         var n = await Prim.MoveItemsAsync(Kind, Ids,
             _changeHome ? _newHome : null, _newHomeKind, _newHomeRefId,
-            _changeAssignee ? _newAssignee : null, _newAssigneeKind, _assigneeFollowsHome, App.CurrentUserId);
+            _changeAssignee ? _newAssignee : null, _newAssigneeKind, _newAssigneeRefId, _assigneeFollowsHome, App.CurrentUserId);
         Snackbar.Add($"Moved {n} item(s).", Severity.Success);
         App.Log("Moved items", $"{n} {Kind.ToLower()}(s)");
         MudDialog.Close(DialogResult.Ok(true));

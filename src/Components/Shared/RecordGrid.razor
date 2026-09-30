@@ -1,0 +1,62 @@
+@* Standard records grid: full column set, expandable child rows, clickable
+   Home/Assignee, breadcrumb Path column. Used by Records, Dashboard,
+   AdvancedSearch, and Workspaces. *@
+@inject PrimService Prim
+
+<ObjectGrid @ref="_grid" T="RecordItem" Items="Items" Kind="Record" GridId="@GridId" Scope="@Scope"
+            GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
+            GetBarcode="r => r.Barcode"
+            EditItem="EditItem" DeleteItems="DeleteItems"
+            ExportCols="GridColumns.RecordColumns()" RowToDict="RowWithPath"
+            GetHomeRef="GetHomeRef" GetAssigneeRef="GetAssigneeRef" GetPath="GetPath"
+            Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
+            CanMove="@CanMove" CanDelete="@CanDelete"
+            ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
+            OnChanged="OnChanged" />
+
+@code {
+    private ObjectGrid<RecordItem>? _grid;
+
+    [Parameter] public IEnumerable<RecordItem> Items { get; set; } = Enumerable.Empty<RecordItem>();
+    [Parameter] public string GridId { get; set; } = "records";
+    [Parameter] public string Scope { get; set; } = "records";
+    [Parameter] public Func<RecordItem, Task<bool>>? EditItem { get; set; }
+    [Parameter] public Func<List<int>, Task<bool>>? DeleteItems { get; set; }
+    [Parameter] public bool CanMove { get; set; } = true;
+    [Parameter] public bool CanDelete { get; set; } = true;
+    [Parameter] public bool ShowRemoveFromSlot { get; set; }
+    [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private Dictionary<int, List<PathSeg>> _paths = new();
+    private HashSet<int> _withChildren = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var ids = Items.Select(r => r.Id).ToList();
+        _paths = await Prim.GetAncestorPathsAsync("Record", ids);
+        _withChildren = await Prim.GetHasChildrenAsync("Record", ids);
+    }
+
+    private Dictionary<string, string> RowWithPath(RecordItem r)
+    {
+        var d = GridColumns.RecordRow(r);
+        d["Path"] = _paths.TryGetValue(r.Id, out var segs) ? string.Join(" › ", segs.Select(s => s.Label)) : "";
+        return d;
+    }
+
+    private List<PathSeg> GetPath(RecordItem r) =>
+        _paths.TryGetValue(r.Id, out var segs) ? segs : new() { new("Record", r.Id, r.RecordNumber) };
+
+    private (string Kind, int Id)? GetHomeRef(RecordItem r) =>
+        r.HomeKind != null && r.HomeRefId != null ? (r.HomeKind, r.HomeRefId.Value) : null;
+
+    private (string Kind, int Id)? GetAssigneeRef(RecordItem r) =>
+        r.AssigneeKind != null && r.AssigneeRefId != null ? (r.AssigneeKind, r.AssigneeRefId.Value) : null;
+
+    private bool HasKids(RecordItem r) => _withChildren.Contains(r.Id);
+
+    private Task<List<ChildItem>> GetKids(RecordItem r) => Prim.GetChildItemsAsync("Record", r.Id);
+
+    public void ClearSelection() => _grid?.ClearSelection();
+}

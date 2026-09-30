@@ -1,5 +1,6 @@
 @inject PrimService Prim
 @inject AppState App
+@inject NavigationManager Nav
 @implements IDisposable
 
 @if (App.ViewPaneSelection is { } sel)
@@ -10,7 +11,19 @@
                 <tbody>
                     @foreach (var (k, v) in _props)
                     {
-                        <tr><td style="font-weight:600;white-space:nowrap">@k</td><td>@v</td></tr>
+                        <tr>
+                            <td style="font-weight:600;white-space:nowrap">@k</td>
+                            <td>
+                                @if (_links.TryGetValue(k, out var tgt))
+                                {
+                                    <MudLink Typo="Typo.body2" OnClick="@(() => NavigateTo(tgt.Kind, tgt.Id, true))">@v</MudLink>
+                                }
+                                else
+                                {
+                                    @v
+                                }
+                            </td>
+                        </tr>
                     }
                 </tbody>
             </MudSimpleTable>
@@ -55,12 +68,26 @@
     [Parameter] public int Id { get; set; }
 
     private List<(string K, string V)> _props = new();
+    private Dictionary<string, (string Kind, int Id)> _links = new();
     private string? _notes;
     private List<AuditEvent> _audit = new();
 
+    private void NavigateTo(string kind, int id, bool expand)
+    {
+        App.RequestFocus(kind, id, expand);
+        Nav.NavigateTo(kind switch
+        {
+            "Record" => "/records",
+            "Container" => "/containers",
+            "Location" => "/locations",
+            "User" => "/users",
+            _ => "/"
+        });
+    }
+
     protected override async Task OnParametersSetAsync()
     {
-        _props.Clear(); _notes = null; _audit = new();
+        _props.Clear(); _notes = null; _audit = new(); _links.Clear();
         if (Kind == "Record")
         {
             var r = await Prim.GetRecordAsync(Id);
@@ -78,6 +105,8 @@
                 ("State", r.State), ("Created", $"{r.CreatedBy} · {r.CreatedUtc.ToLocalTime():g}"),
                 ("Last Updated", $"{r.LastUpdatedBy} · {r.LastUpdatedUtc.ToLocalTime():g}"),
             };
+            if (r.HomeKind != null && r.HomeRefId != null) _links["Home"] = (r.HomeKind, r.HomeRefId.Value);
+            if (r.AssigneeKind != null && r.AssigneeRefId != null) _links["Assignee"] = (r.AssigneeKind, r.AssigneeRefId.Value);
             _notes = r.Notes;
         }
         else if (Kind == "Container")
@@ -92,6 +121,8 @@
                 ("Created", $"{c.CreatedBy} · {c.CreatedUtc.ToLocalTime():g}"),
                 ("Last Updated", $"{c.LastUpdatedBy} · {c.LastUpdatedUtc.ToLocalTime():g}"),
             };
+            if (c.HomeKind != null && c.HomeRefId != null) _links["Home"] = (c.HomeKind, c.HomeRefId.Value);
+            if (c.AssigneeKind != null && c.AssigneeRefId != null) _links["Assignee"] = (c.AssigneeKind, c.AssigneeRefId.Value);
         }
         else if (Kind == "Location")
         {
@@ -106,6 +137,7 @@
                 ("Created", $"{l.CreatedBy} · {l.CreatedUtc.ToLocalTime():g}"),
                 ("Last Updated", $"{l.LastUpdatedBy} · {l.LastUpdatedUtc.ToLocalTime():g}"),
             };
+            if (l.ParentId is int parentId) _links["Parent"] = ("Location", parentId);
         }
         else if (Kind == "User")
         {

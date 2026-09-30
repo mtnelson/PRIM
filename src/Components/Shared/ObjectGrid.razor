@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 @implements IDisposable
 
 <div class="d-flex align-center mb-1">
@@ -29,15 +30,63 @@
                      RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))"
                      RowClassFunc="RowClass" @ondblclick="OnGridDblClick">
             <Columns>
+                @if (Expandable)
+                {
+                    @* Caret column: the button is disabled (and hidden by CSS) on rows
+                       without children, so the caret only appears where there is
+                       something to expand. *@
+                    <HierarchyColumn T="T"
+                                     ButtonDisabledFunc="@(x => !(HasChildren?.Invoke(x) ?? false))"
+                                     InitiallyExpandedFunc="@(x => _forceExpanded.Contains(GetInfo(x).Id))"
+                                     EnableHeaderToggle="false" />
+                }
                 <SelectColumn T="T" />
                 @foreach (var col in _effective)
                 {
                     var c = col;
                     <TemplateColumn T="T" Title="@c.Label" Sortable="true" SortBy="@(x => CellVal(x, c.Key))">
-                        <CellTemplate>@CellVal(context.Item, c.Key)</CellTemplate>
+                        <CellTemplate>
+                            @{
+                                var item = context.Item;
+                                var homeTgt = c.Key == "Home" ? GetHomeRef?.Invoke(item) : null;
+                                var assigneeTgt = c.Key == "Assignee" ? GetAssigneeRef?.Invoke(item) : null;
+                            }
+                            @if (c.Key == "Path" && GetPath != null)
+                            {
+                                var segs = GetPath(item);
+                                @for (var i = 0; i < segs.Count; i++)
+                                {
+                                    var s = segs[i];
+                                    if (i > 0)
+                                    {
+                                        <span class="mx-1" style="opacity:.45">›</span>
+                                    }
+                                    <MudLink Typo="Typo.body2" OnClick="@(() => NavigateToObject(s.Kind, s.Id, true))">@s.Label</MudLink>
+                                }
+                            }
+                            else if (homeTgt is { } h)
+                            {
+                                <MudLink Typo="Typo.body2" OnClick="@(() => NavigateToObject(h.Kind, h.Id, true))">@CellVal(item, c.Key)</MudLink>
+                            }
+                            else if (assigneeTgt is { } a)
+                            {
+                                <MudLink Typo="Typo.body2" OnClick="@(() => NavigateToObject(a.Kind, a.Id, true))">@CellVal(item, c.Key)</MudLink>
+                            }
+                            else
+                            {
+                                @CellVal(item, c.Key)
+                            }
+                        </CellTemplate>
                     </TemplateColumn>
                 }
             </Columns>
+            <ChildRowContent>
+                @if (Expandable && GetChildrenAsync != null)
+                {
+                    <ChildRows LoadAsync="@(() => LoadChildren(context.Item))"
+                               OnNavigate="OnChildNavigate" />
+                }
+            </ChildRowContent>
         </MudDataGrid>
     </Activator>
 </GridContextMenu>
@@ -59,6 +108,15 @@
     [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
+    // Hierarchy + navigation (expandable child rows, clickable Home/Assignee,
+    // breadcrumb Path column, cross-page focus).
+    [Parameter] public bool Expandable { get; set; }
+    [Parameter] public Func<T, bool>? HasChildren { get; set; }
+    [Parameter] public Func<T, Task<List<ChildItem>>>? GetChildrenAsync { get; set; }
+    [Parameter] public Func<T, (string Kind, int Id)?>? GetHomeRef { get; set; }
+    [Parameter] public Func<T, (string Kind, int Id)?>? GetAssigneeRef { get; set; }
+    [Parameter] public Func<T, List<PathSeg>>? GetPath { get; set; }
+
     private HashSet<T> _selected = new();
     private T? _active;
     private bool _hasActive;
@@ -70,20 +128,28 @@
     private string _menuHeader = "No selection";
     private List<(string Key, string Label)> _effective = new();
     private string _scope => string.IsNullOrEmpty(Scope) ? GridId : Scope;
+    // Hotkey registrations owned by this grid; disposing removes only ours so
+    // sibling grids sharing the scope (Dashboard, Workspaces) keep theirs.
+    private readonly List<IDisposable> _hotkeyRegs = new();
+    // Rows force-expanded by a focus request (InitiallyExpandedFunc reads this).
+    private readonly HashSet<int> _forceExpanded = new();
+    // Per-row child lists, loaded lazily on first expansion.
+    private readonly Dictionary<int, List<ChildItem>> _childCache = new();
 
     private bool NoTarget => _selected.Count == 0 && !_hasActive;
 
     protected override void OnInitialized()
     {
         _effective = ExportCols.ToList();
+        App.Changed += OnAppChanged;
         if (!string.IsNullOrEmpty(_scope))
         {
-            Hotkeys.Register(_scope, "Ctrl+A", SelectAll);
-            Hotkeys.Register(_scope, "Ctrl+C", CopyWithHeaders);
-            Hotkeys.Register(_scope, "F2", MenuEdit);
-            Hotkeys.Register(_scope, "Delete", MenuDelete);
-            Hotkeys.Register(_scope, "Ctrl+P", MenuPrint);
-            Hotkeys.Register(_scope, "Escape", ClearSelection);
+            _hotkeyRegs.Add(Hotkeys.Register(_scope, "Ctrl+A", SelectAll));
+            _hotkeyRegs.Add(Hotkeys.Register(_scope, "Ctrl+C", CopyWithHeaders));
+            _hotkeyRegs.Add(Hotkeys.Register(_scope, "F2", MenuEdit));
+            _hotkeyRegs.Add(Hotkeys.Register(_scope, "Delete", MenuDelete));
+            _hotkeyRegs.Add(Hotkeys.Register(_scope, "Ctrl+P", MenuPrint));
+            _hotkeyRegs.Add(Hotkeys.Register(_scope, "Escape", ClearSelection));
         }
     }
 
@@ -98,7 +164,66 @@
 
     public void Dispose()
     {
-        if (!string.IsNullOrEmpty(_scope)) Hotkeys.UnregisterScope(_scope);
+        App.Changed -= OnAppChanged;
+        foreach (var r in _hotkeyRegs) r.Dispose();
+        _hotkeyRegs.Clear();
+    }
+
+    private void OnAppChanged() => InvokeAsync(StateHasChanged);
+
+    // Applies a cross-page focus request (from a Home/Assignee link, a Path
+    // breadcrumb, or a child row): selects the row, opens the detail pane,
+    // and expands its children when asked.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (App.TryTakeFocus(Kind, out var f) && f != null)
+        {
+            var item = Items.FirstOrDefault(x => GetInfo(x).Id == f.Id);
+            if (item is null)
+            {
+                // Not in this grid's items (e.g. filtered out) — still show details.
+                App.SetViewPane(f.Kind, f.Id, await Prim.GetObjectLabelAsync(f.Kind, f.Id));
+            }
+            else
+            {
+                _selected = new HashSet<T> { item };
+                _active = item; _hasActive = true;
+                var (kind, id, label) = GetInfo(item);
+                App.SetViewPane(kind, id, label);
+                if (f.Expand && (HasChildren?.Invoke(item) ?? false))
+                    _forceExpanded.Add(id);
+                UpdateMenuHeader();
+                StateHasChanged();
+            }
+        }
+    }
+
+    // Navigates to an object's page and focuses it there. Works for
+    // same-page targets too (the focus request is consumed on re-render).
+    private void NavigateToObject(string kind, int id, bool expand)
+    {
+        App.RequestFocus(kind, id, expand);
+        Nav.NavigateTo(kind switch
+        {
+            "Record" => "/records",
+            "Container" => "/containers",
+            "Location" => "/locations",
+            "User" => "/users",
+            _ => "/"
+        });
+    }
+
+    private void OnChildNavigate(ChildItem c) => NavigateToObject(c.Kind, c.Id, c.HasChildren);
+
+    private async Task<List<ChildItem>> LoadChildren(T item)
+    {
+        var id = GetInfo(item).Id;
+        if (!_childCache.TryGetValue(id, out var kids))
+        {
+            kids = await GetChildrenAsync!(item);
+            _childCache[id] = kids;
+        }
+        return kids;
     }
 
     private void ApplyLayout(List<string> keys)
@@ -147,8 +272,15 @@
         UpdateMenuHeader();
     }
 
-    private string RowClass(T item, int index) =>
-        _selected.Contains(item) ? "prim-row-selected" : "";
+    private string RowClass(T item, int index)
+    {
+        var cls = _selected.Contains(item) ? "prim-row-selected" : "";
+        // Rows without children get no caret (the disabled hierarchy button is
+        // hidden by CSS); keep the selected highlight independent of that.
+        if (Expandable && !(HasChildren?.Invoke(item) ?? false))
+            cls += (cls.Length > 0 ? " " : "") + "prim-row-nochildren";
+        return cls;
+    }
 
     private string CellVal(T x, string key)
         => RowToDict is null ? "" : RowToDict(x).GetValueOrDefault(key, "");

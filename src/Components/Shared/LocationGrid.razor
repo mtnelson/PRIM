@@ -1,0 +1,55 @@
+@* Standard locations grid: full column set, expandable child rows, breadcrumb
+   Path column. Used by Locations, Dashboard, and Workspaces. *@
+@inject PrimService Prim
+
+<ObjectGrid @ref="_grid" T="Location" Items="Items" Kind="Location" GridId="@GridId" Scope="@Scope"
+            GetInfo="@(l => ("Location", l.Id, l.LocationName))"
+            GetBarcode="l => l.Barcode"
+            EditItem="EditItem" DeleteItems="DeleteItems"
+            ExportCols="GridColumns.LocationColumns()" RowToDict="RowWithPath"
+            GetPath="GetPath"
+            Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
+            CanMove="@CanMove" CanDelete="@CanDelete"
+            ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
+            OnChanged="OnChanged" />
+
+@code {
+    private ObjectGrid<Location>? _grid;
+
+    [Parameter] public IEnumerable<Location> Items { get; set; } = Enumerable.Empty<Location>();
+    [Parameter] public string GridId { get; set; } = "locations";
+    [Parameter] public string Scope { get; set; } = "locations";
+    [Parameter] public Func<Location, Task<bool>>? EditItem { get; set; }
+    [Parameter] public Func<List<int>, Task<bool>>? DeleteItems { get; set; }
+    [Parameter] public bool CanMove { get; set; } = true;
+    [Parameter] public bool CanDelete { get; set; } = true;
+    [Parameter] public bool ShowRemoveFromSlot { get; set; }
+    [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private Dictionary<int, List<PathSeg>> _paths = new();
+    private HashSet<int> _withChildren = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var ids = Items.Select(l => l.Id).ToList();
+        _paths = await Prim.GetAncestorPathsAsync("Location", ids);
+        _withChildren = await Prim.GetHasChildrenAsync("Location", ids);
+    }
+
+    private Dictionary<string, string> RowWithPath(Location l)
+    {
+        var d = GridColumns.LocationRow(l);
+        d["Path"] = _paths.TryGetValue(l.Id, out var segs) ? string.Join(" › ", segs.Select(s => s.Label)) : "";
+        return d;
+    }
+
+    private List<PathSeg> GetPath(Location l) =>
+        _paths.TryGetValue(l.Id, out var segs) ? segs : new() { new("Location", l.Id, l.LocationName) };
+
+    private bool HasKids(Location l) => _withChildren.Contains(l.Id);
+
+    private Task<List<ChildItem>> GetKids(Location l) => Prim.GetChildItemsAsync("Location", l.Id);
+
+    public void ClearSelection() => _grid?.ClearSelection();
+}

@@ -1,0 +1,61 @@
+@* Standard containers grid: full column set, expandable child rows, clickable
+   Home/Assignee, breadcrumb Path column. Used by Containers, Dashboard, and Workspaces. *@
+@inject PrimService Prim
+
+<ObjectGrid @ref="_grid" T="Container" Items="Items" Kind="Container" GridId="@GridId" Scope="@Scope"
+            GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
+            GetBarcode="c => c.Barcode"
+            EditItem="EditItem" DeleteItems="DeleteItems"
+            ExportCols="GridColumns.ContainerColumns()" RowToDict="RowWithPath"
+            GetHomeRef="GetHomeRef" GetAssigneeRef="GetAssigneeRef" GetPath="GetPath"
+            Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
+            CanMove="@CanMove" CanDelete="@CanDelete"
+            ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
+            OnChanged="OnChanged" />
+
+@code {
+    private ObjectGrid<Container>? _grid;
+
+    [Parameter] public IEnumerable<Container> Items { get; set; } = Enumerable.Empty<Container>();
+    [Parameter] public string GridId { get; set; } = "containers";
+    [Parameter] public string Scope { get; set; } = "containers";
+    [Parameter] public Func<Container, Task<bool>>? EditItem { get; set; }
+    [Parameter] public Func<List<int>, Task<bool>>? DeleteItems { get; set; }
+    [Parameter] public bool CanMove { get; set; } = true;
+    [Parameter] public bool CanDelete { get; set; } = true;
+    [Parameter] public bool ShowRemoveFromSlot { get; set; }
+    [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private Dictionary<int, List<PathSeg>> _paths = new();
+    private HashSet<int> _withChildren = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var ids = Items.Select(c => c.Id).ToList();
+        _paths = await Prim.GetAncestorPathsAsync("Container", ids);
+        _withChildren = await Prim.GetHasChildrenAsync("Container", ids);
+    }
+
+    private Dictionary<string, string> RowWithPath(Container c)
+    {
+        var d = GridColumns.ContainerRow(c);
+        d["Path"] = _paths.TryGetValue(c.Id, out var segs) ? string.Join(" › ", segs.Select(s => s.Label)) : "";
+        return d;
+    }
+
+    private List<PathSeg> GetPath(Container c) =>
+        _paths.TryGetValue(c.Id, out var segs) ? segs : new() { new("Container", c.Id, c.ContainerName) };
+
+    private (string Kind, int Id)? GetHomeRef(Container c) =>
+        c.HomeKind != null && c.HomeRefId != null ? (c.HomeKind, c.HomeRefId.Value) : null;
+
+    private (string Kind, int Id)? GetAssigneeRef(Container c) =>
+        c.AssigneeKind != null && c.AssigneeRefId != null ? (c.AssigneeKind, c.AssigneeRefId.Value) : null;
+
+    private bool HasKids(Container c) => _withChildren.Contains(c.Id);
+
+    private Task<List<ChildItem>> GetKids(Container c) => Prim.GetChildItemsAsync("Container", c.Id);
+
+    public void ClearSelection() => _grid?.ClearSelection();
+}

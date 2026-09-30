@@ -133,7 +133,7 @@
         AuxiliaryOffice = r.AuxiliaryOffice, IsBulky = r.IsBulky, IsAdmin = r.IsAdmin, IsControlFile = r.IsControlFile,
         Labels = r.Labels, SecurityClassification = r.SecurityClassification, Subject = r.Subject, Notes = r.Notes,
         Home = r.Home, HomeKind = r.HomeKind, HomeRefId = r.HomeRefId,
-        Assignee = r.Assignee, AssigneeKind = r.AssigneeKind,
+        Assignee = r.Assignee, AssigneeKind = r.AssigneeKind, AssigneeRefId = r.AssigneeRefId,
         ParentRecordId = r.ParentRecordId, State = r.State, RowVersion = r.RowVersion
     };
 
@@ -146,6 +146,7 @@
     {
         _model.Assignee = _model.Home;
         _model.AssigneeKind = _model.HomeKind;
+        _model.AssigneeRefId = _model.HomeRefId;
     }
 
     private async Task PickHome()
@@ -167,7 +168,7 @@
         var res = await d.Result;
         if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
         {
-            _model.Assignee = pick.Item3; _model.AssigneeKind = pick.Item1;
+            _model.Assignee = pick.Item3; _model.AssigneeKind = pick.Item1; _model.AssigneeRefId = pick.Item2;
         }
     }
     [Inject] IDialogService DialogService { get; set; } = null!;

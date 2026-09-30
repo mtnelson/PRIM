@@ -1,0 +1,41 @@
+@* Standard users grid: full column set, expandable child rows (records and
+   containers assigned/homed to the user). Used by Users and Workspaces. *@
+@inject PrimService Prim
+
+<ObjectGrid @ref="_grid" T="AppUser" Items="Items" Kind="User" GridId="@GridId" Scope="@Scope"
+            GetInfo="@(u => ("User", u.Id, u.DisplayName))"
+            GetBarcode="@(u => "")"
+            EditItem="EditItem" DeleteItems="DeleteItems"
+            ExportCols="GridColumns.UserColumns()" RowToDict="GridColumns.UserRow"
+            Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
+            CanMove="@CanMove" CanDelete="@CanDelete"
+            ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
+            OnChanged="OnChanged" />
+
+@code {
+    private ObjectGrid<AppUser>? _grid;
+
+    [Parameter] public IEnumerable<AppUser> Items { get; set; } = Enumerable.Empty<AppUser>();
+    [Parameter] public string GridId { get; set; } = "users";
+    [Parameter] public string Scope { get; set; } = "users";
+    [Parameter] public Func<AppUser, Task<bool>>? EditItem { get; set; }
+    [Parameter] public Func<List<int>, Task<bool>>? DeleteItems { get; set; }
+    [Parameter] public bool CanMove { get; set; } = true;
+    [Parameter] public bool CanDelete { get; set; } = true;
+    [Parameter] public bool ShowRemoveFromSlot { get; set; }
+    [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private HashSet<int> _withChildren = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _withChildren = await Prim.GetHasChildrenAsync("User", Items.Select(u => u.Id));
+    }
+
+    private bool HasKids(AppUser u) => _withChildren.Contains(u.Id);
+
+    private Task<List<ChildItem>> GetKids(AppUser u) => Prim.GetChildItemsAsync("User", u.Id);
+
+    public void ClearSelection() => _grid?.ClearSelection();
+}

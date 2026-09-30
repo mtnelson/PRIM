@@ -79,7 +79,7 @@
                 FieldOffice = Model.FieldOffice, ContainerCode = Model.ContainerCode, FormattedNumber = Model.FormattedNumber,
                 Description = Model.Description, Barcode = Model.Barcode, Home = Model.Home, HomeKind = Model.HomeKind,
                 HomeRefId = Model.HomeRefId, Assignee = Model.Assignee, AssigneeKind = Model.AssigneeKind,
-                ParentContainerId = Model.ParentContainerId,
+                AssigneeRefId = Model.AssigneeRefId, ParentContainerId = Model.ParentContainerId,
                 LocationId = Model.LocationId, RowVersion = Model.RowVersion
             };
         if (_model.Id == 0) await GenerateName();
@@ -115,7 +115,7 @@
         var res = await d.Result;
         if (res is { Canceled: false, Data: ValueTuple<string, int, string> pick })
         {
-            _model.Assignee = pick.Item3; _model.AssigneeKind = pick.Item1;
+            _model.Assignee = pick.Item3; _model.AssigneeKind = pick.Item1; _model.AssigneeRefId = pick.Item2;
         }
     }
 

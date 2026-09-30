@@ -7,20 +7,23 @@
     [Parameter] public Func<Task>? OnSave { get; set; }
     [Parameter] public Action? OnCancel { get; set; }
 
+    private readonly List<IDisposable> _regs = new();
+
     protected override void OnInitialized()
     {
         Hotkeys.PushScope("dialog");
         var save = OnSave;
         if (save != null)
-            Hotkeys.Register("dialog", "Ctrl+S", save);
+            _regs.Add(Hotkeys.Register("dialog", "Ctrl+S", save));
         var cancel = OnCancel;
         if (cancel != null)
-            Hotkeys.Register("dialog", "Escape", cancel);
+            _regs.Add(Hotkeys.Register("dialog", "Escape", cancel));
     }
 
     public void Dispose()
     {
-        Hotkeys.UnregisterScope("dialog");
+        foreach (var r in _regs) r.Dispose();
+        _regs.Clear();
         Hotkeys.PopScope();
     }
 }

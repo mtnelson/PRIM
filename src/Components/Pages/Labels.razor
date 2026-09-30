@@ -1,0 +1,166 @@
+@* Labels: named collections of objects. Create/manage labels here; click a
+   label (here or a chip in any data grid) to see every item that has it. *@
+@page "/labels"
+@page "/labels/{LabelId:int}"
+@inject PrimService Prim
+@inject AppState App
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+
+<PageTitle>PRIM — Labels</PageTitle>
+
+@if (LabelId == null)
+{
+    <div class="d-flex align-center mb-3">
+        <MudText Typo="Typo.h5">Labels</MudText>
+        <MudSpacer />
+        <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…" Margin="Margin.Dense"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Style="max-width:220px" Class="mr-2" Immediate="true" />
+        <MudTextField T="string" @bind-Value="_newName" Placeholder="New label name…" Margin="Margin.Dense"
+                      Style="max-width:220px" Class="mr-2" OnKeyDown="NewLabelKey" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateLabel"
+                   Disabled="@string.IsNullOrWhiteSpace(_newName)">Create</MudButton>
+    </div>
+    <MudTable Items="Filtered" Hover="true" Dense="true">
+        <HeaderContent>
+            <MudTh>Label</MudTh>
+            <MudTh>Items</MudTh>
+            <MudTh>Created By</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><MudLink Typo="Typo.body2" OnClick="@(() => Nav.NavigateTo($"/labels/{context.Id}"))">@context.Name</MudLink></MudTd>
+            <MudTd>@(_counts.TryGetValue(context.Id, out var c) ? c : 0)</MudTd>
+            <MudTd>@context.CreatedBy</MudTd>
+            <MudTd Style="text-align:right">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Rename"
+                               OnClick="@(() => Rename(context))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" title="Delete"
+                               OnClick="@(() => Delete(context))" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+else if (_label == null)
+{
+    <MudAlert Severity="Severity.Warning" Class="mt-4">Label not found.</MudAlert>
+    <MudButton Variant="Variant.Text" Class="mt-2" OnClick="@(() => Nav.NavigateTo("/labels"))">Back to Labels</MudButton>
+}
+else
+{
+    <div class="d-flex align-center mb-3">
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="@(() => Nav.NavigateTo("/labels"))">Labels</MudButton>
+        <MudText Typo="Typo.h5" Class="ml-2">Label: @_label.Name</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Edit" title="Rename" OnClick="@(() => Rename(_label))" />
+        <MudIconButton Icon="@Icons.Material.Filled.Delete" title="Delete" OnClick="@(() => Delete(_label))" />
+    </div>
+    @if (_members.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info">No items have this label yet. Add labels from any record, container, location, or user.</MudAlert>
+    }
+    @foreach (var g in _members.GroupBy(m => m.Kind))
+    {
+        <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">@g.Key (@g.Count())</MudText>
+        <MudTable Items="g.ToList()" Hover="true" Dense="true">
+            <RowTemplate>
+                <MudTd><MudLink Typo="Typo.body2" OnClick="@(() => GoTo(context.Kind, context.Id))">@context.Label</MudLink></MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+}
+
+@code {
+    [Parameter] public int? LabelId { get; set; }
+
+    private List<Label> _labels = new();
+    private Dictionary<int, int> _counts = new();
+    private string _filter = "";
+    private string _newName = "";
+    private Label? _label;
+    private List<(string Kind, int Id, string Label)> _members = new();
+
+    private IEnumerable<Label> Filtered => string.IsNullOrWhiteSpace(_filter) ? _labels
+        : _labels.Where(l => l.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnParametersSetAsync() => await Load();
+
+    private async Task Load()
+    {
+        if (LabelId == null)
+        {
+            _labels = await Prim.GetLabelsAsync();
+            _counts = await Prim.GetLabelCountsAsync();
+        }
+        else
+        {
+            _label = await Prim.GetLabelAsync(LabelId.Value);
+            _members = _label == null ? new() : await Prim.GetLabelMembersAsync(LabelId.Value);
+        }
+    }
+
+    private async Task NewLabelKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CreateLabel();
+    }
+
+    private async Task CreateLabel()
+    {
+        var name = _newName.Trim();
+        if (name.Length == 0) return;
+        try
+        {
+            var label = await Prim.GetOrCreateLabelAsync(name, App.CurrentUserId);
+            App.Log("Created label", label.Name);
+            _newName = "";
+            await Load();
+            Snackbar.Add($"Label '{label.Name}' created.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Rename(Label label)
+    {
+        var p = new DialogParameters { ["Title"] = "Rename Label", ["Label"] = "New name", ["Value"] = label.Name };
+        var d = await DialogService.ShowAsync<TextInputDialog>("Rename Label", p,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: string newName })
+        {
+            try
+            {
+                await Prim.RenameLabelAsync(label.Id, newName, App.CurrentUserId);
+                App.Log("Renamed label", $"{label.Name} → {newName.Trim()}");
+                await Load();
+                Snackbar.Add("Label renamed.", Severity.Success);
+            }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        }
+    }
+
+    private async Task Delete(Label label)
+    {
+        bool? ok = await DialogService.ShowMessageBox("Delete label?",
+            $"Delete the label '{label.Name}'? It will be removed from all items. This cannot be undone.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        await Prim.DeleteLabelAsync(label.Id, App.CurrentUserId);
+        App.Log("Deleted label", label.Name);
+        Snackbar.Add("Label deleted.", Severity.Success);
+        if (LabelId != null) Nav.NavigateTo("/labels");
+        else await Load();
+    }
+
+    private void GoTo(string kind, int id)
+    {
+        App.RequestFocus(kind, id, false);
+        Nav.NavigateTo(kind switch
+        {
+            "Record" => "/records", "Container" => "/containers",
+            "Location" => "/locations", "User" => "/users", _ => "/"
+        });
+    }
+}

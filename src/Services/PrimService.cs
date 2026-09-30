@@ -7,8 +7,10 @@ namespace Prim.Services;
 /// <summary>One breadcrumb segment in an object's ancestor path (root first).</summary>
 public record PathSeg(string Kind, int Id, string Label);
 
-/// <summary>One child row rendered under an expanded grid row.</summary>
-public record ChildItem(string Kind, int Id, string Label, string Detail, bool HasChildren);
+/// <summary>One child row rendered under an expanded grid row. Cells/Columns carry
+/// the child's full grid column set so expanded rows show every column.</summary>
+public record ChildItem(string Kind, int Id, string Label, string Detail, bool HasChildren,
+    Dictionary<string, string>? Cells = null, List<(string Key, string Label)>? Columns = null);
 
 /// <summary>CRUD + audit + search over the four PRIM object types.</summary>
 public class PrimService
@@ -633,7 +635,7 @@ public class PrimService
                 .OrderBy(r => r.RecordNumber).ToListAsync();
             var withKids = await GetHasChildrenAsync("Record", kids.Select(r => r.Id));
             items.AddRange(kids.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
-                $"Record · {r.RecordType} · {r.Barcode}", withKids.Contains(r.Id))));
+                $"Record · {r.RecordType} · {r.Barcode}", withKids.Contains(r.Id), GridColumns.RecordRow(r), GridColumns.RecordColumns())));
             return items;
         }
         if (kind == "Container")
@@ -646,9 +648,9 @@ public class PrimService
             var withKidsR = await GetHasChildrenAsync("Record", recs.Select(r => r.Id));
             var withKidsC = await GetHasChildrenAsync("Container", conts.Select(c => c.Id));
             items.AddRange(recs.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
-                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id))));
+                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id), GridColumns.RecordRow(r), GridColumns.RecordColumns())));
             items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
-                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id))));
+                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id), GridColumns.ContainerRow(c), GridColumns.ContainerColumns())));
             return items;
         }
         if (kind == "Location")
@@ -663,11 +665,11 @@ public class PrimService
             var withKidsC = await GetHasChildrenAsync("Container", conts.Select(c => c.Id));
             var withKidsL = await GetHasChildrenAsync("Location", locs.Select(l => l.Id));
             items.AddRange(recs.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
-                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id))));
+                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id), GridColumns.RecordRow(r), GridColumns.RecordColumns())));
             items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
-                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id))));
+                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id), GridColumns.ContainerRow(c), GridColumns.ContainerColumns())));
             items.AddRange(locs.Select(l => new ChildItem("Location", l.Id, l.LocationName,
-                $"Location · {l.LocationType}", withKidsL.Contains(l.Id))));
+                $"Location · {l.LocationType}", withKidsL.Contains(l.Id), GridColumns.LocationRow(l), GridColumns.LocationColumns())));
             return items;
         }
         if (kind == "User")
@@ -679,9 +681,9 @@ public class PrimService
             var withKidsR = await GetHasChildrenAsync("Record", recs.Select(r => r.Id));
             var withKidsC = await GetHasChildrenAsync("Container", conts.Select(c => c.Id));
             items.AddRange(recs.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
-                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id))));
+                $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id), GridColumns.RecordRow(r), GridColumns.RecordColumns())));
             items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
-                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id))));
+                $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id), GridColumns.ContainerRow(c), GridColumns.ContainerColumns())));
             return items;
         }
         return items;

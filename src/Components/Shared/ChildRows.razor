@@ -1,5 +1,7 @@
 @* Child rows rendered under an expanded grid row: the items inside a
-   compressed record, container, location, or user's holdings. *@
+   compressed record, container, location, or user's holdings. Each child is
+   shown with every grid column of its kind (grouped when an expansion mixes
+   kinds), and the label cell navigates to the child. *@
 @if (_loading)
 {
     <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ma-2" />
@@ -10,33 +12,56 @@ else if (_kids.Count == 0)
 }
 else
 {
-    <div class="pa-2 pl-10">
-        <MudSimpleTable Dense="true" Hover="true" Style="background:transparent">
-            <tbody>
-                @foreach (var k in _kids)
-                {
-                    var kid = k;
+    <div class="pa-2 pl-10" style="overflow-x:auto">
+        @foreach (var g in _kids.GroupBy(k => k.Kind))
+        {
+            var group = g.ToList();
+            var cols = group[0].Columns ?? new List<(string Key, string Label)>();
+            <MudText Typo="Typo.caption" Class="mb-1" Style="opacity:.6">@(g.Key)s (@group.Count)</MudText>
+            <MudSimpleTable Dense="true" Hover="true" Class="mb-3" Style="background:transparent">
+                <thead>
                     <tr>
-                        <td style="width:30px">
-                            <MudIcon Icon="@IconFor(kid.Kind)" Size="Size.Small" Style="opacity:.7" />
-                        </td>
-                        <td>
-                            <MudLink Typo="Typo.body2" OnClick="@(() => OnNavigate.InvokeAsync(kid))">@kid.Label</MudLink>
-                            @if (kid.HasChildren)
-                            {
-                                <MudTooltip Text="Open with contents">
-                                    <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
-                                                   OnClick="@(() => OnNavigate.InvokeAsync(kid))" />
-                                </MudTooltip>
-                            }
-                        </td>
-                        <td>
-                            <MudText Typo="Typo.caption" Style="opacity:.65">@kid.Detail</MudText>
-                        </td>
+                        <th style="width:30px"></th>
+                        @foreach (var c in cols)
+                        {
+                            <th>@c.Label</th>
+                        }
                     </tr>
-                }
-            </tbody>
-        </MudSimpleTable>
+                </thead>
+                <tbody>
+                    @foreach (var k in group)
+                    {
+                        var kid = k;
+                        <tr>
+                            <td>
+                                <MudIcon Icon="@IconFor(kid.Kind)" Size="Size.Small" Style="opacity:.7" />
+                            </td>
+                            @for (var i = 0; i < cols.Count; i++)
+                            {
+                                var val = kid.Cells?.GetValueOrDefault(cols[i].Key, "") ?? "";
+                                @if (i == 0)
+                                {
+                                    <td>
+                                        <MudLink Typo="Typo.body2" OnClick="@(() => OnNavigate.InvokeAsync(kid))">@val</MudLink>
+                                        @if (kid.HasChildren)
+                                        {
+                                            <MudTooltip Text="Open with contents">
+                                                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
+                                                               OnClick="@(() => OnNavigate.InvokeAsync(kid))" />
+                                            </MudTooltip>
+                                        }
+                                    </td>
+                                }
+                                else
+                                {
+                                    <td>@val</td>
+                                }
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
     </div>
 }
 

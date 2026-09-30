@@ -9,7 +9,9 @@
 <MudText Typo="Typo.h5" Class="mb-3">Workspaces</MudText>
 <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:0.7">
     Five personal workspaces plus Favorites (TIS-1411). Items are stored per user.
-    Right-click a row for actions — removing an item from a workspace never deletes the item itself.
+    Each section below is the same full data grid as its main screen — expand rows,
+    click Home/Assignee or Path breadcrumbs to navigate. Right-click a row for actions —
+    removing an item from a workspace never deletes the item itself.
 </MudText>
 
 <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2" @bind-ActivePanelIndex="_tab">
@@ -18,9 +20,13 @@
         var s = slot;
         <MudTabPanel Text="@s">
             @{
-                var items = _items.GetValueOrDefault(s, new List<WorkspaceItem>());
+                var g = _groups.GetValueOrDefault(s, Empty);
+                Func<List<int>, Task> rmRec = ids => RemoveSelected(s, "Record", ids);
+                Func<List<int>, Task> rmCont = ids => RemoveSelected(s, "Container", ids);
+                Func<List<int>, Task> rmLoc = ids => RemoveSelected(s, "Location", ids);
+                Func<List<int>, Task> rmUser = ids => RemoveSelected(s, "User", ids);
             }
-            @if (items.Count == 0)
+            @if (g.IsEmpty)
             {
                 <MudText Typo="Typo.caption" Class="pa-4" Style="opacity:0.7">
                     Empty. Right-click items on other screens and choose Add to Workspace.
@@ -28,13 +34,38 @@
             }
             else
             {
-                <ObjectGrid T="WorkspaceItem" Kind="@s" GridId="@GridIdFor(s)" Scope="workspaces" Items="items"
-                            GetInfo="@(w => (w.ObjectKind, w.ObjectId, w.Label))"
-                            GetBarcode="@(w => "")"
-                            ExportCols="GridColumns.WorkspaceColumns()" RowToDict="GridColumns.WorkspaceRow"
-                            CanMove="false" CanDelete="false" ShowRemoveFromSlot="true"
-                            RemoveFromSlot="(ids => RemoveSelected(s, ids))"
-                            OnChanged="Load" />
+                @if (g.Records.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Records (@g.Records.Count)</MudText>
+                    <RecordGrid Items="g.Records" GridId="@GridIdFor(s, "record")" Scope="workspaces"
+                                CanMove="false" CanDelete="false" ShowRemoveFromSlot="true"
+                                RemoveFromSlot="rmRec"
+                                OnChanged="Load" />
+                }
+                @if (g.Containers.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Containers (@g.Containers.Count)</MudText>
+                    <ContainerGrid Items="g.Containers" GridId="@GridIdFor(s, "container")" Scope="workspaces"
+                                   CanMove="false" CanDelete="false" ShowRemoveFromSlot="true"
+                                   RemoveFromSlot="rmCont"
+                                   OnChanged="Load" />
+                }
+                @if (g.Locations.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Locations (@g.Locations.Count)</MudText>
+                    <LocationGrid Items="g.Locations" GridId="@GridIdFor(s, "location")" Scope="workspaces"
+                                  CanMove="false" CanDelete="false" ShowRemoveFromSlot="true"
+                                  RemoveFromSlot="rmLoc"
+                                  OnChanged="Load" />
+                }
+                @if (g.Users.Count > 0)
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Users (@g.Users.Count)</MudText>
+                    <UserGrid Items="g.Users" GridId="@GridIdFor(s, "user")" Scope="workspaces"
+                              CanMove="false" CanDelete="false" ShowRemoveFromSlot="true"
+                              RemoveFromSlot="rmUser"
+                              OnChanged="Load" />
+                }
             }
         </MudTabPanel>
     }
@@ -44,10 +75,19 @@
     private static readonly string[] Slots =
         { "Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4", "Workspace 5", "Favorites" };
 
-    private Dictionary<string, List<WorkspaceItem>> _items = new();
+    private record SlotGroups(List<RecordItem> Records, List<Container> Containers,
+        List<Location> Locations, List<AppUser> Users)
+    {
+        public bool IsEmpty => Records.Count == 0 && Containers.Count == 0
+            && Locations.Count == 0 && Users.Count == 0;
+    }
+
+    private static readonly SlotGroups Empty = new(new(), new(), new(), new());
+    private Dictionary<string, SlotGroups> _groups = new();
     private int _tab;
 
-    private static string GridIdFor(string slot) => "ws-" + slot.ToLowerInvariant().Replace(" ", "-");
+    private static string GridIdFor(string slot, string kind) =>
+        "ws-" + slot.ToLowerInvariant().Replace(" ", "-") + "-" + kind;
 
     protected override async Task OnInitializedAsync()
     {
@@ -62,20 +102,27 @@
 
     private async Task Load()
     {
+        var next = new Dictionary<string, SlotGroups>();
         foreach (var s in Slots)
-            _items[s] = await Prim.GetSlotAsync(App.CurrentUserId, s);
+        {
+            var items = await Prim.GetSlotAsync(App.CurrentUserId, s);
+            next[s] = new SlotGroups(
+                await Prim.GetRecordsByIdsAsync(items.Where(w => w.ObjectKind == "Record").Select(w => w.ObjectId)),
+                await Prim.GetContainersByIdsAsync(items.Where(w => w.ObjectKind == "Container").Select(w => w.ObjectId)),
+                await Prim.GetLocationsByIdsAsync(items.Where(w => w.ObjectKind == "Location").Select(w => w.ObjectId)),
+                await Prim.GetUsersByIdsAsync(items.Where(w => w.ObjectKind == "User").Select(w => w.ObjectId)));
+        }
+        _groups = next;
         StateHasChanged();
     }
 
-    // Delete on the workspace grid removes the selected item(s) from the slot,
+    // Delete on a workspace grid removes the selected item(s) from the slot,
     // never the underlying object.
-    private async Task RemoveSelected(string slot, List<int> ids)
+    private async Task RemoveSelected(string slot, string kind, List<int> ids)
     {
-        var items = _items.GetValueOrDefault(slot, new List<WorkspaceItem>());
-        var byId = items.Where(w => ids.Contains(w.ObjectId)).ToList();
-        foreach (var w in byId)
-            await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, w.ObjectKind, w.ObjectId);
-        App.Log("Removed from " + slot, $"{byId.Count} item(s)");
+        foreach (var id in ids)
+            await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, kind, id);
+        App.Log("Removed from " + slot, $"{ids.Count} item(s)");
         await Load();
     }
 }

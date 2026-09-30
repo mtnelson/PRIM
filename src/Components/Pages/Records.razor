@@ -19,34 +19,15 @@
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewRecord">New Record (Ctrl+N)</MudButton>
 </div>
 
-@if (_compressedRoots.Count > 0)
-{
-    <MudExpansionPanel Text="@($"Compressed record contents ({_compressedChildCount} child record(s))")" Dense="true" Class="mb-2">
-        <MudTreeView T="RecordItem" Items="_compressedRoots" Dense="true" Hover="true" ExpandOnClick="true"
-                     Style="max-height:240px;overflow-y:auto">
-            <ItemTemplate>
-                <MudTreeViewItem T="RecordItem" Value="@context.Value" Items="@context.Children"
-                                 Text="@context.Value!.RecordNumber" EndText="@(context.Value.RecordType)"
-                                 OnClick="() => SelectFromTree(context.Value)" />
-            </ItemTemplate>
-        </MudTreeView>
-    </MudExpansionPanel>
-}
-
-<ObjectGrid @ref="_grid" Items="Filtered" Kind="Record" GridId="records" Scope="records"
-            GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
-            GetBarcode="r => r.Barcode"
+<RecordGrid @ref="_grid" Items="Filtered" GridId="records" Scope="records"
             EditItem="EditRecord" DeleteItems="DeleteRecords"
-            ExportCols="GridColumns.RecordColumns()" RowToDict="GridColumns.RecordRow"
             OnChanged="Load">
-</ObjectGrid>
+</RecordGrid>
 
 @code {
-    private ObjectGrid<RecordItem>? _grid;
+    private RecordGrid? _grid;
     private List<RecordItem> _items = new();
     private string _filter = "";
-    private List<TreeItemData<RecordItem>> _compressedRoots = new();
-    private int _compressedChildCount;
 
     private IEnumerable<RecordItem> Filtered => string.IsNullOrWhiteSpace(_filter) ? _items
         : _items.Where(r =>
@@ -71,29 +52,9 @@
     private async Task Load()
     {
         _items = await Prim.GetRecordsAsync(includeDeleted: false);
-        BuildCompressedTree();
         _grid?.ClearSelection();
         StateHasChanged();
     }
-
-    private void BuildCompressedTree()
-    {
-        var byParent = _items.Where(r => r.ParentRecordId != null)
-            .GroupBy(r => r.ParentRecordId!.Value)
-            .ToDictionary(g => g.Key, g => g.ToList());
-        TreeItemData<RecordItem> Build(RecordItem r) => new()
-        {
-            Value = r,
-            Children = byParent.TryGetValue(r.Id, out var kids)
-                ? kids.Select(Build).ToList() : new()
-        };
-        _compressedRoots = _items
-            .Where(r => r.RecordType == "Compressed" && byParent.ContainsKey(r.Id))
-            .Select(Build).ToList();
-        _compressedChildCount = byParent.Values.Sum(k => k.Count);
-    }
-
-    private void SelectFromTree(RecordItem r) => App.SetViewPane("Record", r.Id, r.RecordNumber);
 
     private async Task NewRecord()
     {

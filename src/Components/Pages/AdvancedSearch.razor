@@ -46,13 +46,10 @@
 @if (_searched)
 {
     <MudText Typo="Typo.subtitle1" Class="mb-2">@_resultsTitle</MudText>
-    <ObjectGrid @ref="_grid" Items="_records" Kind="Record" GridId="advanced" Scope="advanced"
-                GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
-                GetBarcode="r => r.Barcode"
+    <RecordGrid @ref="_grid" Items="_records" GridId="advanced" Scope="advanced"
                 EditItem="EditRecord" DeleteItems="DeleteRecords"
-                ExportCols="GridColumns.RecordColumns()" RowToDict="GridColumns.RecordRow"
                 OnChanged="RunSearch">
-    </ObjectGrid>
+    </RecordGrid>
 }
 
 @code {
@@ -76,7 +73,7 @@
     private bool _searched = false;
     private string _resultsTitle = "";
     private List<RecordItem> _records = new();
-    private ObjectGrid<RecordItem>? _grid;
+    private RecordGrid? _grid;
 
     private List<(string Key, string Label)> _advFields = new()
     {

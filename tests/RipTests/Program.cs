@@ -175,7 +175,7 @@ Check(!dupUr.Ok && dupUr.Error != null && dupUr.Error.Contains("already exists")
 
 // ---- move items ----
 var mvRec = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000005");
-var mvN = await svc.MoveItemsAsync("Record", new[] { mvRec.Id }, "FREEZER A", "Location", null, "recordsmgr01", "User", false, "harness");
+var mvN = await svc.MoveItemsAsync("Record", new[] { mvRec.Id }, "FREEZER A", "Location", null, "recordsmgr01", "User", null, false, "harness");
 var mvAfter = await svc.GetRecordAsync(mvRec.Id);
 Check(mvN == 1 && mvAfter!.Home == "FREEZER A" && mvAfter.Assignee == "recordsmgr01" && mvAfter.AssigneeKind == "User", "move items home+assignee");
 var mvAudit = await svc.GetAuditAsync("Record", mvRec.Id);
@@ -285,6 +285,120 @@ await svc.SaveGridLayoutAsync("mtnelson", "records", new List<string> { "RecordN
 var layout2 = await svc.GetGridLayoutAsync("mtnelson", "records");
 Check(layout2 != null && layout2.SequenceEqual(new[] { "RecordNumber" }), "grid layout update");
 Check(await svc.GetGridLayoutAsync("mtnelson", "no-such-grid") == null, "missing grid layout is null");
+
+// ---- hierarchy: ref-id backfill on seed data ----
+var recMgrUser = (await svc.GetUsersAsync()).First(u => u.UserId == "recordsmgr01");
+var mtUser = (await svc.GetUsersAsync()).First(u => u.UserId == "mtnelson");
+var seedR1 = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000001");
+Check(seedR1.AssigneeRefId == recMgrUser.Id, "seed record assignee backfilled to user ref", seedR1.AssigneeRefId?.ToString());
+var seedR4 = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000004");
+Check(seedR4.HomeRefId == recMgrUser.Id && seedR4.HomeKind == "User", "seed user-home backfilled to ref id", seedR4.HomeRefId?.ToString());
+var seedBox = (await svc.GetContainersAsync()).First(c => c.Barcode == "CON000001");
+Check(seedBox.AssigneeRefId == recMgrUser.Id && seedBox.HomeRefId != null, "seed container assignee/home refs backfilled");
+
+// ---- record/container create resolves assignee name to ref id ----
+var refRec = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "REFASSIGN1", Volume = "1", Subject = "ref test", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
+Check((await svc.SaveRecordAsync(refRec, "harness")).Ok, "ref record create ok");
+Check(refRec.AssigneeRefId == mtUser.Id, "record save resolves assignee name to ref id", refRec.AssigneeRefId?.ToString());
+var refCont = new Container { ContainerName = "REFASSIGN-BOX", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "TEST", FormattedNumber = "030", Home = "SHELF 1", HomeKind = "Location", Assignee = "recordsmgr01", AssigneeKind = "User" };
+Check((await svc.SaveContainerAsync(refCont, "harness")).Ok, "ref container create ok");
+Check(refCont.AssigneeRefId == recMgrUser.Id, "container save resolves assignee name to ref id", refCont.AssigneeRefId?.ToString());
+
+// ---- MoveItemsAsync: explicit assignee ref id + assignee-follows-home ----
+var mvT = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "MVREF1", Volume = "1", Subject = "move ref test", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
+Check((await svc.SaveRecordAsync(mvT, "harness")).Ok, "move-ref record create ok");
+await svc.MoveItemsAsync("Record", new[] { mvT.Id }, null, null, null, "recordsmgr01", "User", recMgrUser.Id, false, "harness");
+var mvT2 = await svc.GetRecordAsync(mvT.Id);
+Check(mvT2!.AssigneeRefId == recMgrUser.Id && mvT2.Assignee == "recordsmgr01", "move sets explicit assignee ref id", mvT2.AssigneeRefId?.ToString());
+var shelfLoc = (await svc.GetLocationsAsync()).First(l => l.LocationName == "SHELF 1");
+await svc.MoveItemsAsync("Record", new[] { mvT.Id }, "SHELF 1", "Location", shelfLoc.Id, null, null, null, true, "harness");
+var mvT3 = await svc.GetRecordAsync(mvT.Id);
+Check(mvT3!.AssigneeRefId == shelfLoc.Id && mvT3.AssigneeKind == "Location" && mvT3.Assignee == "SHELF 1",
+    "assignee-follows-home copies home ref id", mvT3.AssigneeRefId?.ToString());
+var mvC = new Container { ContainerName = "MOVEREF-BOX", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "TEST", FormattedNumber = "031", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User" };
+Check((await svc.SaveContainerAsync(mvC, "harness")).Ok, "move-ref container create ok");
+await svc.MoveItemsAsync("Container", new[] { mvC.Id }, null, null, null, "recordsmgr01", "User", recMgrUser.Id, false, "harness");
+var mvC2 = (await svc.GetContainersAsync()).First(c => c.Id == mvC.Id);
+Check(mvC2.AssigneeRefId == recMgrUser.Id, "container move sets assignee ref id", mvC2.AssigneeRefId?.ToString());
+
+// ---- GetHasChildrenAsync across the four kinds ----
+var hasKids = await svc.GetHasChildrenAsync("Record", new[] { parent.Id, nonCompressed.Id });
+Check(hasKids.Contains(parent.Id) && !hasKids.Contains(nonCompressed.Id), "record has-children: compressed parent true, plain false");
+var hasKidsC = await svc.GetHasChildrenAsync("Container", new[] { seedBox.Id, mvC.Id });
+Check(hasKidsC.Contains(seedBox.Id) && !hasKidsC.Contains(mvC.Id), "container has-children: box true, empty box false");
+var hasKidsL = await svc.GetHasChildrenAsync("Location", new[] { shelfLoc.Id });
+Check(hasKidsL.Contains(shelfLoc.Id), "location has-children: shelf true");
+var htestUser = (await svc.GetUsersAsync()).First(u => u.UserId == "htest");
+var hasKidsU = await svc.GetHasChildrenAsync("User", new[] { recMgrUser.Id, htestUser.Id });
+Check(hasKidsU.Contains(recMgrUser.Id) && !hasKidsU.Contains(htestUser.Id), "user has-children: recordsmgr01 true, htest false");
+
+// ---- GetChildItemsAsync ----
+var kidsOfParent = await svc.GetChildItemsAsync("Record", parent.Id);
+Check(kidsOfParent.Count == 1 && kidsOfParent[0].Kind == "Record" && kidsOfParent[0].Id == child.Id
+      && kidsOfParent[0].Label == child.RecordNumber && !kidsOfParent[0].HasChildren,
+    "child items of compressed record", string.Join(",", kidsOfParent.Select(k => k.Label)));
+var kidsOfBox = await svc.GetChildItemsAsync("Container", seedBox.Id);
+Check(kidsOfBox.Any(k => k.Kind == "Record" && k.Label == "R-000001")
+      && kidsOfBox.Any(k => k.Kind == "Record" && k.Label == "R-000003"),
+    "child items of container include homed records", string.Join(",", kidsOfBox.Select(k => k.Label)));
+var subShelf = new Location { LocationName = "Shelf 1-A", LocationType = "Shelf", ParentId = shelfLoc.Id };
+Check((await svc.SaveLocationAsync(subShelf, "harness")).Ok, "child location under shelf");
+var kidsOfShelf = await svc.GetChildItemsAsync("Location", shelfLoc.Id);Check(kidsOfShelf.Any(k => k.Kind == "Container" && k.Label == "HQ-SHIP-LD263S")
+      && kidsOfShelf.Any(k => k.Kind == "Location"),
+    "child items of location include containers and child locations", string.Join(",", kidsOfShelf.Select(k => k.Kind + ":" + k.Label)));
+var kidsOfMgr = await svc.GetChildItemsAsync("User", recMgrUser.Id);
+Check(kidsOfMgr.Any(k => k.Kind == "Record" && k.Label == "R-000004"),
+    "child items of user include homed records", string.Join(",", kidsOfMgr.Select(k => k.Label)));
+
+// ---- GetAncestorPathsAsync: full chain + cycle guard ----
+var paths = await svc.GetAncestorPathsAsync("Record", new[] { seedR1.Id });
+var p1 = paths[seedR1.Id];
+Check(p1.Count == 7 && p1.First().Label == "BLDG CRC" && p1.Last().Label == "R-000001"
+      && p1.Select(s => s.Kind).SequenceEqual(new[] { "Location", "Location", "Location", "Location", "Location", "Container", "Record" }),
+    "ancestor path R-000001 -> building ... box -> record",
+    string.Join(" > ", p1.Select(s => s.Label)));
+var childPath = (await svc.GetAncestorPathsAsync("Record", new[] { child.Id }))[child.Id];
+Check(childPath.Count >= 4 && childPath[^1].Id == child.Id
+      && childPath[^2].Id == parent.Id && childPath[^2].Kind == "Record"
+      && childPath[^3].Label == "SHELF 1",
+    "ancestor path of compressed child ends [.., SHELF 1, parent, child]",
+    string.Join(" > ", childPath.Select(s => s.Label)));
+// cycle guard: force a parent/child cycle directly in the db, path must terminate
+using (var cdb = factory.CreateDbContext())
+{
+    var pRow = cdb.Records.First(r => r.Id == parent.Id);
+    pRow.ParentRecordId = child.Id; cdb.SaveChanges();
+}
+var cycPath = (await svc.GetAncestorPathsAsync("Record", new[] { child.Id }))[child.Id];
+Check(cycPath.Count <= 50 && cycPath.Count >= 2, "ancestor path terminates on cycle", cycPath.Count.ToString());
+using (var cdb = factory.CreateDbContext())
+{
+    var pRow = cdb.Records.First(r => r.Id == parent.Id);
+    pRow.ParentRecordId = null; cdb.SaveChanges();
+}
+
+// ---- GetByIdsAsync round-trips (workspace resolution) ----
+Check((await svc.GetRecordsByIdsAsync(new[] { seedR1.Id, 999999 })).Count == 1, "GetRecordsByIdsAsync round-trip");
+Check((await svc.GetContainersByIdsAsync(new[] { seedBox.Id })).Count == 1, "GetContainersByIdsAsync round-trip");
+Check((await svc.GetLocationsByIdsAsync(new[] { shelfLoc.Id })).Count == 1, "GetLocationsByIdsAsync round-trip");
+Check((await svc.GetUsersByIdsAsync(new[] { recMgrUser.Id })).Count == 1, "GetUsersByIdsAsync round-trip");
+Check(await svc.GetObjectLabelAsync("Record", seedR1.Id) == "R-000001", "GetObjectLabelAsync record");
+Check(await svc.GetObjectLabelAsync("Bogus", 1) == "", "GetObjectLabelAsync unknown kind");
+
+// ---- HotkeyManager: stacked handlers per (scope, combo) ----
+{
+    var hm = new HotkeyManager();
+    hm.PushScope("workspaces");
+    int fired = 0;
+    var regA = hm.Register("workspaces", "Ctrl+C", () => fired = 1);
+    var regB = hm.Register("workspaces", "Ctrl+C", () => fired = 2);
+    Check(await hm.Handle("Ctrl+C") && fired == 2, "hotkey last-registered wins");
+    regB.Dispose(); // disposing one grid must not kill its sibling's handler
+    Check(await hm.Handle("Ctrl+C") && fired == 1, "hotkey sibling survives dispose");
+    regA.Dispose();
+    Check(!await hm.Handle("Ctrl+C"), "hotkey silent when no handlers remain");
+    hm.PopScope();
+}
 
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }

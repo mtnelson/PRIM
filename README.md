@@ -12,8 +12,8 @@ packaging docs (`SMOKE-TEST.md`, `Start PRIM.bat`).
 No installs needed — the portable package is self-contained (no .NET SDK,
 no network dependencies).
 
-1. **Download** the portable zip (53 MB):
-   <https://muse.ai/files/588249304382024/2152147542180674/llrykgedrkgjvb4or3qosg1m/PRIM-portable-win-x64.zip>
+1. **Download** the portable zip (51 MB):
+   <https://muse.ai/files/588249304382024/2975730562766297/w44jc8fghzviy9o29ws6e22u/PRIM-portable-win-x64.zip> (link expires 2026-10-02)
 2. **Unzip** to any folder, e.g. `C:\PRIM\` (avoid `C:\Program Files\` unless
    running as administrator — the app writes its database next to the exe).
 3. **Double-click `Start PRIM.bat`**. Your browser opens to

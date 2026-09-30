@@ -62,41 +62,32 @@
 
     @if (_objectType == "Record")
     {
-        <ObjectGrid @ref="_recordGrid" Items="_records" Kind="Record" GridId="dashboard-records" Scope="dashboard"
-                    GetInfo="@(r => ("Record", r.Id, r.RecordNumber))"
-                    GetBarcode="r => r.Barcode"
+        <RecordGrid @ref="_recordGrid" Items="_records" GridId="dashboard-records" Scope="dashboard"
                     EditItem="EditRecord" DeleteItems="DeleteRecords"
-                    ExportCols="GridColumns.RecordColumns()" RowToDict="GridColumns.RecordRow"
                     OnChanged="RunSearch">
-        </ObjectGrid>
+        </RecordGrid>
     }
     else if (_objectType == "Container")
     {
-        <ObjectGrid @ref="_containerGrid" Items="_containers" Kind="Container" GridId="dashboard-containers" Scope="dashboard"
-                    GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
-                    GetBarcode="c => c.Barcode"
-                    EditItem="EditContainer" DeleteItems="DeleteContainers"
-                    ExportCols="GridColumns.ContainerColumns()" RowToDict="GridColumns.ContainerRow"
-                    OnChanged="RunSearch">
-        </ObjectGrid>
+        <ContainerGrid @ref="_containerGrid" Items="_containers" GridId="dashboard-containers" Scope="dashboard"
+                       EditItem="EditContainer" DeleteItems="DeleteContainers"
+                       OnChanged="RunSearch">
+        </ContainerGrid>
     }
     else
     {
-        <ObjectGrid @ref="_locationGrid" Items="_locations" Kind="Location" GridId="dashboard-locations" Scope="dashboard"
-                    GetInfo="@(l => ("Location", l.Id, l.LocationName))"
-                    GetBarcode="l => l.Barcode"
-                    EditItem="EditLocation"
-                    ExportCols="GridColumns.LocationColumns()" RowToDict="GridColumns.LocationRow"
-                    CanMove="false" CanDelete="false"
-                    OnChanged="RunSearch">
-        </ObjectGrid>
+        <LocationGrid @ref="_locationGrid" Items="_locations" GridId="dashboard-locations" Scope="dashboard"
+                      EditItem="EditLocation"
+                      CanMove="false" CanDelete="false"
+                      OnChanged="RunSearch">
+        </LocationGrid>
     }
 }
 
 @code {
-    private ObjectGrid<RecordItem>? _recordGrid;
-    private ObjectGrid<Container>? _containerGrid;
-    private ObjectGrid<Location>? _locationGrid;
+    private RecordGrid? _recordGrid;
+    private ContainerGrid? _containerGrid;
+    private LocationGrid? _locationGrid;
 
     private string _objectType = "Record";
     private List<(string Key, string Label)> _fields = new();

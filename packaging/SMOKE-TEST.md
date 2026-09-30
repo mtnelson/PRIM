@@ -47,6 +47,24 @@ Click each shortcut; each page renders its grid/content with no error:
       (record-type change requires Records Manager permission and
       confirmation). Confirm and verify the audit trail shows the change.
 
+## 3b. Hierarchy, links, and breadcrumb paths
+
+- [ ] In the Records grid, the **Path** column shows breadcrumb segments
+      separated by › (e.g. shelf › box); clicking a segment shows that
+      level's contents.
+- [ ] Rows that have children (compressed records, containers with items,
+      locations with child locations) show a **caret/chevron** in the first
+      column; rows with no children show no caret.
+- [ ] Click the caret on a compressed record or container: its child rows
+      expand inline. Click again to collapse. Clicking a child row's name
+      opens its details in the view pane.
+- [ ] Click a **Home** value (e.g. a box name): the app navigates to the
+      Containers page and selects/focuses that box.
+- [ ] Click an **Assignee** value: the app navigates to that user and
+      focuses them.
+- [ ] The same caret expansion, clickable Home/Assignee, and Path column
+      work on the Containers and Locations grids.
+
 ## 4. Search
 
 - [ ] Dashboard quick search: type `HQ` — matching records appear.
@@ -64,6 +82,10 @@ Click each shortcut; each page renders its grid/content with no error:
 ## 6. Workspaces, Move, Reports
 
 - [ ] Add a record to a workspace; it appears under Workspaces / Favorites.
+- [ ] Each workspace group shows **full data grids** (Records, Containers,
+      Locations, Users) with the same columns, sorting, selection,
+      expansion carets, clickable Home/Assignee, Path breadcrumbs, and
+      Ctrl+C copy as the main screens.
 - [ ] Select records, use **Move Items** to change Home/Assignee or location.
 - [ ] Reports: group by State (or another field); counts look right.
 

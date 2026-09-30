@@ -19,16 +19,13 @@
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewContainer">New Container (Ctrl+N)</MudButton>
 </div>
 
-<ObjectGrid @ref="_grid" Items="Filtered" Kind="Container" GridId="containers" Scope="containers"
-            GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
-            GetBarcode="c => c.Barcode"
-            EditItem="EditContainer" DeleteItems="DeleteContainers"
-            ExportCols="GridColumns.ContainerColumns()" RowToDict="GridColumns.ContainerRow"
-            OnChanged="Load">
-</ObjectGrid>
+<ContainerGrid @ref="_grid" Items="Filtered" GridId="containers" Scope="containers"
+               EditItem="EditContainer" DeleteItems="DeleteContainers"
+               OnChanged="Load">
+</ContainerGrid>
 
 @code {
-    private ObjectGrid<Container>? _grid;
+    private ContainerGrid? _grid;
     private List<Container> _items = new();
     private string _filter = "";
 

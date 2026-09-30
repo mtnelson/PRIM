@@ -20,36 +20,13 @@
     assignees of records and containers. Right-click a row for actions. Users are deactivated, not deleted.
 </MudText>
 
-<MudGrid>
-    <MudItem xs="12" md="4">
-        <MudPaper Elevation="1" Class="pa-2">
-            <MudText Typo="Typo.subtitle2" Class="pa-2">Homed items (expand a user)</MudText>
-            <MudTreeView T="HomedNode" Items="_userRoots" Hover="true" Dense="true" ExpandOnClick="true"
-                         Style="max-height:400px;overflow-y:auto">
-                <ItemTemplate>
-                    <MudTreeViewItem T="HomedNode" Value="@context.Value" Items="@context.Children"
-                                     Text="@context.Value!.Label" EndText="@context.Value.Kind"
-                                     OnClick="() => SelectFromTree(context.Value)" />
-                </ItemTemplate>
-            </MudTreeView>
-        </MudPaper>
-    </MudItem>
-    <MudItem xs="12" md="8">
-        <ObjectGrid @ref="_grid" T="AppUser" Kind="User" GridId="users" Scope="users" Items="Filtered"
-                    ExportCols="GridColumns.UserColumns()"
-                    RowToDict="GridColumns.UserRow" GetInfo="@(u => ("User", u.Id, u.UserId))"
-                    GetBarcode="@(u => "")"
-                    EditItem="EditUser" OnChanged="Load" CanMove="false" />
-    </MudItem>
-</MudGrid>
+<UserGrid @ref="_grid" Items="Filtered" GridId="users" Scope="users"
+          EditItem="EditUser" OnChanged="Load" CanMove="false" />
 
 @code {
-    private ObjectGrid<AppUser>? _grid;
+    private UserGrid? _grid;
     private List<AppUser> _items = new();
     private bool _showInactive;
-    private List<TreeItemData<HomedNode>> _userRoots = new();
-
-    private record HomedNode(string Kind, int Id, string Label, bool IsLeaf);
 
     private IEnumerable<AppUser> Filtered => _showInactive ? _items : _items.Where(u => u.Active);
 
@@ -68,30 +45,8 @@
     private async Task Load()
     {
         _items = await Prim.GetUsersAsync();
-        var records = await Prim.GetRecordsAsync();
-        var containers = await Prim.GetContainersAsync();
-        var byHome = records.Where(r => r.HomeKind == "User").ToLookup(r => r.Home);
-        var byHomeC = containers.Where(c => c.HomeKind == "User").ToLookup(c => c.Home);
-        _userRoots = _items.OrderBy(u => u.DisplayName).Select(u =>
-        {
-            var kids = new List<TreeItemData<HomedNode>>();
-            foreach (var r in byHome[u.UserId].OrderBy(x => x.RecordNumber))
-                kids.Add(new TreeItemData<HomedNode> { Value = new HomedNode("Record", r.Id, r.RecordNumber, true) });
-            foreach (var c in byHomeC[u.UserId].OrderBy(x => x.ContainerName))
-                kids.Add(new TreeItemData<HomedNode> { Value = new HomedNode("Container", c.Id, c.ContainerName, true) });
-            return new TreeItemData<HomedNode>
-            {
-                Value = new HomedNode("User", u.Id, $"{u.DisplayName} ({kids.Count})", false),
-                Children = kids
-            };
-        }).ToList();
         _grid?.ClearSelection();
         StateHasChanged();
-    }
-
-    private void SelectFromTree(HomedNode n)
-    {
-        if (n.IsLeaf) App.SetViewPane(n.Kind, n.Id, n.Label);
     }
 
     private async Task NewUser()

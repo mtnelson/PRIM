@@ -25,6 +25,13 @@ tr.prim-row-selected:hover {
     background-color: rgba(25, 118, 210, 0.26) !important;
 }
 
+/* Hierarchy caret: the expand button is disabled on rows without children
+   (ButtonDisabledFunc); hide it so the caret only appears where there is
+   something to expand. The hierarchy column is the first column. */
+tr.prim-row-nochildren td.mud-table-cell:first-child .mud-icon-button.mud-disabled {
+    visibility: hidden;
+}
+
 /* Login screen */
 .login-wrap {
     min-height: 100vh; display: flex; align-items: center; justify-content: center;

@@ -26,6 +26,7 @@
                  OnRemoveFromSlot="MenuRemoveFromSlot" ShowRemove="ShowRemoveFromSlot">
     <Activator>
         <MudDataGrid Items="Items" Dense="true" Hover="true" MultiSelection="true" Striped="false"
+                     HorizontalScrollbar="true"
                      SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))"
                      RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))"
                      RowClassFunc="RowClass" @ondblclick="OnGridDblClick">
@@ -386,13 +387,15 @@
     {
         var t = Targets(); if (t.Count == 0) return;
         int n = 0;
+        var labels = new List<string>();
         foreach (var x in t)
         {
             var (kind, id, label) = GetInfo(x);
             if (await Prim.AddToWorkspaceAsync(App.CurrentUserId, slot, kind, id, label)) n++;
+            labels.Add(label);
         }
         Snackbar.Add($"Added {n} item(s) to {slot}.", Severity.Success);
-        App.Log("Added to " + slot, $"{n} item(s)");
+        App.LogItems("Added to " + slot, labels);
     }
 
     private async Task MenuRemoveFromSlot()

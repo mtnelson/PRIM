@@ -14,33 +14,32 @@
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewLocation">New Location (Ctrl+N)</MudButton>
 </div>
 
-<LocationGrid @ref="_grid" Items="_items" GridId="locations" Scope="locations"
+<LocationGrid @ref="_grid" ItemsProvider="ProvideLocations" GridId="locations" Scope="locations"
               EditItem="EditLocation"
               CanMove="false" CanDelete="false"
-              OnChanged="Load">
+              OnChanged="OnGridChanged">
 </LocationGrid>
 
 @code {
     private LocationGrid? _grid;
-    private List<Location> _items = new();
 
-    protected override async Task OnInitializedAsync()
+    private Task<GridPageResult<Location>> ProvideLocations(GridPageRequest req)
+        => Prim.GetLocationsPageAsync(req);
+
+    protected override void OnInitialized()
     {
         Hotkeys.PushScope("locations");
         Hotkeys.Register("locations", "Ctrl+N", NewLocation);
         Hotkeys.Register("locations", "F9", Refresh);
-        await Load();
     }
 
     public void Dispose() => Hotkeys.UnregisterScope("locations");
 
-    private async Task Refresh() { await Load(); Snackbar.Add("Locations refreshed.", Severity.Info); }
+    private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Locations refreshed.", Severity.Info); }
 
-    private async Task Load()
+    private async Task OnGridChanged()
     {
-        _items = await Prim.GetLocationsAsync();
-        _grid?.ClearSelection();
-        StateHasChanged();
+        if (_grid != null) await _grid.ResetAsync();
     }
 
     private async Task NewLocation()
@@ -48,7 +47,7 @@
         var d = await DialogService.ShowAsync<LocationDialog>("New Location",
             new DialogParameters { ["Model"] = new Location() },
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
-        if ((await d.Result) is { Canceled: false }) await Load();
+        if ((await d.Result) is { Canceled: false }) await OnGridChanged();
     }
 
     private async Task<bool> EditLocation(Location l)

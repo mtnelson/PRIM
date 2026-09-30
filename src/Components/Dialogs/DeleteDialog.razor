@@ -50,7 +50,9 @@
 
         var n = await Prim.DeleteRecordsAsync(Ids, _reason, _mergedInto, _otherText, App.CurrentUserId);
         Snackbar.Add($"Deleted {n} record(s).", Severity.Success);
-        App.Log("Deleted records", $"{n} record(s): {_reason}");
+        var labels = new List<string>();
+        foreach (var id in Ids) labels.Add(await Prim.GetObjectLabelAsync("Record", id));
+        App.LogItems($"Deleted records ({_reason})", labels);
         MudDialog.Close(DialogResult.Ok(true));
     }
 }

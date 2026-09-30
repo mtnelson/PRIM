@@ -57,7 +57,7 @@
                     <MudCheckBox T="bool" Label="Is Control File?" @bind-Value="_model.IsControlFile" />
                 </MudItem>
                 <MudItem xs="12" md="6">
-                    <MudTextField T="string" Label="Record Labels (comma-separated)" @bind-Value="_model.Labels" />
+                    <LabelPicker @bind-Selected="_labels" Actor="@App.CurrentUserId" />
                 </MudItem>
                 <MudItem xs="12" md="6">
                     <MudSelect T="string" Label="Security Classification" @bind-Value="_model.SecurityClassification" Clearable="true">
@@ -112,6 +112,7 @@
     private MudForm _form = null!;
     private RecordItem _model = new();
     private List<RecordItem> _compressed = new();
+    private List<string> _labels = new();
     private string? _error;
     private string _originalType = "";
     private bool _typeLocked => _model.Id != 0 && !App.IsRecordsManager;
@@ -123,6 +124,7 @@
             ? new RecordItem { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : Clone(Model);
         _originalType = _model.RecordType;
+        if (_model.Id != 0) _labels = await Prim.GetObjectLabelNamesAsync("Record", _model.Id);
     }
 
     private static RecordItem Clone(RecordItem r) => new()
@@ -195,6 +197,7 @@
         var isNew = _model.Id == 0;
         var (ok2, err) = await Prim.SaveRecordAsync(_model, App.CurrentUserId);
         if (!ok2) { _error = err; return; }
+        await Prim.SetObjectLabelsAsync("Record", _model.Id, _labels, App.CurrentUserId);
         Snackbar.Add(isNew ? "Record created." : "Record updated.", Severity.Success);
         App.Log(isNew ? "Created record" : "Updated record", _model.RecordNumber);
         MudDialog.Close(DialogResult.Ok(true));

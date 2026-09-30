@@ -151,7 +151,7 @@ public class PrimService
     // repeated runs produce the same data). Inserts directly without
     // per-record audit events; numbering continues from the current max so
     // sequences stay consistent with records created through the UI.
-    public async Task<int> SeedTestRecordsAsync(int count, string actor)
+    public async Task<List<string>> SeedTestRecordsAsync(int count, string actor)
     {
         using var db = _factory.CreateDbContext();
         var users = await db.Users.AsNoTracking().ToListAsync();
@@ -216,7 +216,7 @@ public class PrimService
         var kids = list.Skip(parentCount).OrderBy(_ => rnd.Next()).Take(Math.Min(200, list.Count - parentCount)).ToList();
         foreach (var k in kids) k.ParentRecordId = parents[rnd.Next(parents.Count)].Id;
         await db.SaveChangesAsync();
-        return list.Count;
+        return list.Select(r => r.RecordNumber).ToList();
     }
 
     private static int MaxSuffix(IEnumerable<string> existing, string prefix, int width)
@@ -400,7 +400,11 @@ public class PrimService
     }
 
     // ---------------- writes ----------------
-    private async Task AuditAsync(PrimDbContext db, string kind, int id, string label,
+    // Audit events are staged with AddAudit and persisted by the caller's
+    // SaveChangesAsync, so bulk operations (move/delete/restore of many
+    // items, multi-field updates) cost one database round-trip instead of
+    // one per event. Single-item paths keep using AuditAsync.
+    private static void AddAudit(PrimDbContext db, string kind, int id, string label,
         string action, string actor, string? field = null, string? oldV = null, string? newV = null)
     {
         db.AuditEvents.Add(new AuditEvent
@@ -409,6 +413,12 @@ public class PrimService
             FieldName = field, OldValue = oldV, NewValue = newV,
             Actor = actor, TimestampUtc = DateTime.UtcNow
         });
+    }
+
+    private async Task AuditAsync(PrimDbContext db, string kind, int id, string label,
+        string action, string actor, string? field = null, string? oldV = null, string? newV = null)
+    {
+        AddAudit(db, kind, id, label, action, actor, field, oldV, newV);
         await db.SaveChangesAsync();
     }
 
@@ -480,7 +490,8 @@ public class PrimService
         cur.LastUpdatedUtc = DateTime.UtcNow; cur.LastUpdatedBy = actor; cur.RowVersion++;
         await db.SaveChangesAsync();
         foreach (var (f, o, n) in tracked)
-            await AuditAsync(db, "Record", cur.Id, cur.RecordNumber, typeChanged && f == "RecordType" ? "Type Changed" : "Updated", actor, f, o, n);
+            AddAudit(db, "Record", cur.Id, cur.RecordNumber, typeChanged && f == "RecordType" ? "Type Changed" : "Updated", actor, f, o, n);
+        await db.SaveChangesAsync();
         return (true, null);
     }
 
@@ -613,7 +624,7 @@ public class PrimService
                 }
                 else if (newAssignee != null) { r.Assignee = newAssignee; r.AssigneeKind = newAssigneeKind; r.AssigneeRefId = newAssigneeRefId; }
                 r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
-                await AuditAsync(db, "Record", r.Id, r.RecordNumber, "Moved", actor, "Movement", o, $"Home={r.Home}, Assignee={r.Assignee}");
+                AddAudit(db, "Record", r.Id, r.RecordNumber, "Moved", actor, "Movement", o, $"Home={r.Home}, Assignee={r.Assignee}");
                 n++;
             }
         }
@@ -626,7 +637,7 @@ public class PrimService
                 if (newHome != null) { c.Home = newHome; c.HomeKind = newHomeKind; c.HomeRefId = newHomeRefId; }
                 if (newAssignee != null) { c.Assignee = newAssignee; c.AssigneeKind = newAssigneeKind; c.AssigneeRefId = newAssigneeRefId; }
                 c.LastUpdatedUtc = DateTime.UtcNow; c.LastUpdatedBy = actor; c.RowVersion++;
-                await AuditAsync(db, "Container", c.Id, c.ContainerName, "Moved", actor, "Movement", o, $"Home={c.Home}, Assignee={c.Assignee}");
+                AddAudit(db, "Container", c.Id, c.ContainerName, "Moved", actor, "Movement", o, $"Home={c.Home}, Assignee={c.Assignee}");
                 n++;
             }
         }
@@ -651,7 +662,7 @@ public class PrimService
             r.DeleteReason = reason == "Other" ? $"Other: {otherText}" : reason;
             r.MergedIntoBarcode = mergedInto;
             r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
-            await AuditAsync(db, "Record", r.Id, r.RecordNumber, "Deleted", actor, "DeleteReason", null,
+            AddAudit(db, "Record", r.Id, r.RecordNumber, "Deleted", actor, "DeleteReason", null,
                 r.DeleteReason + (mergedInto != null ? $" (merged into {mergedInto})" : ""));
         }
         await db.SaveChangesAsync();
@@ -666,7 +677,7 @@ public class PrimService
         {
             r.Deleted = false; r.DeleteReason = null; r.MergedIntoBarcode = null;
             r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
-            await AuditAsync(db, "Record", r.Id, r.RecordNumber, "Restored", actor);
+            AddAudit(db, "Record", r.Id, r.RecordNumber, "Restored", actor);
         }
         await db.SaveChangesAsync();
         return items.Count;
@@ -692,7 +703,7 @@ public class PrimService
                 "Cannot delete container(s) with child containers: " + string.Join(", ", names));
         }
         foreach (var c in items)
-            await AuditAsync(db, "Container", c.Id, c.ContainerName, "Deleted", actor);
+            AddAudit(db, "Container", c.Id, c.ContainerName, "Deleted", actor);
         db.Containers.RemoveRange(items);
         await db.SaveChangesAsync();
         return items.Count;

@@ -78,6 +78,20 @@ public static class GridColumns
         ["Label"] = w.Label, ["ObjectKind"] = w.ObjectKind,
         ["AddedUtc"] = w.AddedUtc.ToLocalTime().ToString("g"),
     };
+
+    // Explicit column widths for data grids. MudDataGrid only engages its
+    // horizontal scrollbar when the columns' combined width overflows the
+    // viewport; without widths the table squeezes columns to fit instead.
+    public static string ColWidth(string key) => key switch
+    {
+        "FieldOffice" or "Volume" or "State" or "Active" => "90px",
+        "RecordNumber" or "Barcode" or "CaseNumber" or "ContainerCode"
+            or "CaseClassification" or "ContainerName" or "UserId" => "130px",
+        "Subject" or "Notes" or "Description" or "Path" => "260px",
+        "RecordType" or "ContainerType" or "LocationType" or "Home" or "Assignee"
+            or "DisplayName" or "LocationName" or "FormattedNumber" => "170px",
+        _ => "140px",
+    };
 }
 
 public static class Csv

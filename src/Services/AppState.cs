@@ -43,6 +43,15 @@ public class AppState
         ActivityLog.Add((DateTime.Now, action, detail));
         Notify();
     }
+    // Item-specific log entries: names the affected items instead of a bare
+    // count. Long lists are truncated with a "+N more" tail.
+    public void LogItems(string action, IEnumerable<string> labels, int max = 8)
+    {
+        var list = labels.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        var detail = string.Join(", ", list.Take(max));
+        if (list.Count > max) detail += $" (+{list.Count - max} more)";
+        Log(action, detail);
+    }
     public void ClearLog() { ActivityLog.Clear(); Notify(); }
 
     // Recently viewed items for the Shortcuts pane.

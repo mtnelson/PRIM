@@ -1,5 +1,3 @@
-@inject PrimService Prim
-
 <MudDialog>
     <TitleContent><MudText Typo="Typo.h6">Audit archive file — @FileName</MudText></TitleContent>
     <DialogContent>
@@ -28,12 +26,4 @@
     <DialogActions><MudButton OnClick="() => MudDialog.Close()">Close</MudButton></DialogActions>
 </MudDialog>
 
-@code {
-    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
-    [Parameter] public string FileName { get; set; } = "";
 
-    private List<AuditEventArchive> _rows = new();
-
-    protected override async Task OnInitializedAsync()
-        => _rows = await Prim.ReadAuditExportAsync(FileName);
-}

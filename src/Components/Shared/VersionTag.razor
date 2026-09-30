@@ -1,10 +1,5 @@
 @* Tiny clickable version tag. Opens the changelog dialog. *@
-@inject IDialogService Dialogs
-
 <a @onclick="ShowChangelog" title="View changelog"
    style="opacity:0.45;font-size:0.65rem;cursor:pointer;color:inherit;text-decoration:none">v@(AppState.AppVersion)</a>
 
-@code {
-    private Task ShowChangelog() => Dialogs.ShowAsync<ChangelogDialog>("Changelog",
-        new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
-}
+

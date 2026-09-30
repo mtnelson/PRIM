@@ -1,29 +1,3 @@
 @* Pushes a "dialog" hotkey scope while a dialog is open: Ctrl+S saves,
    Escape cancels. Place inside a MudDialog. Handles nested dialogs via a scope stack. *@
-@inject HotkeyManager Hotkeys
-@implements IDisposable
 
-@code {
-    [Parameter] public Func<Task>? OnSave { get; set; }
-    [Parameter] public Action? OnCancel { get; set; }
-
-    private readonly List<IDisposable> _regs = new();
-
-    protected override void OnInitialized()
-    {
-        Hotkeys.PushScope("dialog");
-        var save = OnSave;
-        if (save != null)
-            _regs.Add(Hotkeys.Register("dialog", "Ctrl+S", save));
-        var cancel = OnCancel;
-        if (cancel != null)
-            _regs.Add(Hotkeys.Register("dialog", "Escape", cancel));
-    }
-
-    public void Dispose()
-    {
-        foreach (var r in _regs) r.Dispose();
-        _regs.Clear();
-        Hotkeys.PopScope();
-    }
-}

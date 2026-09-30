@@ -1,0 +1,107 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Forms;
+using Microsoft.AspNetCore.Components.Routing;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.AspNetCore.Components.Web.Virtualization;
+using Microsoft.JSInterop;
+using MudBlazor;
+using Prim.Components.Dialogs;
+using Prim.Components.Layout;
+using Prim.Components.Shared;
+using Prim.Data;
+using Prim.Services;
+
+namespace Prim.Components.Shared;
+
+public partial class RecordGrid : ComponentBase
+{
+    [Inject] public PrimService Prim { get; set; } = default!;
+
+    private ObjectGrid<RecordItem>? _grid;
+
+    [Parameter] public IEnumerable<RecordItem> Items { get; set; } = Enumerable.Empty<RecordItem>();
+    // When set, the grid virtualizes through this provider (per-chunk
+    // enrichment included) instead of rendering Items.
+    [Parameter] public Func<GridPageRequest, Task<GridPageResult<RecordItem>>>? ItemsProvider { get; set; }
+    // Total matching rows + all matching Ids, for the virtualized grid.
+    [Parameter] public Func<Task<int>>? CountProvider { get; set; }
+    [Parameter] public Func<Task<List<int>>>? AllIdsProvider { get; set; }
+    [Parameter] public string GridId { get; set; } = "records";
+    [Parameter] public string Scope { get; set; } = "records";
+    [Parameter] public Func<RecordItem, Task<bool>>? EditItem { get; set; }
+    [Parameter] public Func<List<int>, Task<bool>>? DeleteItems { get; set; }
+    [Parameter] public bool CanMove { get; set; } = true;
+    [Parameter] public bool CanDelete { get; set; } = true;
+    [Parameter] public bool ShowRemoveFromSlot { get; set; }
+    [Parameter] public EventCallback<List<int>> RemoveFromSlot { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    // Search-tab state, passed through to the inner ObjectGrid.
+    [Parameter] public SearchTabState? TabState { get; set; }
+    [Parameter] public EventCallback TabStateChanged { get; set; }
+
+    private Dictionary<int, List<PathSeg>> _paths = new();
+    private HashSet<int> _withChildren = new();
+    private Dictionary<int, List<(int Id, string Name)>> _labelPairs = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ItemsProvider != null) return; // provider mode enriches per chunk
+        var ids = Items.Select(r => r.Id).ToList();
+        _labelPairs = await Prim.GetObjectLabelPairsAsync("Record", ids);
+        _paths = await Prim.GetAncestorPathsAsync("Record", ids);
+        _withChildren = await Prim.GetHasChildrenAsync("Record", ids);
+    }
+
+    private Func<GridPageRequest, Task<GridPageResult<RecordItem>>>? _provider
+        => ItemsProvider == null ? null : ProvideAsync;
+
+    private async Task<GridPageResult<RecordItem>> ProvideAsync(GridPageRequest req)
+    {
+        var page = await ItemsProvider!(req);
+        await EnrichChunkAsync(page.Rows);
+        return page;
+    }
+
+    // Loads paths/child-flags/labels for one chunk and merges them into the
+    // caches the row renderers read from.
+    public async Task EnrichChunkAsync(List<RecordItem> rows)
+    {
+        var ids = rows.Select(r => r.Id).ToList();
+        if (ids.Count == 0) return;
+        foreach (var kv in await Prim.GetObjectLabelPairsAsync("Record", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var kv in await Prim.GetAncestorPathsAsync("Record", ids)) _paths[kv.Key] = kv.Value;
+        foreach (var id in await Prim.GetHasChildrenAsync("Record", ids)) _withChildren.Add(id);
+    }
+
+    private void ResetSupplemental()
+    {
+        _paths.Clear(); _withChildren.Clear(); _labelPairs.Clear();
+    }
+
+    private Dictionary<string, string> RowWithPath(RecordItem r)
+    {
+        var d = GridColumns.RecordRow(r);
+        d["Labels"] = _labelPairs.TryGetValue(r.Id, out var lp) ? string.Join(", ", lp.Select(x => x.Name)) : "";
+        d["Path"] = _paths.TryGetValue(r.Id, out var segs) ? string.Join(" › ", segs.Select(s => s.Label)) : "";
+        return d;
+    }
+
+    private List<PathSeg> GetPath(RecordItem r) =>
+        _paths.TryGetValue(r.Id, out var segs) ? segs : new() { new("Record", r.Id, r.RecordNumber) };
+
+    private (string Kind, int Id)? GetHomeRef(RecordItem r) =>
+        r.HomeKind != null && r.HomeRefId != null ? (r.HomeKind, r.HomeRefId.Value) : null;
+
+    private (string Kind, int Id)? GetAssigneeRef(RecordItem r) =>
+        r.AssigneeKind != null && r.AssigneeRefId != null ? (r.AssigneeKind, r.AssigneeRefId.Value) : null;
+
+    private bool HasKids(RecordItem r) => _withChildren.Contains(r.Id);
+
+    private Task<List<ChildItem>> GetKids(RecordItem r) => Prim.GetChildItemsAsync("Record", r.Id);
+
+    private List<(int Id, string Name)> GetChips(RecordItem r) =>
+        _labelPairs.TryGetValue(r.Id, out var lp2) ? lp2 : new();
+
+    public void ClearSelection() => _grid?.ClearSelection();
+    public Task ResetAsync() => _grid?.ResetAsync() ?? Task.CompletedTask;
+}

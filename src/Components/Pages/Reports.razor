@@ -1,7 +1,4 @@
 @page "/reports"
-@inject PrimService Prim
-@inject IJSRuntime JS
-
 <PageTitle>PRIM — Reports</PageTitle>
 
 <MudText Typo="Typo.h5" Class="mb-3">Reports</MudText>
@@ -42,30 +39,4 @@
     </MudItem>
 </MudGrid>
 
-@code {
-    private Dictionary<string, int> _counts = new();
-    private double[] _typeData = Array.Empty<double>();
-    private string[] _typeLabels = Array.Empty<string>();
-    private double[] _foData = Array.Empty<double>();
-    private string[] _foLabels = Array.Empty<string>();
 
-    protected override async Task OnInitializedAsync()
-    {
-        _counts = await Prim.GetCountsAsync();
-
-        var byType = await Prim.GroupRecordsAsync(r => r.RecordType);
-        _typeData = byType.Select(g => (double)g.Count).ToArray();
-        _typeLabels = byType.Select(g => $"{g.Label} ({g.Count})").ToArray();
-
-        var byOffice = await Prim.GroupRecordsAsync(r => r.FieldOffice);
-        _foData = byOffice.Select(g => (double)g.Count).ToArray();
-        _foLabels = byOffice.Select(g => $"{g.Label} ({g.Count})").ToArray();
-    }
-
-    private async Task ExportCounts()
-    {
-        var csv = "Metric,Count\r\n" + string.Join("\r\n",
-            _counts.Select(kv => $"{Csv.Escape(kv.Key)},{kv.Value}"));
-        await Csv.DownloadAsync(JS, "prim-totals.csv", csv);
-    }
-}

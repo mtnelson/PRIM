@@ -88,6 +88,17 @@ Click each shortcut; each page renders its grid/content with no error:
       header total updates; debounced, no full-table freeze.
 - [ ] Click a column header to sort; the sort persists when you switch
       search tabs and come back.
+- [ ] While a chunk loads, rows show a spinner ("Loading…") instead of
+      blank space.
+- [ ] Workspaces: each grid has its own scrollbar (compact 400px height) —
+      the page no longer grows without bound.
+- [ ] Dashboard / Workspaces / Advanced Search: a progress bar appears at
+      the top while loading or searching; search buttons disable and read
+      "Searching…".
+- [ ] Admin → Audit Retention: "Archive now" / "Export archive to file"
+      show "Archiving…"/"Exporting…" plus a spinner while running.
+- [ ] Admin → Test Data: the Generate button shows a spinner and
+      "Generating…" while running.
 
 ## 4c. Search tabs
 

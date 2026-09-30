@@ -1,5 +1,10 @@
 # PRIM Changelog
 
+## v0.10.3 — 2026-09-30
+- All data grids now use infinite scroll: the dashboard and workspace grids (which previously grew the page without any scrollbar) are virtualized with a compact 400px scroll height, matching the main screens' virtualized scrolling.
+- Loading indicators everywhere data takes time: grid rows show a spinner while a chunk is being fetched; Dashboard, Workspaces, and Advanced Search show an indeterminate progress bar while loading or searching, with their buttons disabled and relabeled ("Searching…"); Admin → Audit Retention buttons show "Archiving…"/"Exporting…" with a spinner; the test-data Generate button shows a spinner while generating.
+- Codebase convention: every Razor component now uses a `.razor.cs` code-behind file — no more `@code` blocks in markup files.
+
 ## v0.10.2 — 2026-09-30
 - Grids are now truly virtualized (`MudDataGrid` `Virtualize` + `VirtualizeServerData`): scrolling fetches 500-row chunks on demand instead of accumulating every loaded row in memory, so 3,000+ records stay responsive and the first rows render without any horizontal scrolling. A fixed grid height with a sticky header keeps the column titles visible while scrolling.
 - Fixed the duplicate horizontal scrollbar: the grid now owns exactly one, via a PRIM-specific CSS rule (also applied to Admin → Deleted Records).

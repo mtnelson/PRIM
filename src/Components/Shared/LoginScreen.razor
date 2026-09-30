@@ -1,9 +1,5 @@
 @* PRIM login screen (development). Production will determine identity via
    OAuth/SSO — always authenticate through IAuthProvider, never hard-wire. *@
-@inject IAuthProvider Auth
-@inject AppState App
-@inject ISnackbar Snackbar
-
 <MudThemeProvider />
 <MudSnackbarProvider />
 
@@ -34,21 +30,4 @@
     </MudPaper>
 </div>
 
-@code {
-    private string _userId = "";
-    private string _password = "";
-    private string? _error;
-    private bool _busy;
 
-    private async Task Login()
-    {
-        _error = null; _busy = true;
-        try
-        {
-            var res = await Auth.AuthenticateAsync(_userId, _password);
-            if (!res.Ok) { _error = res.Error; return; }
-            App.SignIn(res.UserId, res.DisplayName, res.Role);
-        }
-        finally { _busy = false; }
-    }
-}

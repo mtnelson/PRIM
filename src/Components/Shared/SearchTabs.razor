@@ -15,10 +15,4 @@
     </MudTooltip>
 </div>
 
-@code {
-    [Parameter] public List<SearchSession> Tabs { get; set; } = new();
-    [Parameter] public int ActiveId { get; set; }
-    [Parameter] public EventCallback<SearchSession> OnActivate { get; set; }
-    [Parameter] public EventCallback<SearchSession> OnClose { get; set; }
-    [Parameter] public EventCallback OnAdd { get; set; }
-}
+

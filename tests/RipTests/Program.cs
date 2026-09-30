@@ -633,6 +633,68 @@ var allRecs = await svc.GetRecordsAsync();
         "1500 seed: children point at new compressed parents", $"kids={newKids.Count}");
 }
 
+// ---- search sessions (tab persistence) ----
+var (cok, cerr, sess) = await svc.CreateSessionAsync(new SearchSession { OwnerUserId = "u1", PageKind = "records", Title = "t1", Filter = "abc" });
+Check(cok && sess != null, "session create ok", cerr);
+var open1 = await svc.GetOpenSessionsAsync("u1", "records");
+Check(open1.Count == 1 && open1[0].Filter == "abc", "session get returns created session");
+Check((await svc.GetOpenSessionsAsync("u1", "containers")).Count == 0, "session page isolation");
+Check((await svc.GetOpenSessionsAsync("u2", "records")).Count == 0, "session owner isolation");
+
+sess!.Title = "renamed";
+sess.SortColumn = "RecordNumber"; sess.SortDescending = true;
+sess.ColumnKeysCsv = "RecordNumber,Subject"; sess.Filter = "xyz";
+sess.SelectedIdsCsv = "1,2"; sess.ExpandedIdsCsv = "7"; sess.CriteriaJson = "{\"logic\":\"AND\"}";
+var (sok, serr) = await svc.SaveSessionAsync(sess);
+Check(sok, "session save ok", serr);
+var open2 = await svc.GetOpenSessionsAsync("u1", "records");
+Check(open2[0].Title == "renamed" && open2[0].SortColumn == "RecordNumber" && open2[0].SortDescending
+    && open2[0].ColumnKeysCsv == "RecordNumber,Subject" && open2[0].Filter == "xyz"
+    && open2[0].SelectedIdsCsv == "1,2" && open2[0].ExpandedIdsCsv == "7" && open2[0].CriteriaJson == "{\"logic\":\"AND\"}",
+    "session save persists all descriptor fields");
+
+var (sokOther, serrOther) = await svc.SaveSessionAsync(new SearchSession { Id = sess.Id, OwnerUserId = "u2", PageKind = "records", Title = "hijack" });
+Check(!sokOther && serrOther != null, "session save by other owner rejected", serrOther);
+await svc.DeleteSessionAsync(sess.Id, "u2");
+Check((await svc.GetOpenSessionsAsync("u1", "records")).Count == 1, "session delete by other owner is a no-op");
+
+var ts = open2[0].ToTabState();
+Check(open2[0].Filter == "xyz" && ts.SortColumn == "RecordNumber" && ts.SortDescending
+    && ts.ColumnKeys != null && ts.ColumnKeys.SequenceEqual(new[] { "RecordNumber", "Subject" })
+    && ts.SelectedIds.SetEquals(new[] { 1, 2 }) && ts.ExpandedIds.SetEquals(new[] { 7 }),
+    "ToTabState round-trips descriptor");
+var ts2 = new SearchTabState { SortColumn = "Subject", SortDescending = false,
+    ColumnKeys = new List<string> { "Subject" }, SelectedIds = new HashSet<int> { 9 }, ExpandedIds = new HashSet<int>() };
+open2[0].ApplyTabState(ts2);
+Check(open2[0].SortColumn == "Subject" && !open2[0].SortDescending
+    && open2[0].ColumnKeysCsv == "Subject" && open2[0].SelectedIdsCsv == "9" && open2[0].ExpandedIdsCsv == "",
+    "ApplyTabState writes descriptor fields");
+var ts3 = new SearchTabState(); // nulls clear the descriptor (Filter is page-owned, untouched)
+open2[0].ApplyTabState(ts3);
+Check(open2[0].Filter == "xyz" && open2[0].SortColumn == null && open2[0].ColumnKeysCsv == ""
+    && open2[0].SelectedIdsCsv == "" && open2[0].ExpandedIdsCsv == "",
+    "ApplyTabState nulls clear descriptor");
+
+// cap: 10 tabs per page per owner
+for (var i = 2; i <= 10; i++)
+    await svc.CreateSessionAsync(new SearchSession { OwnerUserId = "u1", PageKind = "records", Title = $"t{i}" });
+var (c11ok, c11err, _) = await svc.CreateSessionAsync(new SearchSession { OwnerUserId = "u1", PageKind = "records", Title = "t11" });
+Check(!c11ok && c11err != null && c11err.Contains("10"), "session cap: 11th tab refused", c11err);
+// cap is per (owner, page): another page still accepts
+var (cOtherPage, _, _) = await svc.CreateSessionAsync(new SearchSession { OwnerUserId = "u1", PageKind = "containers", Title = "c1" });
+Check(cOtherPage, "session cap is per page kind");
+// LastUsedUtc ordering: most recently used first
+var open3 = await svc.GetOpenSessionsAsync("u1", "records");
+Check(open3.Count == 10 && open3[0].Title == "t10", "sessions ordered by LastUsedUtc desc", open3.Count > 0 ? open3[0].Title : "none");
+await svc.SaveSessionAsync(open3[^1]); // touch the oldest
+var open4 = await svc.GetOpenSessionsAsync("u1", "records");
+Check(open4[0].Id == open3[^1].Id, "save bumps LastUsedUtc to front");
+
+await svc.DeleteSessionAsync(sess.Id, "u1");
+Check((await svc.GetOpenSessionsAsync("u1", "records")).Count == 9, "session gone after delete");
+var (cAfter, _, _) = await svc.CreateSessionAsync(new SearchSession { OwnerUserId = "u1", PageKind = "records", Title = "t-new" });
+Check(cAfter, "session create works again after delete (under cap)");
+
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }
 return fail == 0 ? 0 : 1;

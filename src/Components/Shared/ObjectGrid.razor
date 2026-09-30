@@ -26,7 +26,7 @@
                  OnExport="MenuExport" OnCopy="MenuCopy" OnSelectAll="SelectAll" OnUnselectAll="UnselectAll"
                  OnRemoveFromSlot="MenuRemoveFromSlot" ShowRemove="ShowRemoveFromSlot">
     <Activator>
-        <MudDataGrid @ref="_mudGrid" T="T" Items="_gridItems" ServerData="_serveData" Dense="true" Hover="true" MultiSelection="true" Striped="false"
+        <MudDataGrid @key="TabState" @ref="_mudGrid" T="T" Items="_gridItems" ServerData="_serveData" Dense="true" Hover="true" MultiSelection="true" Striped="false"
                      HorizontalScrollbar="true"
                      SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))"
                      RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))"
@@ -136,6 +136,13 @@
     // Called when the chunk pipeline resets (filter/sort change) so wrappers
     // can drop per-row supplemental caches (paths, child flags, labels).
     [Parameter] public Action? OnReset { get; set; }
+    // Search-tab state (one instance per open tab, owned by the page). The
+    // grid applies it when a tab is activated and writes user-driven changes
+    // (sort, selection, expansion, column layout) back into it, firing
+    // TabStateChanged so the page can persist the session descriptor.
+    // Null on pages without tabs: behavior is exactly as before.
+    [Parameter] public SearchTabState? TabState { get; set; }
+    [Parameter] public EventCallback TabStateChanged { get; set; }
     [Parameter] public string Kind { get; set; } = "";
     [Parameter] public string GridId { get; set; } = "";
     [Parameter] public string Scope { get; set; } = "";
@@ -176,8 +183,9 @@
     // Hotkey registrations owned by this grid; disposing removes only ours so
     // sibling grids sharing the scope (Dashboard, Workspaces) keep theirs.
     private readonly List<IDisposable> _hotkeyRegs = new();
-    // Rows force-expanded by a focus request (InitiallyExpandedFunc reads this).
-    private readonly HashSet<int> _forceExpanded = new();
+    // Rows force-expanded by a focus request or restored from a search tab
+    // (InitiallyExpandedFunc reads this).
+    private HashSet<int> _forceExpanded = new();
     // Per-row child lists, loaded lazily on first expansion.
     private readonly Dictionary<int, List<ChildItem>> _childCache = new();
 
@@ -192,6 +200,13 @@
     private ElementReference _sentinel;
     private DotNetObjectReference<ObjectGrid<T>>? _dotNetRef;
     private bool _disposed;
+    // The TabState instance already applied to this grid; a new reference
+    // means the page switched tabs.
+    private SearchTabState? _appliedTabState;
+    // True when the current sort came from a tab descriptor rather than the
+    // grid's sort UI: the next ServerData call must not treat the empty sort
+    // UI as a user-cleared sort.
+    private bool _sortFromTab;
     // Stable per-column sort delegates, so a GridState sort definition can be
     // mapped back to its column key by reference equality.
     private readonly Dictionary<string, Func<T, object>> _sortFuncs = new();
@@ -220,6 +235,14 @@
     protected override void OnInitialized()
     {
         _effective = ExportCols.ToList();
+        if (TabState != null)
+        {
+            _appliedTabState = TabState;
+            _sortCol = TabState.SortColumn;
+            _sortDesc = TabState.SortDescending;
+            _sortFromTab = TabState.SortColumn != null;
+            _forceExpanded = new HashSet<int>(TabState.ExpandedIds);
+        }
         App.Changed += OnAppChanged;
         if (!string.IsNullOrEmpty(_scope))
         {
@@ -234,11 +257,47 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!string.IsNullOrEmpty(GridId) && !string.IsNullOrEmpty(App.CurrentUserId))
+        await ResolveColumnLayoutAsync();
+    }
+
+    // Tab switch: the page hands over a new SearchTabState instance. Apply
+    // it (sort, expansion, columns) and re-run the query server-side from
+    // the first chunk — inactive tabs keep no loaded rows.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (TabState != null && !ReferenceEquals(TabState, _appliedTabState))
         {
-            var saved = await Prim.GetGridLayoutAsync(App.CurrentUserId, GridId);
-            if (saved is { Count: > 0 }) ApplyLayout(saved);
+            _appliedTabState = TabState;
+            await ApplyTabStateAsync();
         }
+    }
+
+    // Applies the new tab's descriptor. The inner MudDataGrid is keyed by
+    // TabState, so this render recreates it with clean sort UI — its initial
+    // ServerData call then fetches the first chunk for the new query.
+    private async Task ApplyTabStateAsync()
+    {
+        var ts = TabState!;
+        _sortCol = ts.SortColumn;
+        _sortDesc = ts.SortDescending;
+        _sortFromTab = ts.SortColumn != null;
+        _forceExpanded = new HashSet<int>(ts.ExpandedIds);
+        await ResolveColumnLayoutAsync();
+        _rows.Clear(); _hasMore = true; _needsFetch = true; _loadingChunk = false;
+        _selected.Clear(); _active = default; _hasActive = false;
+        OnReset?.Invoke();
+        UpdateMenuHeader();
+        StateHasChanged();
+    }
+
+    // Column layout precedence: the active tab's saved layout, then the
+    // user's profile layout, then the full default column set.
+    private async Task ResolveColumnLayoutAsync()
+    {
+        List<string>? keys = TabState?.ColumnKeys is { Count: > 0 } tabKeys ? tabKeys : null;
+        if (keys == null && !string.IsNullOrEmpty(GridId) && !string.IsNullOrEmpty(App.CurrentUserId))
+            keys = await Prim.GetGridLayoutAsync(App.CurrentUserId, GridId);
+        ApplyLayout(keys ?? new());
     }
 
     public void Dispose()
@@ -281,6 +340,7 @@
                 _selected = new HashSet<T> { item };
                 _active = item; _hasActive = true;
                 var (kind, id, label) = GetInfo(item);
+                if (TabState != null) TabState.SelectedIds = new HashSet<int> { id };
                 App.SetViewPane(kind, id, label);
                 if (f.Expand && (HasChildren?.Invoke(item) ?? false))
                     _forceExpanded.Add(id);
@@ -315,6 +375,14 @@
             kids = await GetChildrenAsync!(item);
             _childCache[id] = kids;
         }
+        // Record the expansion in the tab state so it survives tab switches.
+        // (Collapse isn't observable from the grid; an expanded row stays
+        // expanded for the tab session once opened.)
+        if (TabState != null && TabState.ExpandedIds.Add(id))
+        {
+            _forceExpanded.Add(id);
+            await NotifyTabStateChanged();
+        }
         return kids;
     }
 
@@ -339,6 +407,11 @@
         {
             await Prim.SaveGridLayoutAsync(App.CurrentUserId, GridId, keys);
             ApplyLayout(keys);
+            if (TabState != null)
+            {
+                TabState.ColumnKeys = keys.ToList();
+                await NotifyTabStateChanged();
+            }
             App.Log("Customized columns", $"{Kind} grid");
             Snackbar.Add("Column layout saved to your profile.", Severity.Success);
         }
@@ -348,7 +421,7 @@
 
     private async Task<GridData<T>> ServeData(GridState<T> state)
     {
-        ApplySortFromState(state);
+        await ApplySortFromState(state);
         if (_needsFetch)
         {
             _needsFetch = false;
@@ -357,25 +430,44 @@
         return new GridData<T> { TotalItems = _rows.Count, Items = _rows };
     }
 
-    private void ApplySortFromState(GridState<T> state)
+    private async Task ApplySortFromState(GridState<T> state)
     {
         var def = state.SortDefinitions.FirstOrDefault();
         string? key = null;
         var desc = false;
         if (def?.SortFunc != null)
         {
+            // A real sort-header interaction overrides any tab-applied sort.
+            _sortFromTab = false;
             key = _sortFuncs.FirstOrDefault(kv => kv.Value == def.SortFunc).Key;
             desc = def.Descending;
+        }
+        else if (_sortFromTab)
+        {
+            // The current sort came from the tab descriptor; the grid's sort
+            // UI is intentionally empty. Keep the tab sort for this load.
+            _sortFromTab = false;
+            return;
         }
         if (key != _sortCol || desc != _sortDesc)
         {
             _sortCol = key; _sortDesc = desc;
             _rows.Clear(); _hasMore = true; _needsFetch = true;
             _selected.Clear(); _active = default; _hasActive = false;
+            if (TabState != null)
+            {
+                TabState.SortColumn = key;
+                TabState.SortDescending = desc;
+                TabState.SelectedIds.Clear();
+            }
             OnReset?.Invoke();
             UpdateMenuHeader();
+            await NotifyTabStateChanged();
         }
     }
+
+    private Task NotifyTabStateChanged()
+        => TabStateChanged.HasDelegate ? TabStateChanged.InvokeAsync() : Task.CompletedTask;
 
     private async Task FetchChunkAsync()
     {
@@ -394,6 +486,15 @@
             var page = await ItemsProvider(req);
             _rows.AddRange(page.Rows);
             _hasMore = page.HasMore;
+            // Tab restore: re-select rows whose stable IDs were selected when
+            // the tab was saved, as they stream in.
+            if (TabState != null && TabState.SelectedIds.Count > 0)
+            {
+                foreach (var r in page.Rows)
+                    if (TabState.SelectedIds.Contains(GetInfo(r).Id))
+                        _selected.Add(r);
+                UpdateMenuHeader();
+            }
         }
         catch (Exception ex)
         {
@@ -425,6 +526,8 @@
     {
         _rows.Clear(); _hasMore = true; _needsFetch = true; _loadingChunk = false;
         _selected.Clear(); _active = default; _hasActive = false;
+        // A reset is a new query within the tab: drop the tab's selection.
+        TabState?.SelectedIds.Clear();
         OnReset?.Invoke();
         UpdateMenuHeader();
         if (_mudGrid != null && ItemsProvider != null)
@@ -436,10 +539,11 @@
     public void ClearSelection()
     {
         _selected.Clear(); _active = default; _hasActive = false;
+        TabState?.SelectedIds.Clear();
         UpdateMenuHeader(); StateHasChanged();
     }
 
-    private void OnSelChanged(HashSet<T> v)
+    private async Task OnSelChanged(HashSet<T> v)
     {
         if (_singleSelectPending && _singleSelectItem is not null)
         {
@@ -451,6 +555,16 @@
             _selected = v;
         }
         UpdateMenuHeader();
+        await SyncTabSelectionAsync();
+    }
+
+    // Writes the live selection into the tab state (user gestures replace
+    // the restore pool) and asks the page to persist the session.
+    private async Task SyncTabSelectionAsync()
+    {
+        if (TabState == null) return;
+        TabState.SelectedIds = _selected.Select(x => GetInfo(x).Id).ToHashSet();
+        await NotifyTabStateChanged();
     }
 
     private string RowClass(T item, int index)
@@ -466,7 +580,7 @@
     private string CellVal(T x, string key)
         => RowToDict is null ? "" : RowToDict(x).GetValueOrDefault(key, "");
 
-    private void OnRowClick(DataGridRowClickEventArgs<T> e)
+    private async Task OnRowClick(DataGridRowClickEventArgs<T> e)
     {
         var toggle = e.MouseEventArgs?.CtrlKey == true || e.MouseEventArgs?.MetaKey == true;
         _active = e.Item; _hasActive = true;
@@ -489,6 +603,7 @@
             UpdateMenuHeader();
             StateHasChanged();
         }
+        await SyncTabSelectionAsync();
         var (kind, id, label) = GetInfo(e.Item);
         App.SetViewPane(kind, id, label);
         UpdateMenuHeader();
@@ -518,8 +633,22 @@
         };
     }
 
-    private void SelectAll() { _selected = _gridItems.ToHashSet(); UpdateMenuHeader(); StateHasChanged(); }
-    private void UnselectAll() { _selected.Clear(); UpdateMenuHeader(); StateHasChanged(); }
+    private async Task SelectAll()
+    {
+        // Ctrl+A selects loaded rows only — infinite scroll never
+        // materializes the full result set.
+        _selected = _gridItems.ToHashSet();
+        UpdateMenuHeader();
+        StateHasChanged();
+        await SyncTabSelectionAsync();
+    }
+    private async Task UnselectAll()
+    {
+        _selected.Clear();
+        UpdateMenuHeader();
+        StateHasChanged();
+        await SyncTabSelectionAsync();
+    }
 
     private void MenuView()
     {

@@ -37,7 +37,7 @@
 
     private async Task Print()
     {
-        App.Log("Printed label(s)", $"{Items.Count} label(s)");
+        App.LogItems("Printed label(s)", Items.Select(i => i.Title));
         await PrimJs.TryInvokeVoidAsync(JS, "prim.print");
     }
 }

@@ -258,7 +258,9 @@
         if (ok != true) return false;
         var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
         Snackbar.Add($"Deleted {n} container(s).", Severity.Success);
-        App.Log("Deleted containers", $"{n} container(s)");
+        var names = new List<string>();
+        foreach (var id in ids) names.Add(await Prim.GetObjectLabelAsync("Container", id));
+        App.LogItems("Deleted containers", names);
         return true;
     }
 }

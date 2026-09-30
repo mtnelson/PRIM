@@ -79,5 +79,24 @@ window.prim = {
             parts.push(k.length === 1 ? k.toUpperCase() : k);
             return parts.join('+');
         }
+    },
+    // Infinite-scroll sentinel: watches the bottom marker of a grid and asks
+    // Blazor for the next chunk when it scrolls into view (with a prefetch
+    // margin so loading starts before the user hits the bottom).
+    observeSentinel: function (el, dotNet) {
+        if (!el) return;
+        window.prim.unobserveSentinel(el);
+        const obs = new IntersectionObserver(function (entries) {
+            if (entries.some(function (e) { return e.isIntersecting; }))
+                dotNet.invokeMethodAsync('OnSentinelVisible');
+        }, { rootMargin: '800px' });
+        obs.observe(el);
+        el._primSentinelObs = obs;
+    },
+    unobserveSentinel: function (el) {
+        if (el && el._primSentinelObs) {
+            el._primSentinelObs.disconnect();
+            el._primSentinelObs = null;
+        }
     }
 };

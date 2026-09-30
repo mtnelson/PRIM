@@ -10,6 +10,7 @@
 
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.caption" Style="opacity:0.7">
+        @(ItemsProvider != null ? $"{_rows.Count} loaded · " : "")
         @(_selected.Count == 0 ? "Click a row to select · Ctrl+click toggles · double-click edits" : $"{_selected.Count} row(s) selected")
     </MudText>
     <MudSpacer />
@@ -25,11 +26,12 @@
                  OnExport="MenuExport" OnCopy="MenuCopy" OnSelectAll="SelectAll" OnUnselectAll="UnselectAll"
                  OnRemoveFromSlot="MenuRemoveFromSlot" ShowRemove="ShowRemoveFromSlot">
     <Activator>
-        <MudDataGrid Items="Items" Dense="true" Hover="true" MultiSelection="true" Striped="false"
+        <MudDataGrid @ref="_mudGrid" T="T" Items="_gridItems" ServerData="_serveData" Dense="true" Hover="true" MultiSelection="true" Striped="false"
                      HorizontalScrollbar="true"
                      SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))"
                      RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))"
                      RowClassFunc="RowClass" @ondblclick="OnGridDblClick">
+            <PagerContent />
             <Columns>
                 @if (Expandable)
                 {
@@ -45,7 +47,7 @@
                 @foreach (var col in _effective)
                 {
                     var c = col;
-                    <TemplateColumn T="T" Title="@c.Label" Sortable="true" SortBy="@(x => CellVal(x, c.Key))">
+                    <TemplateColumn T="T" Title="@c.Label" Sortable="@IsColSortable(c.Key)" SortBy="@GetSortFunc(c.Key)">
                         <CellTemplate>
                             @{
                                 var item = context.Item;
@@ -100,11 +102,40 @@
                 }
             </ChildRowContent>
         </MudDataGrid>
+        @if (ItemsProvider != null)
+        {
+            @* Scroll sentinel: when this marker scrolls into view the next
+               chunk is fetched and appended — no click-to-paginate. *@
+            <div @ref="_sentinel" style="min-height:2px"></div>
+            <div class="d-flex align-center justify-center py-1">
+                @if (_loadingChunk)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    <MudText Typo="Typo.caption" Style="opacity:0.7">Loading more…</MudText>
+                }
+                else if (_hasMore && _rows.Count > 0)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7">Scroll for more</MudText>
+                }
+                else if (!_hasMore && _rows.Count > 0)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7">All @_rows.Count rows loaded</MudText>
+                }
+            </div>
+        }
     </Activator>
 </GridContextMenu>
 
 @code {
     [Parameter] public IEnumerable<T> Items { get; set; } = Enumerable.Empty<T>();
+    // Infinite-scroll mode: when set, the grid fetches PageSize-row chunks
+    // from this provider (first chunk on load, more via the scroll sentinel)
+    // instead of rendering a pre-loaded Items list.
+    [Parameter] public Func<GridPageRequest, Task<GridPageResult<T>>>? ItemsProvider { get; set; }
+    [Parameter] public int PageSize { get; set; } = 500;
+    // Called when the chunk pipeline resets (filter/sort change) so wrappers
+    // can drop per-row supplemental caches (paths, child flags, labels).
+    [Parameter] public Action? OnReset { get; set; }
     [Parameter] public string Kind { get; set; } = "";
     [Parameter] public string GridId { get; set; } = "";
     [Parameter] public string Scope { get; set; } = "";
@@ -150,7 +181,41 @@
     // Per-row child lists, loaded lazily on first expansion.
     private readonly Dictionary<int, List<ChildItem>> _childCache = new();
 
+    // Infinite-scroll state (only used when ItemsProvider is set).
+    private MudDataGrid<T>? _mudGrid;
+    private readonly List<T> _rows = new();
+    private bool _hasMore = true;
+    private bool _loadingChunk;
+    private bool _needsFetch = true;
+    private string? _sortCol;
+    private bool _sortDesc;
+    private ElementReference _sentinel;
+    private DotNetObjectReference<ObjectGrid<T>>? _dotNetRef;
+    private bool _disposed;
+    // Stable per-column sort delegates, so a GridState sort definition can be
+    // mapped back to its column key by reference equality.
+    private readonly Dictionary<string, Func<T, object>> _sortFuncs = new();
+
+    private IEnumerable<T> _gridItems => ItemsProvider != null ? _rows : Items;
+    private Func<GridState<T>, Task<GridData<T>>>? _serveData
+        => ItemsProvider != null ? ServeData : null;
+
     private bool NoTarget => _selected.Count == 0 && !_hasActive;
+
+    // In provider mode only entity-mapped columns can sort server-side;
+    // Path/Labels are computed per row and sort client-side in Items mode.
+    private bool IsColSortable(string key)
+        => ItemsProvider == null || (key != "Path" && key != "Labels");
+
+    private Func<T, object> GetSortFunc(string key)
+    {
+        if (!_sortFuncs.TryGetValue(key, out var f))
+        {
+            f = x => CellVal(x, key);
+            _sortFuncs[key] = f;
+        }
+        return f;
+    }
 
     protected override void OnInitialized()
     {
@@ -178,9 +243,17 @@
 
     public void Dispose()
     {
+        _disposed = true;
         App.Changed -= OnAppChanged;
         foreach (var r in _hotkeyRegs) r.Dispose();
         _hotkeyRegs.Clear();
+        if (_dotNetRef != null)
+        {
+            try { _ = PrimJs.TryInvokeVoidAsync(JS, "prim.unobserveSentinel", _sentinel); }
+            catch (Exception) { /* circuit going away — nothing to clean up */ }
+            _dotNetRef.Dispose();
+            _dotNetRef = null;
+        }
     }
 
     private void OnAppChanged() => InvokeAsync(StateHasChanged);
@@ -190,9 +263,14 @@
     // and expands its children when asked.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender && ItemsProvider != null && !_disposed)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await PrimJs.TryInvokeVoidAsync(JS, "prim.observeSentinel", _sentinel, _dotNetRef);
+        }
         if (App.TryTakeFocus(Kind, out var f) && f != null)
         {
-            var item = Items.FirstOrDefault(x => GetInfo(x).Id == f.Id);
+            var item = _gridItems.FirstOrDefault(x => GetInfo(x).Id == f.Id);
             if (item is null)
             {
                 // Not in this grid's items (e.g. filtered out) — still show details.
@@ -264,6 +342,95 @@
             App.Log("Customized columns", $"{Kind} grid");
             Snackbar.Add("Column layout saved to your profile.", Severity.Success);
         }
+    }
+
+    // ---------- Infinite-scroll chunk pipeline ----------
+
+    private async Task<GridData<T>> ServeData(GridState<T> state)
+    {
+        ApplySortFromState(state);
+        if (_needsFetch)
+        {
+            _needsFetch = false;
+            await FetchChunkAsync();
+        }
+        return new GridData<T> { TotalItems = _rows.Count, Items = _rows };
+    }
+
+    private void ApplySortFromState(GridState<T> state)
+    {
+        var def = state.SortDefinitions.FirstOrDefault();
+        string? key = null;
+        var desc = false;
+        if (def?.SortFunc != null)
+        {
+            key = _sortFuncs.FirstOrDefault(kv => kv.Value == def.SortFunc).Key;
+            desc = def.Descending;
+        }
+        if (key != _sortCol || desc != _sortDesc)
+        {
+            _sortCol = key; _sortDesc = desc;
+            _rows.Clear(); _hasMore = true; _needsFetch = true;
+            _selected.Clear(); _active = default; _hasActive = false;
+            OnReset?.Invoke();
+            UpdateMenuHeader();
+        }
+    }
+
+    private async Task FetchChunkAsync()
+    {
+        if (ItemsProvider == null || _loadingChunk || _disposed) return;
+        _loadingChunk = true;
+        try
+        {
+            var req = new GridPageRequest
+            {
+                Skip = _rows.Count,
+                AfterId = _rows.Count == 0 ? null : GetInfo(_rows[^1]).Id,
+                Take = PageSize,
+                SortColumn = _sortCol,
+                SortDescending = _sortDesc,
+            };
+            var page = await ItemsProvider(req);
+            _rows.AddRange(page.Rows);
+            _hasMore = page.HasMore;
+        }
+        catch (Exception ex)
+        {
+            _hasMore = false;
+            Snackbar.Add($"Could not load more rows: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loadingChunk = false;
+        }
+        if (!_disposed) StateHasChanged();
+    }
+
+    // Fired by the scroll sentinel (IntersectionObserver in prim.js) when the
+    // bottom marker scrolls into view. Guarded so chunks never overlap; while
+    // the marker stays visible it keeps firing until _hasMore is false.
+    [JSInvokable]
+    public async Task OnSentinelVisible()
+    {
+        if (ItemsProvider == null || _loadingChunk || !_hasMore || _disposed) return;
+        await FetchChunkAsync();
+        if (_mudGrid != null && !_disposed)
+            await _mudGrid.ReloadServerData();
+    }
+
+    // Drops all loaded chunks and re-fetches from the first page — used after
+    // filter changes and create/edit/delete operations.
+    public async Task ResetAsync()
+    {
+        _rows.Clear(); _hasMore = true; _needsFetch = true; _loadingChunk = false;
+        _selected.Clear(); _active = default; _hasActive = false;
+        OnReset?.Invoke();
+        UpdateMenuHeader();
+        if (_mudGrid != null && ItemsProvider != null)
+            await _mudGrid.ReloadServerData();
+        else
+            StateHasChanged();
     }
 
     public void ClearSelection()
@@ -351,7 +518,7 @@
         };
     }
 
-    private void SelectAll() { _selected = Items.ToHashSet(); UpdateMenuHeader(); StateHasChanged(); }
+    private void SelectAll() { _selected = _gridItems.ToHashSet(); UpdateMenuHeader(); StateHasChanged(); }
     private void UnselectAll() { _selected.Clear(); UpdateMenuHeader(); StateHasChanged(); }
 
     private void MenuView()

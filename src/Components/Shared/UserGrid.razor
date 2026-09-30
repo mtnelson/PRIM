@@ -9,6 +9,7 @@
             ExportCols="GridColumns.UserColumns()" RowToDict="RowWithLabels"
             Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
             GetLabelChips="GetChips"
+            CountProvider="CountProvider" AllIdsProvider="AllIdsProvider"
             CanMove="@CanMove" CanDelete="@CanDelete"
             ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
             OnChanged="OnChanged" TabState="TabState" TabStateChanged="TabStateChanged" />
@@ -18,6 +19,8 @@
 
     [Parameter] public IEnumerable<AppUser> Items { get; set; } = Enumerable.Empty<AppUser>();
     [Parameter] public Func<GridPageRequest, Task<GridPageResult<AppUser>>>? ItemsProvider { get; set; }
+    [Parameter] public Func<Task<int>>? CountProvider { get; set; }
+    [Parameter] public Func<Task<List<int>>>? AllIdsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "users";
     [Parameter] public string Scope { get; set; } = "users";
     [Parameter] public Func<AppUser, Task<bool>>? EditItem { get; set; }

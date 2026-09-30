@@ -10,7 +10,7 @@
 
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.caption" Style="opacity:0.7">
-        @(ItemsProvider != null ? $"{_rows.Count} loaded · " : "")
+        @(ItemsProvider != null ? $"{(_totalValid ? _totalItems.ToString("N0") : "…")} total · " : "")
         @(_selected.Count == 0 ? "Click a row to select · Ctrl+click toggles · double-click edits" : $"{_selected.Count} row(s) selected")
     </MudText>
     <MudSpacer />
@@ -26,8 +26,11 @@
                  OnExport="MenuExport" OnCopy="MenuCopy" OnSelectAll="SelectAll" OnUnselectAll="UnselectAll"
                  OnRemoveFromSlot="MenuRemoveFromSlot" ShowRemove="ShowRemoveFromSlot">
     <Activator>
-        <MudDataGrid @key="TabState" @ref="_mudGrid" T="T" Items="_mudItems" ServerData="_serveData" Dense="true" Hover="true" MultiSelection="true" Striped="false"
-                     HorizontalScrollbar="true"
+        <MudDataGrid @key="_gridKey" @ref="_mudGrid" T="T" Items="_mudItems" ServerData="_serveData" Dense="true" Hover="true" MultiSelection="true" Striped="false"
+                     Class="prim-grid"
+                     HorizontalScrollbar="true" Virtualize="_useVirtualize" VirtualizeServerData="_virtualizeServerData"
+                     Height="@(_useVirtualize ? GridHeight : null)" FixedHeader="_useVirtualize" OverscanCount="10"
+                     Comparer="Comparer"
                      SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))"
                      RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))"
                      RowClassFunc="RowClass" @ondblclick="OnGridDblClick">
@@ -103,37 +106,25 @@
                 }
             </ChildRowContent>
         </MudDataGrid>
-        @if (ItemsProvider != null)
-        {
-            @* Scroll sentinel: when this marker scrolls into view the next
-               chunk is fetched and appended — no click-to-paginate. *@
-            <div @ref="_sentinel" style="min-height:2px"></div>
-            <div class="d-flex align-center justify-center py-1">
-                @if (_loadingChunk)
-                {
-                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                    <MudText Typo="Typo.caption" Style="opacity:0.7">Loading more…</MudText>
-                }
-                else if (_hasMore && _rows.Count > 0)
-                {
-                    <MudText Typo="Typo.caption" Style="opacity:0.7">Scroll for more</MudText>
-                }
-                else if (!_hasMore && _rows.Count > 0)
-                {
-                    <MudText Typo="Typo.caption" Style="opacity:0.7">All @_rows.Count rows loaded</MudText>
-                }
-            </div>
-        }
     </Activator>
 </GridContextMenu>
 
 @code {
     [Parameter] public IEnumerable<T> Items { get; set; } = Enumerable.Empty<T>();
-    // Infinite-scroll mode: when set, the grid fetches PageSize-row chunks
-    // from this provider (first chunk on load, more via the scroll sentinel)
+    // Virtualized mode: when set, the grid renders only the visible window
+    // (+overscan) and fetches 500-row chunks from this provider on demand
     // instead of rendering a pre-loaded Items list.
     [Parameter] public Func<GridPageRequest, Task<GridPageResult<T>>>? ItemsProvider { get; set; }
     [Parameter] public int PageSize { get; set; } = 500;
+    // Virtualized mode: total matching rows for the current filter (single
+    // indexed COUNT(*)). Invoked once per query; cached until the next reset.
+    [Parameter] public Func<Task<int>>? CountProvider { get; set; }
+    // Virtualized mode: every matching Id in Id order, for select-all across
+    // rows that are not currently loaded.
+    [Parameter] public Func<Task<List<int>>>? AllIdsProvider { get; set; }
+    // Fixed scroll height of the virtualized grid body. Only applies in
+    // provider mode; Items-mode grids keep their natural height.
+    [Parameter] public string GridHeight { get; set; } = "calc(100dvh - 300px)";
     // Called when the chunk pipeline resets (filter/sort change) so wrappers
     // can drop per-row supplemental caches (paths, child flags, labels).
     [Parameter] public Action? OnReset { get; set; }
@@ -190,34 +181,54 @@
     // Per-row child lists, loaded lazily on first expansion.
     private readonly Dictionary<int, List<ChildItem>> _childCache = new();
 
-    // Infinite-scroll state (only used when ItemsProvider is set).
+    // Virtualized provider-mode state. The grid renders only the visible
+    // window (+overscan); 500-row chunks are fetched on demand through
+    // ItemsProvider and cached here. Chunks outside a small neighborhood of
+    // the window are evicted, so the DOM and the Blazor circuit stay small
+    // no matter how many rows the query matches.
     private MudDataGrid<T>? _mudGrid;
-    private readonly List<T> _rows = new();
-    private bool _hasMore = true;
-    private bool _loadingChunk;
-    private bool _needsFetch = true;
+    private readonly Dictionary<int, List<T>> _chunks = new();
+    private string _chunkSortKey = "";
+    private int _totalItems;
+    private bool _totalValid;
+    // Generation counter: reset/sort/tab bumps it so chunk fetches from a
+    // stale query are discarded instead of polluting the new cache.
+    private int _querySeq;
+    // Inner grid recreation key: bumped on every reset so the Virtualize
+    // component restarts at row 0 with the new query.
+    private string _gridKey = "g0";
+    private int _gridSeq;
+    // Stable IDs selected by a tab descriptor or a cross-page focus request,
+    // applied to rows as their chunks stream into view.
+    private readonly HashSet<int> _restoreSelectIds = new();
+    // Identity comparer: rows are the same object when their stable Ids
+    // match, so selection/expansion survive chunk eviction and re-fetch.
+    private IEqualityComparer<T>? _comparer;
+    private IEqualityComparer<T> Comparer => _comparer ??= new IdComparer<T>(x => GetInfo(x).Id);
+    private sealed class IdComparer<TItem>(Func<TItem, int> idOf) : IEqualityComparer<TItem>
+    {
+        public bool Equals(TItem? x, TItem? y) => x is not null && y is not null && idOf(x) == idOf(y);
+        public int GetHashCode(TItem obj) => obj is null ? 0 : idOf(obj).GetHashCode();
+    }
+    private bool _useVirtualize => ItemsProvider != null;
     private string? _sortCol;
     private bool _sortDesc;
-    private ElementReference _sentinel;
-    private DotNetObjectReference<ObjectGrid<T>>? _dotNetRef;
     private bool _disposed;
     // The TabState instance already applied to this grid; a new reference
     // means the page switched tabs.
     private SearchTabState? _appliedTabState;
-    // True when the current sort came from a tab descriptor rather than the
-    // grid's sort UI: the next ServerData call must not treat the empty sort
-    // UI as a user-cleared sort.
-    private bool _sortFromTab;
     // Stable per-column sort delegates, so a GridState sort definition can be
     // mapped back to its column key by reference equality.
     private readonly Dictionary<string, Func<T, object>> _sortFuncs = new();
 
-    private IEnumerable<T> _gridItems => ItemsProvider != null ? _rows : Items;
+    private IEnumerable<T> _gridItems => ItemsProvider != null ? _chunks.Values.SelectMany(c => c) : Items;
     // MudDataGrid forbids supplying both Items and ServerData: in provider
-    // mode the Items parameter must be null (the grid reads via ServeData).
+    // mode the Items parameter must be null (the grid reads via the
+    // VirtualizeServerData delegate).
     private IEnumerable<T>? _mudItems => ItemsProvider != null ? null : Items;
-    private Func<GridState<T>, Task<GridData<T>>>? _serveData
-        => ItemsProvider != null ? ServeData : null;
+    private Func<GridState<T>, Task<GridData<T>>>? _serveData => null;
+    private Func<GridStateVirtualize<T>, CancellationToken, Task<GridData<T>>>? _virtualizeServerData
+        => ItemsProvider != null ? ServeVirtualized : null;
 
     private bool NoTarget => _selected.Count == 0 && !_hasActive;
 
@@ -239,12 +250,12 @@
     protected override void OnInitialized()
     {
         _effective = ExportCols.ToList();
+        _selected = new HashSet<T>(Comparer);
         if (TabState != null)
         {
             _appliedTabState = TabState;
             _sortCol = TabState.SortColumn;
             _sortDesc = TabState.SortDescending;
-            _sortFromTab = TabState.SortColumn != null;
             _forceExpanded = new HashSet<int>(TabState.ExpandedIds);
         }
         App.Changed += OnAppChanged;
@@ -277,18 +288,25 @@
     }
 
     // Applies the new tab's descriptor. The inner MudDataGrid is keyed by
-    // TabState, so this render recreates it with clean sort UI — its initial
-    // ServerData call then fetches the first chunk for the new query.
+    // _gridKey, so this render recreates it with clean sort UI — its initial
+    // VirtualizeServerData call then fetches the first chunk for the new
+    // query. Inactive tabs keep no loaded rows.
     private async Task ApplyTabStateAsync()
     {
         var ts = TabState!;
         _sortCol = ts.SortColumn;
         _sortDesc = ts.SortDescending;
-        _sortFromTab = ts.SortColumn != null;
         _forceExpanded = new HashSet<int>(ts.ExpandedIds);
         await ResolveColumnLayoutAsync();
-        _rows.Clear(); _hasMore = true; _needsFetch = true; _loadingChunk = false;
-        _selected.Clear(); _active = default; _hasActive = false;
+        _chunks.Clear();
+        _chunkSortKey = "";
+        _totalValid = false;
+        _querySeq++;
+        _gridKey = $"g{++_gridSeq}";
+        _selected.Clear();
+        _restoreSelectIds.Clear();
+        if (ts.SelectedIds.Count > 0) _restoreSelectIds.UnionWith(ts.SelectedIds);
+        _active = default; _hasActive = false;
         OnReset?.Invoke();
         UpdateMenuHeader();
         StateHasChanged();
@@ -310,13 +328,6 @@
         App.Changed -= OnAppChanged;
         foreach (var r in _hotkeyRegs) r.Dispose();
         _hotkeyRegs.Clear();
-        if (_dotNetRef != null)
-        {
-            try { _ = PrimJs.TryInvokeVoidAsync(JS, "prim.unobserveSentinel", _sentinel); }
-            catch (Exception) { /* circuit going away — nothing to clean up */ }
-            _dotNetRef.Dispose();
-            _dotNetRef = null;
-        }
     }
 
     private void OnAppChanged() => InvokeAsync(StateHasChanged);
@@ -326,22 +337,19 @@
     // and expands its children when asked.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && ItemsProvider != null && !_disposed)
-        {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            await PrimJs.TryInvokeVoidAsync(JS, "prim.observeSentinel", _sentinel, _dotNetRef);
-        }
         if (App.TryTakeFocus(Kind, out var f) && f != null)
         {
             var item = _gridItems.FirstOrDefault(x => GetInfo(x).Id == f.Id);
             if (item is null)
             {
-                // Not in this grid's items (e.g. filtered out) — still show details.
+                // Not in this grid's loaded chunks (or filtered out): select it
+                // when its chunk scrolls into view, and still show details.
+                if (ItemsProvider != null) _restoreSelectIds.Add(f.Id);
                 App.SetViewPane(f.Kind, f.Id, await Prim.GetObjectLabelAsync(f.Kind, f.Id));
             }
             else
             {
-                _selected = new HashSet<T> { item };
+                _selected = new HashSet<T>(Comparer) { item };
                 _active = item; _hasActive = true;
                 var (kind, id, label) = GetInfo(item);
                 if (TabState != null) TabState.SelectedIds = new HashSet<int> { id };
@@ -421,123 +429,165 @@
         }
     }
 
-    // ---------- Infinite-scroll chunk pipeline ----------
+    // ---------- Virtualized chunk pipeline ----------
 
-    private async Task<GridData<T>> ServeData(GridState<T> state)
+    // Serves the grid's visible window (+overscan). The total comes from a
+    // single indexed COUNT(*) per query; rows come from 500-row chunk fetches
+    // (keyset cursor on default Id ordering, offset otherwise). Only chunks
+    // near the window are kept — the DOM never holds the whole result set.
+    private async Task<GridData<T>> ServeVirtualized(GridStateVirtualize<T> state, CancellationToken ct)
     {
-        await ApplySortFromState(state);
-        if (_needsFetch)
+        if (ItemsProvider == null || _disposed)
+            return new GridData<T> { Items = new List<T>(), TotalItems = 0 };
+        var (sortCol, sortDesc, sortChanged) = ResolveSort(state);
+        var sortKey = $"{sortCol}|{sortDesc}";
+        var seq = _querySeq;
+        if (sortKey != _chunkSortKey)
         {
-            _needsFetch = false;
-            await FetchChunkAsync();
+            _chunks.Clear();
+            _chunkSortKey = sortKey;
+            _querySeq++; seq = _querySeq;
         }
-        return new GridData<T> { TotalItems = _rows.Count, Items = _rows };
+        try
+        {
+            if (CountProvider != null && !_totalValid)
+            {
+                _totalItems = await CountProvider();
+                _totalValid = true;
+            }
+            var window = await GetWindowAsync(state.StartIndex, state.Count, sortCol, sortDesc, seq, ct);
+            if (sortChanged) await NotifyTabStateChanged();
+            if (!_disposed) StateHasChanged();
+            return new GridData<T> { Items = window, TotalItems = _totalItems };
+        }
+        catch (OperationCanceledException)
+        {
+            return new GridData<T> { Items = new List<T>(), TotalItems = _totalItems };
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not load rows: {ex.Message}", Severity.Error);
+            return new GridData<T> { Items = new List<T>(), TotalItems = _totalItems };
+        }
     }
 
-    private async Task ApplySortFromState(GridState<T> state)
+    // Maps the grid's sort UI (or the tab's stored sort on first load) to an
+    // entity sort column. A real header interaction overrides the tab sort
+    // and persists it back to the tab descriptor.
+    private (string? SortColumn, bool SortDescending, bool Changed) ResolveSort(GridStateVirtualize<T> state)
     {
         var def = state.SortDefinitions.FirstOrDefault();
         string? key = null;
         var desc = false;
         if (def?.SortFunc != null)
         {
-            // A real sort-header interaction overrides any tab-applied sort.
-            _sortFromTab = false;
-            key = _sortFuncs.FirstOrDefault(kv => kv.Value == def.SortFunc).Key;
+            key = _sortFuncs.FirstOrDefault(kv => ReferenceEquals(kv.Value, def.SortFunc)).Key;
             desc = def.Descending;
         }
-        else if (_sortFromTab)
+        else
         {
-            // The current sort came from the tab descriptor; the grid's sort
-            // UI is intentionally empty. Keep the tab sort for this load.
-            _sortFromTab = false;
-            return;
+            // No header sort: keep whatever the tab (or the last header
+            // interaction) established; null means default Id ordering.
+            key = _sortCol;
+            desc = _sortDesc;
         }
-        if (key != _sortCol || desc != _sortDesc)
+        var changed = key != _sortCol || desc != _sortDesc;
+        if (changed)
         {
             _sortCol = key; _sortDesc = desc;
-            _rows.Clear(); _hasMore = true; _needsFetch = true;
-            _selected.Clear(); _active = default; _hasActive = false;
             if (TabState != null)
             {
                 TabState.SortColumn = key;
                 TabState.SortDescending = desc;
                 TabState.SelectedIds.Clear();
             }
-            OnReset?.Invoke();
-            UpdateMenuHeader();
-            await NotifyTabStateChanged();
         }
+        return (key, desc, changed);
     }
 
     private Task NotifyTabStateChanged()
         => TabStateChanged.HasDelegate ? TabStateChanged.InvokeAsync() : Task.CompletedTask;
 
-    private async Task FetchChunkAsync()
+    // Returns the rows for [start, start+count), fetching any missing chunks.
+    private async Task<List<T>> GetWindowAsync(int start, int count, string? sortCol, bool sortDesc, int seq, CancellationToken ct)
     {
-        if (ItemsProvider == null || _loadingChunk || _disposed) return;
-        _loadingChunk = true;
-        try
+        var result = new List<T>(Math.Min(count, PageSize * 2));
+        if (count <= 0 || start < 0) return result;
+        var first = start / PageSize;
+        var last = (start + count - 1) / PageSize;
+        // Evict chunks outside a small neighborhood of the window.
+        foreach (var k in _chunks.Keys.Where(k => k < first - 4 || k > last + 4).ToList())
+            _chunks.Remove(k);
+        for (var i = first; i <= last; i++)
         {
-            var req = new GridPageRequest
+            ct.ThrowIfCancellationRequested();
+            if (seq != _querySeq || _disposed) return new List<T>(); // stale query — abandon
+            if (!_chunks.TryGetValue(i, out var chunk))
             {
-                Skip = _rows.Count,
-                AfterId = _rows.Count == 0 ? null : GetInfo(_rows[^1]).Id,
-                Take = PageSize,
-                SortColumn = _sortCol,
-                SortDescending = _sortDesc,
-            };
-            var page = await ItemsProvider(req);
-            _rows.AddRange(page.Rows);
-            _hasMore = page.HasMore;
-            // Tab restore: re-select rows whose stable IDs were selected when
-            // the tab was saved, as they stream in.
-            if (TabState != null && TabState.SelectedIds.Count > 0)
-            {
-                foreach (var r in page.Rows)
-                    if (TabState.SelectedIds.Contains(GetInfo(r).Id))
-                        _selected.Add(r);
-                UpdateMenuHeader();
+                int? afterId = null;
+                if (string.IsNullOrEmpty(sortCol) && i > 0
+                    && _chunks.TryGetValue(i - 1, out var prev) && prev.Count > 0)
+                    afterId = GetInfo(prev[^1]).Id;
+                chunk = await FetchChunkCoreAsync(i, afterId, sortCol, sortDesc);
+                if (seq != _querySeq || _disposed) return new List<T>();
+                _chunks[i] = chunk;
+                // Tab restore: re-select rows whose stable IDs were selected
+                // when the tab was saved, as their chunks stream into view.
+                if (_restoreSelectIds.Count > 0)
+                    foreach (var r in chunk)
+                        if (_restoreSelectIds.Contains(GetInfo(r).Id))
+                            _selected.Add(r);
             }
+            var off = i == first ? start - i * PageSize : 0;
+            var take = Math.Min(chunk.Count - off, start + count - i * PageSize);
+            if (take <= 0) break;
+            result.AddRange(chunk.Skip(off).Take(take));
         }
-        catch (Exception ex)
-        {
-            _hasMore = false;
-            Snackbar.Add($"Could not load more rows: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _loadingChunk = false;
-        }
-        if (!_disposed) StateHasChanged();
+        return result;
     }
 
-    // Fired by the scroll sentinel (IntersectionObserver in prim.js) when the
-    // bottom marker scrolls into view. Guarded so chunks never overlap; while
-    // the marker stays visible it keeps firing until _hasMore is false.
-    [JSInvokable]
-    public async Task OnSentinelVisible()
+    // Fetches one 500-row chunk through the page's provider (filter applied
+    // there). The wrapper's provider also runs per-chunk enrichment (paths,
+    // child flags, labels), so cached chunks are fully display-ready.
+    private async Task<List<T>> FetchChunkCoreAsync(int chunkIndex, int? afterId, string? sortCol, bool sortDesc)
     {
-        if (ItemsProvider == null || _loadingChunk || !_hasMore || _disposed) return;
-        await FetchChunkAsync();
-        if (_mudGrid != null && !_disposed)
-            await _mudGrid.ReloadServerData();
+        var req = new GridPageRequest
+        {
+            Skip = chunkIndex * PageSize,
+            AfterId = afterId,
+            Take = PageSize,
+            SortColumn = sortCol,
+            SortDescending = sortDesc,
+        };
+        var page = await ItemsProvider!(req);
+        return page.Rows;
     }
 
-    // Drops all loaded chunks and re-fetches from the first page — used after
-    // filter changes and create/edit/delete operations.
-    public async Task ResetAsync()
+    // Drops all cached chunks and re-queries from row 0 — used after filter
+    // changes and create/edit/delete operations.
+    public Task ResetAsync()
     {
-        _rows.Clear(); _hasMore = true; _needsFetch = true; _loadingChunk = false;
-        _selected.Clear(); _active = default; _hasActive = false;
-        // A reset is a new query within the tab: drop the tab's selection.
-        TabState?.SelectedIds.Clear();
+        if (ItemsProvider != null)
+        {
+            _chunks.Clear();
+            _chunkSortKey = "";
+            _totalValid = false;
+            _querySeq++;
+            _gridKey = $"g{++_gridSeq}";
+            _selected.Clear();
+            _restoreSelectIds.Clear();
+            _active = default; _hasActive = false;
+            // A reset is a new query within the tab: drop the tab's selection.
+            TabState?.SelectedIds.Clear();
+        }
+        else if (_mudGrid != null)
+        {
+            _ = _mudGrid.ReloadServerData();
+        }
         OnReset?.Invoke();
         UpdateMenuHeader();
-        if (_mudGrid != null && ItemsProvider != null)
-            await _mudGrid.ReloadServerData();
-        else
-            StateHasChanged();
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     public void ClearSelection()
@@ -552,12 +602,15 @@
         if (_singleSelectPending && _singleSelectItem is not null)
         {
             _singleSelectPending = false;
-            _selected = new HashSet<T> { _singleSelectItem };
+            _selected = new HashSet<T>(Comparer) { _singleSelectItem };
         }
         else
         {
-            _selected = v;
+            // Normalize onto the ID comparer: the grid hands us instances it
+            // rendered, which may be older chunk copies than ours.
+            _selected = new HashSet<T>(v, Comparer);
         }
+        _restoreSelectIds.Clear();
         UpdateMenuHeader();
         await SyncTabSelectionAsync();
     }
@@ -637,11 +690,37 @@
         };
     }
 
+    // Ctrl+A across the whole result set: walks the 500-row chunk pipeline
+    // with the current sort/filter (enrichment included). Capped — selecting
+    // millions of rows would exhaust the circuit's memory.
+    private const int MaxSelectAllRows = 50000;
+
     private async Task SelectAll()
     {
-        // Ctrl+A selects loaded rows only — infinite scroll never
-        // materializes the full result set.
-        _selected = _gridItems.ToHashSet();
+        _selected.Clear();
+        if (ItemsProvider == null)
+        {
+            foreach (var x in Items) _selected.Add(x);
+        }
+        else if (AllIdsProvider != null && CountProvider != null)
+        {
+            var total = _totalValid ? _totalItems : await CountProvider();
+            var target = Math.Min(total, MaxSelectAllRows);
+            if (total > MaxSelectAllRows)
+                Snackbar.Add($"Select-all capped at {MaxSelectAllRows:N0} rows — refine the filter to narrow it.", Severity.Warning);
+            var seq = _querySeq;
+            int? afterId = null;
+            for (var i = 0; i * PageSize < target; i++)
+            {
+                if (seq != _querySeq || _disposed) break;
+                var rows = await FetchChunkCoreAsync(i, afterId, _sortCol, _sortDesc);
+                foreach (var r in rows) _selected.Add(r);
+                // Keyset cursor only valid for default Id ordering.
+                afterId = string.IsNullOrEmpty(_sortCol) && rows.Count > 0
+                    ? GetInfo(rows[^1]).Id : null;
+                if (rows.Count < PageSize) break;
+            }
+        }
         UpdateMenuHeader();
         StateHasChanged();
         await SyncTabSelectionAsync();

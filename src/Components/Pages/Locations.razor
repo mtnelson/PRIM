@@ -18,6 +18,7 @@
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <LocationGrid @ref="_grid" ItemsProvider="ProvideLocations" GridId="locations" Scope="locations"
+              CountProvider="() => Prim.CountLocationsAsync(null)" AllIdsProvider="() => Prim.GetAllLocationIdsAsync(null)"
               EditItem="EditLocation"
               CanMove="false" CanDelete="false"
               OnChanged="OnGridChanged" TabState="_tabState" TabStateChanged="OnTabStateChanged">

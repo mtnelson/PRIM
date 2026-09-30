@@ -9,6 +9,7 @@
             ExportCols="GridColumns.ContainerColumns()" RowToDict="RowWithPath"
             GetHomeRef="GetHomeRef" GetAssigneeRef="GetAssigneeRef" GetPath="GetPath"
             GetLabelChips="GetChips"
+            CountProvider="CountProvider" AllIdsProvider="AllIdsProvider"
             Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
             CanMove="@CanMove" CanDelete="@CanDelete"
             ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
@@ -19,6 +20,8 @@
 
     [Parameter] public IEnumerable<Container> Items { get; set; } = Enumerable.Empty<Container>();
     [Parameter] public Func<GridPageRequest, Task<GridPageResult<Container>>>? ItemsProvider { get; set; }
+    [Parameter] public Func<Task<int>>? CountProvider { get; set; }
+    [Parameter] public Func<Task<List<int>>>? AllIdsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "containers";
     [Parameter] public string Scope { get; set; } = "containers";
     [Parameter] public Func<Container, Task<bool>>? EditItem { get; set; }

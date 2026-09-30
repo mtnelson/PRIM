@@ -17,7 +17,7 @@
             <MudSpacer />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Load">Refresh</MudButton>
         </div>
-        <MudDataGrid Items="_deletedRows" Dense="true" Hover="true" HorizontalScrollbar="true">
+        <MudDataGrid Items="_deletedRows" Dense="true" Hover="true" HorizontalScrollbar="true" Class="prim-grid">
             <Columns>
                 @foreach (var col in _deletedCols)
                 {

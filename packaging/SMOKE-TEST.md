@@ -71,16 +71,23 @@ Click each shortcut; each page renders its grid/content with no error:
 - [ ] Advanced Search: add two criteria with AND, run; switch to OR, run.
       Both return sensible results.
 
-## 4b. Test data and infinite scroll
+## 4b. Test data and virtualized scroll
 
 - [ ] Admin → **Test Data** → **Generate 1,500 Test Records**: confirms and
       reports 1,500 created (one-time; rows are prefixed `[TEST]`).
-- [ ] Records grid: scroll to the bottom — more rows load automatically
-      (500 at a time), no pagination buttons, no manual "load more".
-- [ ] With 1,500+ records, Ctrl+A selects only the rows loaded so far;
-      the selection counter shows how many are loaded.
-- [ ] Type in the filter box: the grid resets to the first 500 matches;
-      debounced, no full-table freeze.
+- [ ] Records grid: the header shows the live total (e.g. "1,505 total").
+- [ ] Scroll DOWN vertically — more rows load automatically, with no
+      horizontal scrolling needed first. The column header stays visible
+      (sticky) while scrolling.
+- [ ] Exactly ONE horizontal scrollbar on the grid (none on the page body).
+      Horizontal scroll still reaches the rightmost columns.
+- [ ] With 1,500+ records the grid stays responsive (no long freeze).
+- [ ] Ctrl+A selects all matching rows (up to 50,000); the counter shows
+      the selection count.
+- [ ] Type in the filter box: the grid resets to the first matches and the
+      header total updates; debounced, no full-table freeze.
+- [ ] Click a column header to sort; the sort persists when you switch
+      search tabs and come back.
 
 ## 4c. Search tabs
 

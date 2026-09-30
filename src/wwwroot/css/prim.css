@@ -48,3 +48,11 @@ tr.prim-row-nochildren td.mud-table-cell:first-child .mud-icon-button.mud-disabl
     }
     .label-sheet:last-child { page-break-after: auto; }
 }
+
+/* PRIM data grids: exactly one horizontal scrollbar.
+   MudBlazor gives the outer grid element overflow-x when HorizontalScrollbar is
+   set; the inner .mud-table-container must never add a second one, and the
+   grid must be allowed to shrink inside flex layouts (min-width: 0) so the
+   page body never grows its own horizontal scrollbar. */
+.prim-grid { min-width: 0; }
+.prim-grid .mud-table-container { overflow-x: clip; }

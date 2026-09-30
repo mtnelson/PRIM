@@ -1,5 +1,13 @@
 # PRIM Changelog
 
+## v0.10.2 — 2026-09-30
+- Grids are now truly virtualized (`MudDataGrid` `Virtualize` + `VirtualizeServerData`): scrolling fetches 500-row chunks on demand instead of accumulating every loaded row in memory, so 3,000+ records stay responsive and the first rows render without any horizontal scrolling. A fixed grid height with a sticky header keeps the column titles visible while scrolling.
+- Fixed the duplicate horizontal scrollbar: the grid now owns exactly one, via a PRIM-specific CSS rule (also applied to Admin → Deleted Records).
+- Rows added after the first chunk no longer wait for a horizontal scroll to appear — vertical scrolling loads them directly.
+- Select-all (Ctrl+A) on a filtered grid now uses a server-side ID list capped at 50,000 rows instead of loading entities.
+- The grid header shows the live total row count for the current filter.
+- Bumped the `prim.js` and `prim.css` cache-busters so browsers pick up the current assets.
+
 ## v0.10.1 — 2026-09-30
 - Fixed a launch error on the main data pages: the grid was handing MudBlazor both `Items` and `ServerData` at once, which it forbids. The grid now supplies only `ServerData` in infinite-scroll mode.
 - Fixed the logo image: the repo copy was base64 text instead of JPEG bytes, so browsers couldn't render it. Replaced with the real image.

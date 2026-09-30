@@ -50,6 +50,7 @@
 {
     <MudText Typo="Typo.subtitle1" Class="mb-2">@_resultsTitle</MudText>
     <RecordGrid @ref="_grid" ItemsProvider="ProvideSearchResults" GridId="advanced" Scope="advanced"
+                CountProvider="() => Prim.AdvancedSearchRecordsCountAsync(_criteria, _logic)" AllIdsProvider="() => Prim.AdvancedSearchRecordIdsAsync(_criteria, _logic)"
                 EditItem="EditRecord" DeleteItems="DeleteRecords"
                 OnChanged="RunSearch" TabState="_tabState" TabStateChanged="OnTabStateChanged">
     </RecordGrid>

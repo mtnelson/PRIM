@@ -24,6 +24,7 @@
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <RecordGrid @ref="_grid" ItemsProvider="ProvideRecords" GridId="records" Scope="records"
+            CountProvider="() => Prim.CountRecordsAsync(_filter)" AllIdsProvider="() => Prim.GetAllRecordIdsAsync(_filter)"
             EditItem="EditRecord" DeleteItems="DeleteRecords"
             OnChanged="OnGridChanged" TabState="_tabState" TabStateChanged="OnTabStateChanged">
 </RecordGrid>

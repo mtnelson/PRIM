@@ -1,11 +1,12 @@
 namespace Prim.Services;
 
-/// <summary>A single infinite-scroll chunk request from a data grid.</summary>
+/// <summary>A single 500-row chunk request from a virtualized data grid.</summary>
 public sealed record GridPageRequest
 {
-    /// <summary>Rows already loaded (used for offset fallback on explicit sorts).</summary>
+    /// <summary>Global row offset (used for explicit sorts and jump fetches).</summary>
     public int Skip { get; init; }
-    /// <summary>Id of the last loaded row (keyset cursor for default ordering).</summary>
+    /// <summary>Id of the last row of the previous chunk (keyset cursor for
+    /// default Id ordering; preferred over Skip on large tables).</summary>
     public int? AfterId { get; init; }
     public int Take { get; init; } = 500;
     public string? Filter { get; init; }
@@ -13,8 +14,7 @@ public sealed record GridPageRequest
     public bool SortDescending { get; init; }
 }
 
-/// <summary>One chunk of grid rows. HasMore drives the scroll sentinel:
-/// while true the grid keeps fetching as the user scrolls.</summary>
+/// <summary>One chunk of grid rows.</summary>
 public sealed class GridPageResult<T>
 {
     public List<T> Rows { get; init; } = new();

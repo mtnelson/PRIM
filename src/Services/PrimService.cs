@@ -130,48 +130,121 @@ public class PrimService
     public async Task<GridPageResult<RecordItem>> GetRecordsPageAsync(GridPageRequest req)
     {
         using var db = _factory.CreateDbContext();
-        IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
-        if (!string.IsNullOrWhiteSpace(req.Filter))
-        {
-            var f = req.Filter.Trim();
-            q = q.Where(r => r.RecordNumber.Contains(f) || r.CaseNumber.Contains(f)
-                          || r.Barcode.Contains(f) || (r.Subject != null && r.Subject.Contains(f)));
-        }
-        return await PageAsync(q, req, RecordSortProps);
+        return await PageAsync(RecordsQuery(db, req.Filter), req, RecordSortProps);
     }
 
     public async Task<GridPageResult<Container>> GetContainersPageAsync(GridPageRequest req)
     {
         using var db = _factory.CreateDbContext();
-        IQueryable<Container> q = db.Containers.AsNoTracking();
-        if (!string.IsNullOrWhiteSpace(req.Filter))
-        {
-            var f = req.Filter.Trim();
-            q = q.Where(c => c.ContainerName.Contains(f) || c.Barcode.Contains(f)
-                          || (c.Description != null && c.Description.Contains(f)));
-        }
-        return await PageAsync(q, req, ContainerSortProps);
+        return await PageAsync(ContainersQuery(db, req.Filter), req, ContainerSortProps);
     }
 
     public async Task<GridPageResult<Location>> GetLocationsPageAsync(GridPageRequest req)
     {
         using var db = _factory.CreateDbContext();
-        IQueryable<Location> q = db.Locations.AsNoTracking();
-        if (!string.IsNullOrWhiteSpace(req.Filter))
-        {
-            var f = req.Filter.Trim();
-            q = q.Where(l => l.LocationName.Contains(f) || l.Barcode.Contains(f)
-                          || (l.Description != null && l.Description.Contains(f)));
-        }
-        return await PageAsync(q, req, LocationSortProps);
+        return await PageAsync(LocationsQuery(db, req.Filter), req, LocationSortProps);
     }
 
     public async Task<GridPageResult<AppUser>> GetUsersPageAsync(GridPageRequest req, bool includeInactive)
     {
         using var db = _factory.CreateDbContext();
+        return await PageAsync(UsersQuery(db, includeInactive), req, UserSortProps);
+    }
+
+    // Shared filtered query builders: the page, count, and id-list methods
+    // below must apply the exact same predicate so virtualization totals and
+    // select-all stay consistent with the rows shown.
+    private static IQueryable<RecordItem> RecordsQuery(PrimDbContext db, string? filter)
+    {
+        IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            var f = filter.Trim();
+            q = q.Where(r => r.RecordNumber.Contains(f) || r.CaseNumber.Contains(f)
+                          || r.Barcode.Contains(f) || (r.Subject != null && r.Subject.Contains(f)));
+        }
+        return q;
+    }
+
+    private static IQueryable<Container> ContainersQuery(PrimDbContext db, string? filter)
+    {
+        IQueryable<Container> q = db.Containers.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            var f = filter.Trim();
+            q = q.Where(c => c.ContainerName.Contains(f) || c.Barcode.Contains(f)
+                          || (c.Description != null && c.Description.Contains(f)));
+        }
+        return q;
+    }
+
+    private static IQueryable<Location> LocationsQuery(PrimDbContext db, string? filter)
+    {
+        IQueryable<Location> q = db.Locations.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            var f = filter.Trim();
+            q = q.Where(l => l.LocationName.Contains(f) || l.Barcode.Contains(f)
+                          || (l.Description != null && l.Description.Contains(f)));
+        }
+        return q;
+    }
+
+    private static IQueryable<AppUser> UsersQuery(PrimDbContext db, bool includeInactive)
+    {
         IQueryable<AppUser> q = db.Users.AsNoTracking();
         if (!includeInactive) q = q.Where(u => u.Active);
-        return await PageAsync(q, req, UserSortProps);
+        return q;
+    }
+
+    // Total matching rows for the virtualized grids (single indexed COUNT(*)).
+    public async Task<int> CountRecordsAsync(string? filter)
+    {
+        using var db = _factory.CreateDbContext();
+        return await RecordsQuery(db, filter).CountAsync();
+    }
+
+    public async Task<int> CountContainersAsync(string? filter)
+    {
+        using var db = _factory.CreateDbContext();
+        return await ContainersQuery(db, filter).CountAsync();
+    }
+
+    public async Task<int> CountLocationsAsync(string? filter)
+    {
+        using var db = _factory.CreateDbContext();
+        return await LocationsQuery(db, filter).CountAsync();
+    }
+
+    public async Task<int> CountUsersAsync(bool includeInactive)
+    {
+        using var db = _factory.CreateDbContext();
+        return await UsersQuery(db, includeInactive).CountAsync();
+    }
+
+    // All matching Ids (Id order) for select-all across a virtualized grid.
+    public async Task<List<int>> GetAllRecordIdsAsync(string? filter)
+    {
+        using var db = _factory.CreateDbContext();
+        return await RecordsQuery(db, filter).OrderBy(r => r.Id).Select(r => r.Id).ToListAsync();
+    }
+
+    public async Task<List<int>> GetAllContainerIdsAsync(string? filter)
+    {
+        using var db = _factory.CreateDbContext();
+        return await ContainersQuery(db, filter).OrderBy(c => c.Id).Select(c => c.Id).ToListAsync();
+    }
+
+    public async Task<List<int>> GetAllLocationIdsAsync(string? filter)
+    {
+        using var db = _factory.CreateDbContext();
+        return await LocationsQuery(db, filter).OrderBy(l => l.Id).Select(l => l.Id).ToListAsync();
+    }
+
+    public async Task<List<int>> GetAllUserIdsAsync(bool includeInactive)
+    {
+        using var db = _factory.CreateDbContext();
+        return await UsersQuery(db, includeInactive).OrderBy(u => u.Id).Select(u => u.Id).ToListAsync();
     }
 
     private static async Task<GridPageResult<T>> PageAsync<T>(IQueryable<T> q, GridPageRequest req,
@@ -185,6 +258,11 @@ public class PrimService
                 q = req.SortDescending
                     ? q.Where(x => EF.Property<int>(x, "Id") < req.AfterId.Value)
                     : q.Where(x => EF.Property<int>(x, "Id") > req.AfterId.Value);
+            else if (req.Skip > 0)
+                // Jump fetch (no keyset cursor available): offset is slower on
+                // huge tables but correct; the grid prefers keyset whenever the
+                // previous chunk is cached.
+                q = q.Skip(req.Skip);
             q = req.SortDescending
                 ? q.OrderByDescending(x => EF.Property<int>(x, "Id"))
                 : q.OrderBy(x => EF.Property<int>(x, "Id"));
@@ -293,24 +371,35 @@ public class PrimService
         { "RecordNumber","RecordType","CaseClassification","FieldOffice","CaseNumber","SubfileId","Volume",
           "SerialStart","SerialEnd","Barcode","Home","Assignee","Subject","State" };
 
+    private static IQueryable<RecordItem> AdvancedSearchQuery(PrimDbContext db,
+        List<(string Field, string Op, string Value)> rows, string logic)
+    {
+        IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
+        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
+        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate(crit, logic));
+        return q;
+    }
+
     public async Task<GridPageResult<RecordItem>> AdvancedSearchRecordsPageAsync(
         List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req)
     {
         using var db = _factory.CreateDbContext();
-        IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
-        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
-        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate(crit, logic));
-        return await PageAsync(q, req, RecordSortProps);
+        return await PageAsync(AdvancedSearchQuery(db, rows, logic), req, RecordSortProps);
     }
 
     public async Task<int> AdvancedSearchRecordsCountAsync(
         List<(string Field, string Op, string Value)> rows, string logic)
     {
         using var db = _factory.CreateDbContext();
-        IQueryable<RecordItem> q = db.Records.Where(r => !r.Deleted);
-        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
-        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate(crit, logic));
-        return await q.CountAsync();
+        return await AdvancedSearchQuery(db, rows, logic).CountAsync();
+    }
+
+    // All matching Ids (Id order) for select-all on an advanced search grid.
+    public async Task<List<int>> AdvancedSearchRecordIdsAsync(
+        List<(string Field, string Op, string Value)> rows, string logic)
+    {
+        using var db = _factory.CreateDbContext();
+        return await AdvancedSearchQuery(db, rows, logic).OrderBy(r => r.Id).Select(r => r.Id).ToListAsync();
     }
 
     // Bounded compatibility wrapper: walks server-side pages up to maxResults.

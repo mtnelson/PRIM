@@ -24,6 +24,7 @@
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <ContainerGrid @ref="_grid" ItemsProvider="ProvideContainers" GridId="containers" Scope="containers"
+            CountProvider="() => Prim.CountContainersAsync(_filter)" AllIdsProvider="() => Prim.GetAllContainerIdsAsync(_filter)"
                EditItem="EditContainer" DeleteItems="DeleteContainers"
                OnChanged="OnGridChanged" TabState="_tabState" TabStateChanged="OnTabStateChanged">
 </ContainerGrid>

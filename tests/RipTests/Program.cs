@@ -529,6 +529,64 @@ var allRecs = await svc.GetRecordsAsync();
         "users page honors includeInactive", $"active={uActive.Rows.Count} all={uAll.Rows.Count}");
 }
 
+// ---- virtualization support: counts, id lists, jump fetches ----
+{
+    var allRecsNow = await svc.GetRecordsAsync();
+    var n = allRecsNow.Count;
+    Check(await svc.CountRecordsAsync(null) == n, "CountRecordsAsync(null) == full set", $"got {await svc.CountRecordsAsync(null)}, want {n}");
+    Check(await svc.CountRecordsAsync("R-000001") == 1, "CountRecordsAsync(filter) honors filter");
+    Check(await svc.CountRecordsAsync("ZZZ-NO-MATCH") == 0, "CountRecordsAsync(no match) == 0");
+    var allIds = await svc.GetAllRecordIdsAsync(null);
+    Check(allIds.Count == n && allIds.SequenceEqual(allIds.OrderBy(x => x)),
+        "GetAllRecordIdsAsync ordered ascending by Id");
+    Check(allIds.ToHashSet().SetEquals(allRecsNow.Select(r => r.Id)),
+        "GetAllRecordIdsAsync covers the full set");
+    Check((await svc.GetAllRecordIdsAsync("R-000001")).Count == 1, "GetAllRecordIdsAsync(filter) -> 1");
+    Check((await svc.GetAllRecordIdsAsync("ZZZ-NO-MATCH")).Count == 0, "GetAllRecordIdsAsync(no match) -> empty");
+
+    // Jump fetch (Skip, no keyset cursor) must return exactly the rows the
+    // keyset walk produces at that offset — the grid relies on this when the
+    // user scrolls to a chunk whose predecessor was evicted.
+    var walk = new List<int>();
+    int? cur = null; bool m = true;
+    while (m)
+    {
+        var p = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 2, AfterId = cur });
+        walk.AddRange(p.Rows.Select(r => r.Id));
+        cur = p.Rows.Count == 0 ? null : p.Rows[^1].Id;
+        m = p.HasMore;
+    }
+    var jump = await svc.GetRecordsPageAsync(new GridPageRequest { Skip = 2, Take = 2 });
+    Check(jump.Rows.Select(r => r.Id).SequenceEqual(walk.Skip(2).Take(2)),
+        "jump fetch (Skip, no AfterId) matches keyset walk at offset");
+    var jumpF = await svc.GetRecordsPageAsync(new GridPageRequest { Skip = 1, Take = 2, Filter = "R-00000" });
+    var fAll = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, Filter = "R-00000" });
+    Check(jumpF.Rows.Select(r => r.Id).SequenceEqual(fAll.Rows.Skip(1).Take(2).Select(r => r.Id)),
+        "filtered jump fetch matches filtered offset window");
+    var sJump = await svc.GetRecordsPageAsync(new GridPageRequest { Skip = 2, Take = 2, SortColumn = "RecordNumber" });
+    var sAll = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, SortColumn = "RecordNumber" });
+    Check(sJump.Rows.Select(r => r.Id).SequenceEqual(sAll.Rows.Skip(2).Take(2).Select(r => r.Id)),
+        "explicit-sort jump fetch matches offset window");
+
+    Check(await svc.CountContainersAsync(null) == (await svc.GetContainersAsync()).Count,
+        "CountContainersAsync(null) == full set");
+    Check(await svc.CountContainersAsync("BOX") >= 1, "CountContainersAsync(filter) >= 1");
+    Check(await svc.CountLocationsAsync(null) == (await svc.GetLocationsAsync()).Count,
+        "CountLocationsAsync(null) == full set");
+    var uCount = await svc.CountUsersAsync(false);
+    var uPage = await svc.GetUsersPageAsync(new GridPageRequest { Take = 500 }, includeInactive: false);
+    Check(uCount == uPage.Rows.Count, "CountUsersAsync(false) matches active page", $"count={uCount} page={uPage.Rows.Count}");
+    var cIds = await svc.GetAllContainerIdsAsync(null);
+    Check(cIds.Count == (await svc.GetContainersAsync()).Count && cIds.SequenceEqual(cIds.OrderBy(x => x)),
+        "GetAllContainerIdsAsync ordered, full set");
+
+    var crit = new List<(string, string, string)> { ("CaseNumber", "=", "12345"), ("RecordType", "=", "Case File") };
+    var advCnt = await svc.AdvancedSearchRecordsCountAsync(crit, "AND");
+    var advIds = await svc.AdvancedSearchRecordIdsAsync(crit, "AND");
+    Check(advIds.Count == advCnt && advIds.SequenceEqual(advIds.OrderBy(x => x)),
+        "adv-search ids match count, ordered ascending", $"count={advCnt} ids={advIds.Count}");
+}
+
 // ---- bulk test-data seeding ----
 {
     var before = (await svc.GetRecordsAsync()).Count;

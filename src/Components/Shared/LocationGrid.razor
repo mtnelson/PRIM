@@ -9,6 +9,7 @@
             ExportCols="GridColumns.LocationColumns()" RowToDict="RowWithPath"
             GetPath="GetPath"
             GetLabelChips="GetChips"
+            CountProvider="CountProvider" AllIdsProvider="AllIdsProvider"
             Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
             CanMove="@CanMove" CanDelete="@CanDelete"
             ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
@@ -19,6 +20,8 @@
 
     [Parameter] public IEnumerable<Location> Items { get; set; } = Enumerable.Empty<Location>();
     [Parameter] public Func<GridPageRequest, Task<GridPageResult<Location>>>? ItemsProvider { get; set; }
+    [Parameter] public Func<Task<int>>? CountProvider { get; set; }
+    [Parameter] public Func<Task<List<int>>>? AllIdsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "locations";
     [Parameter] public string Scope { get; set; } = "locations";
     [Parameter] public Func<Location, Task<bool>>? EditItem { get; set; }

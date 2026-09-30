@@ -10,6 +10,7 @@
             ExportCols="GridColumns.RecordColumns()" RowToDict="RowWithPath"
             GetHomeRef="GetHomeRef" GetAssigneeRef="GetAssigneeRef" GetPath="GetPath"
             GetLabelChips="GetChips"
+            CountProvider="CountProvider" AllIdsProvider="AllIdsProvider"
             Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
             CanMove="@CanMove" CanDelete="@CanDelete"
             ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
@@ -19,9 +20,12 @@
     private ObjectGrid<RecordItem>? _grid;
 
     [Parameter] public IEnumerable<RecordItem> Items { get; set; } = Enumerable.Empty<RecordItem>();
-    // When set, the grid infinite-scrolls through this provider (per-chunk
+    // When set, the grid virtualizes through this provider (per-chunk
     // enrichment included) instead of rendering Items.
     [Parameter] public Func<GridPageRequest, Task<GridPageResult<RecordItem>>>? ItemsProvider { get; set; }
+    // Total matching rows + all matching Ids, for the virtualized grid.
+    [Parameter] public Func<Task<int>>? CountProvider { get; set; }
+    [Parameter] public Func<Task<List<int>>>? AllIdsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "records";
     [Parameter] public string Scope { get; set; } = "records";
     [Parameter] public Func<RecordItem, Task<bool>>? EditItem { get; set; }

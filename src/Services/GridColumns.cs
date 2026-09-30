@@ -82,6 +82,9 @@ public static class GridColumns
     // Explicit column widths for data grids. MudDataGrid only engages its
     // horizontal scrollbar when the columns' combined width overflows the
     // viewport; without widths the table squeezes columns to fit instead.
+    // NOTE: TemplateColumn has no Width parameter (the MudBlazor analyzer
+    // flags it MUD0002 and it is ignored at runtime), so widths are applied
+    // via HeaderStyle/CellStyle min-width instead.
     public static string ColWidth(string key) => key switch
     {
         "FieldOffice" or "Volume" or "State" or "Active" => "90px",
@@ -92,6 +95,8 @@ public static class GridColumns
             or "DisplayName" or "LocationName" or "FormattedNumber" => "170px",
         _ => "140px",
     };
+
+    public static string ColMinWidth(string key) => $"min-width:{ColWidth(key)};";
 }
 
 public static class Csv

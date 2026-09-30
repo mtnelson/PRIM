@@ -48,7 +48,7 @@
                 {
                     var c = col;
                     <TemplateColumn T="T" Title="@c.Label" Sortable="@IsColSortable(c.Key)" SortBy="@GetSortFunc(c.Key)"
-                                    Width="@GridColumns.ColWidth(c.Key)">
+                                    HeaderStyle="@GridColumns.ColMinWidth(c.Key)" CellStyle="@GridColumns.ColMinWidth(c.Key)">
                         <CellTemplate>
                             @{
                                 var item = context.Item;

@@ -22,11 +22,12 @@
                 @foreach (var col in _deletedCols)
                 {
                     var c = col;
-                    <TemplateColumn T="DeletedRow" Title="@c.Label" Width="@GridColumns.ColWidth(c.Key)">
+                    <TemplateColumn T="DeletedRow" Title="@c.Label"
+                                        HeaderStyle="@GridColumns.ColMinWidth(c.Key)" CellStyle="@GridColumns.ColMinWidth(c.Key)">
                         <CellTemplate>@context.Item.Cells.GetValueOrDefault(c.Key, "")</CellTemplate>
                     </TemplateColumn>
                 }
-                <TemplateColumn T="DeletedRow" Title="" Width="110px">
+                <TemplateColumn T="DeletedRow" Title="" HeaderStyle="min-width:110px;" CellStyle="min-width:110px;">
                     <CellTemplate>
                         <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
                                    OnClick="() => Restore(context.Item.Item)">Restore</MudButton>

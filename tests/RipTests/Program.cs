@@ -460,6 +460,179 @@ Check((await svc.GetObjectLabelNamesAsync("Record", seedR2.Id)).Count == 2, "bac
     hm.PopScope();
 }
 
+// ---- infinite-scroll paging ----
+var allRecs = await svc.GetRecordsAsync();
+{
+    var pg1 = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 3 });
+    Check(pg1.Rows.Count == 3 && pg1.HasMore, "records page 1: 3 rows, hasMore");
+    Check(pg1.Rows.Select(r => r.Id).SequenceEqual(pg1.Rows.Select(r => r.Id).OrderBy(id => id)),
+        "records page 1 keyed ascending by Id");
+    var p2 = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 3, AfterId = pg1.Rows[^1].Id });
+    Check(p2.Rows.Count == 3 && !p2.Rows.Select(r => r.Id).Intersect(pg1.Rows.Select(r => r.Id)).Any(),
+        "records page 2: next 3 rows, no overlap");
+    // walk every page: full coverage, no dupes
+    var seen = new List<int>();
+    int? after = null; bool more = true;
+    while (more)
+    {
+        var pg = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 4, AfterId = after });
+        seen.AddRange(pg.Rows.Select(r => r.Id));
+        after = pg.Rows.Count == 0 ? after : pg.Rows[^1].Id;
+        more = pg.HasMore;
+    }
+    Check(seen.Count == allRecs.Count && seen.Distinct().Count() == seen.Count,
+        "records paging walks entire set without dupes", $"walked {seen.Count}, total {allRecs.Count}");
+    var last = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 5000, AfterId = seen[^1] });
+    Check(last.Rows.Count == 0 && !last.HasMore, "records page past end: empty, no more");
+}
+{
+    var f = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, Filter = "R-000001" });
+    Check(f.Rows.Count == 1 && f.Rows[0].RecordNumber == "R-000001" && !f.HasMore, "records filter R-000001 -> 1");
+    var fNone = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, Filter = "ZZZ-NO-MATCH" });
+    Check(fNone.Rows.Count == 0 && !fNone.HasMore, "records filter no match -> empty");
+    var sDesc = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, SortColumn = "RecordNumber", SortDescending = true });
+    var nums = sDesc.Rows.Select(r => r.RecordNumber).ToList();
+    Check(nums.SequenceEqual(nums.OrderByDescending(n => n)), "records sort RecordNumber desc");
+    var sAsc = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, SortColumn = "FieldOffice" });
+    var fos = sAsc.Rows.Select(r => r.FieldOffice).ToList();
+    Check(fos.SequenceEqual(fos.OrderBy(n => n)), "records sort FieldOffice asc");
+    var sBad = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 3, SortColumn = "Nope" });
+    Check(sBad.Rows.Select(r => r.Id).SequenceEqual(sBad.Rows.Select(r => r.Id).OrderBy(id => id)),
+        "records unknown sort column falls back to Id order");
+    var sDescKey = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 3, SortDescending = true });
+    var ids = sDescKey.Rows.Select(r => r.Id).ToList();
+    Check(ids.SequenceEqual(ids.OrderByDescending(id => id)), "records default sort desc is Id-desc keyset");
+}
+{
+    var cp = await svc.GetContainersPageAsync(new GridPageRequest { Take = 500 });
+    Check(cp.Rows.Count == (await svc.GetContainersAsync()).Count && !cp.HasMore, "containers page: all in one chunk");
+    var cf = await svc.GetContainersPageAsync(new GridPageRequest { Take = 500, Filter = "BOX" });
+    Check(cf.Rows.Count >= 1 && cf.Rows.All(c => c.ContainerName.Contains("BOX", StringComparison.OrdinalIgnoreCase)
+        || c.Barcode.Contains("BOX", StringComparison.OrdinalIgnoreCase)),
+        "containers filter BOX matches", $"got {cf.Rows.Count}");
+    var lp = await svc.GetLocationsPageAsync(new GridPageRequest { Take = 500 });
+    Check(lp.Rows.Count == (await svc.GetLocationsAsync()).Count && !lp.HasMore, "locations page: all in one chunk", $"got {lp.Rows.Count}");
+}
+{
+    var inact = new AppUser { UserId = "inactive01", DisplayName = "Inactive One", Role = "Viewer", Active = false };
+    var su = await svc.SaveUserAsync(inact, "harness");
+    Check(su.Ok, "inactive user create ok", su.Error);
+    var uActive = await svc.GetUsersPageAsync(new GridPageRequest { Take = 500 }, includeInactive: false);
+    var uAll = await svc.GetUsersPageAsync(new GridPageRequest { Take = 500 }, includeInactive: true);
+    Check(uActive.Rows.All(u => u.Active) && uAll.Rows.Count == uActive.Rows.Count + 1,
+        "users page honors includeInactive", $"active={uActive.Rows.Count} all={uAll.Rows.Count}");
+}
+
+// ---- bulk test-data seeding ----
+{
+    var before = (await svc.GetRecordsAsync()).Count;
+    var maxNumBefore = (await svc.GetRecordsAsync()).Select(r => r.RecordNumber).Max();
+    var n = await svc.SeedTestRecordsAsync(25, "harness");
+    Check(n == 25, "SeedTestRecordsAsync(25) returns 25");
+    var afterRecs = await svc.GetRecordsAsync();
+    Check(afterRecs.Count == before + 25, "seed adds exactly 25 records", $"before={before} after={afterRecs.Count}");
+    var seeded = afterRecs.Where(r => string.Compare(r.RecordNumber, maxNumBefore, StringComparison.Ordinal) > 0).ToList();
+    Check(seeded.Count == 25 && seeded.All(r => !string.IsNullOrWhiteSpace(r.RecordType) && !string.IsNullOrWhiteSpace(r.CaseClassification)
+        && !string.IsNullOrWhiteSpace(r.FieldOffice) && !string.IsNullOrWhiteSpace(r.CaseNumber)
+        && !string.IsNullOrWhiteSpace(r.Volume) && !string.IsNullOrWhiteSpace(r.Home) && !string.IsNullOrWhiteSpace(r.Assignee)
+        && !string.IsNullOrWhiteSpace(r.State) && !string.IsNullOrWhiteSpace(r.Subject) && !string.IsNullOrWhiteSpace(r.Barcode)),
+        "seeded records have all fields filled");
+    Check(seeded.All(r => (r.Subject ?? "").StartsWith("[TEST]")), "seeded subjects carry [TEST] prefix");
+    var compressed = seeded.Where(r => r.RecordType == "Compressed").ToList();
+    Check(compressed.Count > 0 && seeded.Any(r => r.ParentRecordId != null),
+        "seed includes compressed parents with children", $"parents={compressed.Count}");
+    var kidsOf = seeded.Where(r => r.ParentRecordId != null).All(r => compressed.Any(p => p.Id == r.ParentRecordId));
+    Check(kidsOf, "seeded children point at seeded compressed parents");
+}
+
+// ---- advanced search: SQL-side paged path ----
+{
+    var crit = new List<(string, string, string)> { ("CaseNumber", "=", "12345"), ("RecordType", "=", "Case File") };
+    var cnt = await svc.AdvancedSearchRecordsCountAsync(crit, "AND");
+    Check(cnt == 1, "adv-search count AND -> 1", $"got {cnt}");
+    var pg = await svc.AdvancedSearchRecordsPageAsync(crit, "AND", new GridPageRequest { Take = 500 });
+    Check(pg.Rows.Count == 1 && pg.Rows[0].RecordNumber == "R-000001" && !pg.HasMore,
+        "adv-search page AND -> R-000001, no more");
+    var cntOr = await svc.AdvancedSearchRecordsCountAsync(
+        new List<(string, string, string)> { ("CaseNumber", "=", "12345"), ("CaseNumber", "=", "88710") }, "OR");
+    Check(cntOr == 3, "adv-search count OR -> 3", $"got {cntOr}");
+    var wild = await svc.AdvancedSearchRecordsPageAsync(
+        new List<(string, string, string)> { ("Home", "=", "HQ-SHIP-*") }, "AND", new GridPageRequest { Take = 500 });
+    Check(wild.Rows.Count == 2 && !wild.HasMore, "adv-search wildcard HQ-SHIP-* -> 2", $"got {wild.Rows.Count}");
+    var sw = await svc.AdvancedSearchRecordsPageAsync(
+        new List<(string, string, string)> { ("CaseNumber", "StartsWith", "123") }, "AND", new GridPageRequest { Take = 500 });
+    Check(sw.Rows.Count == 2, "adv-search StartsWith 123 -> 2", $"got {sw.Rows.Count}");
+    var ew = await svc.AdvancedSearchRecordsPageAsync(
+        new List<(string, string, string)> { ("CaseNumber", "EndsWith", "88710") }, "AND", new GridPageRequest { Take = 500 });
+    Check(ew.Rows.Count == 1 && ew.Rows[0].RecordNumber == "R-000002", "adv-search EndsWith 88710 -> R-000002");
+    var unk = await svc.AdvancedSearchRecordsCountAsync(
+        new List<(string, string, string)> { ("Nope", "=", "x") }, "AND");
+    Check(unk == (await svc.GetRecordsAsync()).Count, "adv-search unknown field ignored");
+    // walk pages of 1: full coverage, no dupes
+    var allIds = new List<int>(); int? cur = null; bool hasMore = true;
+    var orCrit = new List<(string, string, string)> { ("CaseNumber", "=", "12345"), ("CaseNumber", "=", "88710") };
+    while (hasMore)
+    {
+        var p = await svc.AdvancedSearchRecordsPageAsync(orCrit, "OR", new GridPageRequest { Take = 1, AfterId = cur });
+        allIds.AddRange(p.Rows.Select(r => r.Id));
+        cur = p.Rows.Count > 0 ? p.Rows[^1].Id : cur;
+        hasMore = p.HasMore;
+    }
+    Check(allIds.Count == 3 && allIds.Distinct().Count() == 3, "adv-search OR walks 3 rows across pages");
+}
+
+// ---- full 1500-record seed: chunked reads, no dupes/omissions ----
+{
+    int maxIdBefore = 0;
+    {
+        int? c = null; bool m = true;
+        while (m) { var p = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, AfterId = c });
+            if (p.Rows.Count > 0) { maxIdBefore = Math.Max(maxIdBefore, p.Rows[^1].Id); c = p.Rows[^1].Id; } m = p.HasMore; }
+    }
+    var added = await svc.SeedTestRecordsAsync(1500, "harness");
+    Check(added == 1500, "seed 1500 returns 1500", $"got {added}");
+
+    var seen = new List<int>(); var chunkSizes = new List<int>();
+    int? cur = null; bool more = true;
+    List<RecordItem> allRows = new();
+    while (more)
+    {
+        var p = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, AfterId = cur });
+        chunkSizes.Add(p.Rows.Count);
+        seen.AddRange(p.Rows.Select(r => r.Id));
+        allRows.AddRange(p.Rows);
+        cur = p.Rows.Count > 0 ? p.Rows[^1].Id : cur;
+        more = p.HasMore;
+    }
+    Check(chunkSizes.Count >= 4 && chunkSizes[0] == 500 && chunkSizes[1] == 500 && chunkSizes[2] == 500,
+        "first three 500-row chunks full", $"got [{string.Join(",", chunkSizes)}]");
+    Check(seen.Count == allRows.Count && seen.Distinct().Count() == seen.Count, "page walk: no dupes/omissions");
+    Check(seen.SequenceEqual(seen.OrderBy(id => id)), "page walk: ascending Id order");
+    var tail = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, AfterId = cur });
+    Check(tail.Rows.Count == 0 && !tail.HasMore, "fetch past end: empty, no more");
+
+    var freshBatch = allRows.Where(r => r.Id > maxIdBefore).ToList();
+    Check(freshBatch.Count == 1500, "exactly 1500 new records", $"got {freshBatch.Count}");
+    Check(freshBatch.All(r => r.Subject != null && r.Subject.StartsWith("[TEST]")), "new records carry [TEST] prefix");
+    Check(freshBatch.All(r => !string.IsNullOrWhiteSpace(r.RecordNumber) && !string.IsNullOrWhiteSpace(r.Barcode)
+        && !string.IsNullOrWhiteSpace(r.CaseNumber) && !string.IsNullOrWhiteSpace(r.FieldOffice)
+        && !string.IsNullOrWhiteSpace(r.Home) && !string.IsNullOrWhiteSpace(r.Assignee)
+        && !string.IsNullOrWhiteSpace(r.State) && !string.IsNullOrWhiteSpace(r.RecordType)),
+        "new records have all fields filled");
+    var nums = allRows.Select(r => r.RecordNumber).ToList();
+    Check(nums.Distinct().Count() == nums.Count, "record numbers unique across table");
+    var bars = allRows.Select(r => r.Barcode).ToList();
+    Check(bars.Distinct().Count() == bars.Count, "barcodes unique across table");
+    var suffixes = freshBatch.Select(r => int.Parse(r.RecordNumber["R-".Length..])).OrderBy(n => n).ToList();
+    Check(suffixes[^1] - suffixes[0] + 1 == 1500 && suffixes.Distinct().Count() == 1500,
+        "new record numbers form a contiguous sequence");
+    var newParents = freshBatch.Where(r => r.RecordType == "Compressed").ToList();
+    var newKids = freshBatch.Where(r => r.ParentRecordId != null).ToList();
+    Check(newParents.Count == 20, "1500 seed: 20 compressed parents", $"got {newParents.Count}");
+    Check(newKids.Count > 0 && newKids.All(k => newParents.Any(p => p.Id == k.ParentRecordId)),
+        "1500 seed: children point at new compressed parents", $"kids={newKids.Count}");
+}
+
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }
 return fail == 0 ? 0 : 1;

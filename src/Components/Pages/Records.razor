@@ -13,47 +13,46 @@
     <MudText Typo="Typo.h5">Records</MudText>
     <MudSpacer />
     <div id="records-filter">
-        <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…  (Ctrl+F)" Margin="Margin.Dense" Immediate="true"
+        <MudTextField T="string" Value="_filter" ValueChanged="OnFilterChanged" DebounceInterval="400"
+                      Placeholder="Filter…  (Ctrl+F)" Margin="Margin.Dense"
                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:260px" Class="mr-2" />
     </div>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewRecord">New Record (Ctrl+N)</MudButton>
 </div>
 
-<RecordGrid @ref="_grid" Items="Filtered" GridId="records" Scope="records"
+<RecordGrid @ref="_grid" ItemsProvider="ProvideRecords" GridId="records" Scope="records"
             EditItem="EditRecord" DeleteItems="DeleteRecords"
-            OnChanged="Load">
+            OnChanged="OnGridChanged">
 </RecordGrid>
 
 @code {
     private RecordGrid? _grid;
-    private List<RecordItem> _items = new();
     private string _filter = "";
 
-    private IEnumerable<RecordItem> Filtered => string.IsNullOrWhiteSpace(_filter) ? _items
-        : _items.Where(r =>
-            r.RecordNumber.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
-            r.CaseNumber.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
-            r.Barcode.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
-            (r.Subject ?? "").Contains(_filter, StringComparison.OrdinalIgnoreCase));
+    private Task<GridPageResult<RecordItem>> ProvideRecords(GridPageRequest req)
+        => Prim.GetRecordsPageAsync(req with { Filter = _filter });
 
-    protected override async Task OnInitializedAsync()
+    private async Task OnFilterChanged(string v)
+    {
+        _filter = v;
+        if (_grid != null) await _grid.ResetAsync();
+    }
+
+    protected override void OnInitialized()
     {
         Hotkeys.PushScope("records");
         Hotkeys.Register("records", "Ctrl+N", NewRecord);
         Hotkeys.Register("records", "F9", Refresh);
         Hotkeys.Register("records", "Ctrl+F", async () => await PrimJs.TryInvokeVoidAsync(JS, "prim.focus", "#records-filter input"));
-        await Load();
     }
 
     public void Dispose() => Hotkeys.UnregisterScope("records");
 
-    private async Task Refresh() { await Load(); Snackbar.Add("Records refreshed.", Severity.Info); }
+    private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Records refreshed.", Severity.Info); }
 
-    private async Task Load()
+    private async Task OnGridChanged()
     {
-        _items = await Prim.GetRecordsAsync(includeDeleted: false);
-        _grid?.ClearSelection();
-        StateHasChanged();
+        if (_grid != null) await _grid.ResetAsync();
     }
 
     private async Task NewRecord()
@@ -62,7 +61,7 @@
             new DialogParameters { ["Model"] = new RecordItem() },
             new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
         var res = await d.Result;
-        if (res is { Canceled: false }) await Load();
+        if (res is { Canceled: false }) await OnGridChanged();
     }
 
     private async Task<bool> EditRecord(RecordItem r)

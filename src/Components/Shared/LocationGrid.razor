@@ -2,7 +2,7 @@
    Path column. Used by Locations, Dashboard, and Workspaces. *@
 @inject PrimService Prim
 
-<ObjectGrid @ref="_grid" T="Location" Items="Items" Kind="Location" GridId="@GridId" Scope="@Scope"
+<ObjectGrid @ref="_grid" T="Location" Items="Items" ItemsProvider="_provider" OnReset="ResetSupplemental" Kind="Location" GridId="@GridId" Scope="@Scope"
             GetInfo="@(l => ("Location", l.Id, l.LocationName))"
             GetBarcode="l => l.Barcode"
             EditItem="EditItem" DeleteItems="DeleteItems"
@@ -18,6 +18,7 @@
     private ObjectGrid<Location>? _grid;
 
     [Parameter] public IEnumerable<Location> Items { get; set; } = Enumerable.Empty<Location>();
+    [Parameter] public Func<GridPageRequest, Task<GridPageResult<Location>>>? ItemsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "locations";
     [Parameter] public string Scope { get; set; } = "locations";
     [Parameter] public Func<Location, Task<bool>>? EditItem { get; set; }
@@ -34,6 +35,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (ItemsProvider != null) return; // provider mode enriches per chunk
         var ids = Items.Select(l => l.Id).ToList();
         _labelPairs = await Prim.GetObjectLabelPairsAsync("Location", ids);
         _paths = await Prim.GetAncestorPathsAsync("Location", ids);
@@ -58,5 +60,31 @@
     private List<(int Id, string Name)> GetChips(Location l) =>
         _labelPairs.TryGetValue(l.Id, out var lp2) ? lp2 : new();
 
+    private Func<GridPageRequest, Task<GridPageResult<Location>>>? _provider
+        => ItemsProvider == null ? null : ProvideAsync;
+
+    private async Task<GridPageResult<Location>> ProvideAsync(GridPageRequest req)
+    {
+        var page = await ItemsProvider!(req);
+        await EnrichChunkAsync(page.Rows);
+        return page;
+    }
+
+    public async Task EnrichChunkAsync(List<Location> rows)
+    {
+        var ids = rows.Select(r => r.Id).ToList();
+        if (ids.Count == 0) return;
+        foreach (var kv in await Prim.GetObjectLabelPairsAsync("Location", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var id in await Prim.GetHasChildrenAsync("Location", ids)) _withChildren.Add(id);
+        foreach (var kv in await Prim.GetAncestorPathsAsync("Location", ids)) _paths[kv.Key] = kv.Value;
+    }
+
+    private void ResetSupplemental()
+    {
+        _withChildren.Clear(); _labelPairs.Clear();
+        _paths.Clear();
+    }
+
     public void ClearSelection() => _grid?.ClearSelection();
+    public Task ResetAsync() => _grid?.ResetAsync() ?? Task.CompletedTask;
 }

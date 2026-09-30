@@ -2,6 +2,7 @@
 @inject PrimService Prim
 @inject AppState App
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @inject HotkeyManager Hotkeys
 @implements IDisposable
 
@@ -67,6 +68,20 @@
                 </MudTd>
             </RowTemplate>
         </MudTable>
+    </MudTabPanel>
+    <MudTabPanel Text="Test Data">
+        <MudPaper Elevation="1" Class="pa-4 mt-2" Style="max-width:640px">
+            <MudText Typo="Typo.subtitle1" Class="mb-2"><b>Generate test records</b></MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:0.7">
+                Inserts 1,500 realistic records (all fields filled; some compressed parents with
+                children for testing expandable rows). Record/barcode numbering continues from the
+                current maximum. Subjects are prefixed <b>[TEST]</b> so they are easy to find and delete.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="_seeding"
+                       OnClick="SeedTestData">
+                @(_seeding ? "Generating…" : "Generate 1,500 Test Records")
+            </MudButton>
+        </MudPaper>
     </MudTabPanel>
 </MudTabs>
 
@@ -140,5 +155,30 @@
     {
         await Prim.DeleteSavedSearchAsync(s.Id);
         await Load();
+    }
+
+    private bool _seeding;
+
+    private async Task SeedTestData()
+    {
+        var ok = await DialogService.ShowMessageBox("Generate test records",
+            "Insert 1,500 test records into this database? They can be deleted afterwards via the Records grid.",
+            yesText: "Generate", cancelText: "Cancel");
+        if (ok != true) return;
+        _seeding = true;
+        try
+        {
+            var n = await Prim.SeedTestRecordsAsync(1500, App.CurrentUserId);
+            Snackbar.Add($"Generated {n} test records.", Severity.Success);
+            App.Log("Generated test records", $"{n} records");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Generation failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _seeding = false;
+        }
     }
 }

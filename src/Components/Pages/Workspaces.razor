@@ -120,9 +120,13 @@
     // never the underlying object.
     private async Task RemoveSelected(string slot, string kind, List<int> ids)
     {
+        var labels = new List<string>();
         foreach (var id in ids)
+        {
+            labels.Add(await Prim.GetObjectLabelAsync(kind, id));
             await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, kind, id);
-        App.Log("Removed from " + slot, $"{ids.Count} item(s)");
+        }
+        App.LogItems("Removed from " + slot, labels);
         await Load();
     }
 }

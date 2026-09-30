@@ -56,8 +56,180 @@ public class PrimService
             .OrderByDescending(a => a.TimestampUtc).ToListAsync();
     }
 
+    // ---------- Infinite-scroll paging (500-row chunks, server-side) ----------
+    // Default ordering is keyset on Id: constant-time at any depth, the
+    // 20M-safe path. Explicit column sorts use OFFSET: correct, but deep
+    // pages of a sorted view are not constant-time.
+    private static readonly HashSet<string> RecordSortProps = new()
+        { "RecordNumber","RecordType","CaseClassification","FieldOffice","CaseNumber","SubfileId","Volume",
+          "SerialStart","SerialEnd","AuxiliaryOffice","Home","Assignee","Barcode","State","Subject","Notes" };
+    private static readonly HashSet<string> ContainerSortProps = new()
+        { "ContainerName","ContainerType","FieldOffice","ContainerCode","FormattedNumber","Description",
+          "Home","Assignee","Barcode" };
+    private static readonly HashSet<string> LocationSortProps = new()
+        { "LocationName","LocationType","Description","Barcode" };
+    private static readonly HashSet<string> UserSortProps = new()
+        { "UserId","DisplayName","Role","Email","LocationId","Active" };
+
+    public async Task<GridPageResult<RecordItem>> GetRecordsPageAsync(GridPageRequest req)
+    {
+        using var db = _factory.CreateDbContext();
+        IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
+        if (!string.IsNullOrWhiteSpace(req.Filter))
+        {
+            var f = req.Filter.Trim();
+            q = q.Where(r => r.RecordNumber.Contains(f) || r.CaseNumber.Contains(f)
+                          || r.Barcode.Contains(f) || (r.Subject != null && r.Subject.Contains(f)));
+        }
+        return await PageAsync(q, req, RecordSortProps);
+    }
+
+    public async Task<GridPageResult<Container>> GetContainersPageAsync(GridPageRequest req)
+    {
+        using var db = _factory.CreateDbContext();
+        IQueryable<Container> q = db.Containers.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(req.Filter))
+        {
+            var f = req.Filter.Trim();
+            q = q.Where(c => c.ContainerName.Contains(f) || c.Barcode.Contains(f)
+                          || (c.Description != null && c.Description.Contains(f)));
+        }
+        return await PageAsync(q, req, ContainerSortProps);
+    }
+
+    public async Task<GridPageResult<Location>> GetLocationsPageAsync(GridPageRequest req)
+    {
+        using var db = _factory.CreateDbContext();
+        IQueryable<Location> q = db.Locations.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(req.Filter))
+        {
+            var f = req.Filter.Trim();
+            q = q.Where(l => l.LocationName.Contains(f) || l.Barcode.Contains(f)
+                          || (l.Description != null && l.Description.Contains(f)));
+        }
+        return await PageAsync(q, req, LocationSortProps);
+    }
+
+    public async Task<GridPageResult<AppUser>> GetUsersPageAsync(GridPageRequest req, bool includeInactive)
+    {
+        using var db = _factory.CreateDbContext();
+        IQueryable<AppUser> q = db.Users.AsNoTracking();
+        if (!includeInactive) q = q.Where(u => u.Active);
+        return await PageAsync(q, req, UserSortProps);
+    }
+
+    private static async Task<GridPageResult<T>> PageAsync<T>(IQueryable<T> q, GridPageRequest req,
+        HashSet<string> sortProps) where T : class
+    {
+        var take = Math.Clamp(req.Take, 1, 1000);
+        List<T> rows;
+        if (string.IsNullOrEmpty(req.SortColumn) || !sortProps.Contains(req.SortColumn))
+        {
+            if (req.AfterId.HasValue)
+                q = req.SortDescending
+                    ? q.Where(x => EF.Property<int>(x, "Id") < req.AfterId.Value)
+                    : q.Where(x => EF.Property<int>(x, "Id") > req.AfterId.Value);
+            q = req.SortDescending
+                ? q.OrderByDescending(x => EF.Property<int>(x, "Id"))
+                : q.OrderBy(x => EF.Property<int>(x, "Id"));
+            rows = await q.Take(take + 1).ToListAsync();
+        }
+        else
+        {
+            q = req.SortDescending
+                ? q.OrderByDescending(x => EF.Property<object>(x, req.SortColumn!))
+                     .ThenBy(x => EF.Property<int>(x, "Id"))
+                : q.OrderBy(x => EF.Property<object>(x, req.SortColumn!))
+                     .ThenBy(x => EF.Property<int>(x, "Id"));
+            rows = await q.Skip(req.Skip).Take(take + 1).ToListAsync();
+        }
+        var hasMore = rows.Count > take;
+        return new GridPageResult<T> { Rows = rows.Take(take).ToList(), HasMore = hasMore };
+    }
+
+    // Bulk-generates `count` realistic test records (deterministic seed so
+    // repeated runs produce the same data). Inserts directly without
+    // per-record audit events; numbering continues from the current max so
+    // sequences stay consistent with records created through the UI.
+    public async Task<int> SeedTestRecordsAsync(int count, string actor)
+    {
+        using var db = _factory.CreateDbContext();
+        var users = await db.Users.AsNoTracking().ToListAsync();
+        var locations = await db.Locations.AsNoTracking().ToListAsync();
+        if (users.Count == 0 || locations.Count == 0)
+            throw new InvalidOperationException("Seed users/locations before generating test records.");
+
+        var rnd = new Random(42);
+        var offices = SeedData.FieldOffices.Select(o => o.Code).ToArray();
+        var types = SeedData.RecordTypes.Where(t => t != "Compressed").ToArray();
+        var states = new[] { "Active", "Active", "Active", "Inactive", "Archived" };
+        var subjects = new[] { "Personnel file", "Contract records", "Case exhibits", "Correspondence",
+            "Financial vouchers", "Travel orders", "Training files", "Investigative notes" };
+
+        int nextNum = MaxSuffix(await db.Records.Select(r => r.RecordNumber).ToListAsync(), "R-", 6) + 1;
+        int nextBar = MaxSuffix(await db.Records.Select(r => r.Barcode).ToListAsync(), "REC", 6) + 1;
+
+        var now = DateTime.UtcNow;
+        var list = new List<RecordItem>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var u = users[rnd.Next(users.Count)];
+            var l = locations[rnd.Next(locations.Count)];
+            bool homeToUser = rnd.Next(2) == 0;
+            var fo = offices[rnd.Next(offices.Length)];
+            list.Add(new RecordItem
+            {
+                RecordNumber = "R-" + (nextNum + i).ToString("D6"),
+                Barcode = "REC" + (nextBar + i).ToString("D6"),
+                RecordType = types[rnd.Next(types.Length)],
+                CaseClassification = rnd.Next(1, 999).ToString("D3"),
+                FieldOffice = fo,
+                CaseNumber = $"{fo}-{rnd.Next(1000, 9999)}",
+                Volume = rnd.Next(1, 12).ToString(),
+                SerialStart = rnd.Next(1, 500).ToString(),
+                SerialEnd = rnd.Next(501, 999).ToString(),
+                AuxiliaryOffice = rnd.Next(4) == 0 ? offices[rnd.Next(offices.Length)] : null,
+                IsBulky = rnd.Next(10) == 0,
+                IsAdmin = rnd.Next(10) == 0,
+                SecurityClassification = "Unclassified",
+                Home = homeToUser ? u.DisplayName : l.LocationName,
+                HomeKind = homeToUser ? "User" : "Location",
+                HomeRefId = homeToUser ? u.Id : l.Id,
+                Assignee = u.DisplayName,
+                AssigneeKind = "User",
+                AssigneeRefId = u.Id,
+                State = states[rnd.Next(states.Length)],
+                Subject = $"[TEST] {subjects[rnd.Next(subjects.Length)]} #{nextNum + i}",
+                Notes = "Bulk-generated test record.",
+                CreatedUtc = now, CreatedBy = actor,
+                LastUpdatedUtc = now, LastUpdatedBy = actor,
+            });
+        }
+        db.Records.AddRange(list);
+        await db.SaveChangesAsync();
+
+        // Make some compressed parents and attach children, so expandable
+        // child rows have something to show during testing.
+        var parentCount = Math.Min(20, list.Count / 10);
+        var parents = list.Take(parentCount).ToList();
+        foreach (var p in parents) p.RecordType = "Compressed";
+        var kids = list.Skip(parentCount).OrderBy(_ => rnd.Next()).Take(Math.Min(200, list.Count - parentCount)).ToList();
+        foreach (var k in kids) k.ParentRecordId = parents[rnd.Next(parents.Count)].Id;
+        await db.SaveChangesAsync();
+        return list.Count;
+    }
+
+    private static int MaxSuffix(IEnumerable<string> existing, string prefix, int width)
+    {
+        int max = 0;
+        foreach (var s in existing)
+            if (s.StartsWith(prefix) && int.TryParse(s[prefix.Length..], out var n) && n > max) max = n;
+        return max;
+    }
+
     // ---------- Advanced search (AND/OR across criteria rows) ----------
-    public Task<List<RecordItem>> AdvancedSearchRecordsAsync(List<(string Field, string Op, string Value)> rows, string logic)
+    public Task<List<RecordItem>> AdvancedSearchRecordsAsync(List<(string Field, string Op, string Value)> rows, string logic,
+        int maxResults = 500)
     {
         return Task.Run(() =>
         {
@@ -65,7 +237,7 @@ public class PrimService
             var matchers = rows.Select(r => BuildMatcher(r.Field, r.Op, r.Value)).ToList();
             var q = db.Records.Where(r => !r.Deleted).AsEnumerable();
             q = logic == "OR" ? q.Where(r => matchers.Any(m => m(r))) : q.Where(r => matchers.All(m => m(r)));
-            return q.OrderBy(r => r.RecordNumber).Take(500).ToList();
+            return q.OrderBy(r => r.RecordNumber).Take(maxResults).ToList();
         });
     }
 

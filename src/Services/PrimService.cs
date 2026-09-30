@@ -636,6 +636,7 @@ public class PrimService
             var withKids = await GetHasChildrenAsync("Record", kids.Select(r => r.Id));
             items.AddRange(kids.Select(r => new ChildItem("Record", r.Id, r.RecordNumber,
                 $"Record · {r.RecordType} · {r.Barcode}", withKids.Contains(r.Id), GridColumns.RecordRow(r), GridColumns.RecordColumns())));
+            await FillChildLabelCellsAsync(items);
             return items;
         }
         if (kind == "Container")
@@ -651,6 +652,7 @@ public class PrimService
                 $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id), GridColumns.RecordRow(r), GridColumns.RecordColumns())));
             items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
                 $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id), GridColumns.ContainerRow(c), GridColumns.ContainerColumns())));
+            await FillChildLabelCellsAsync(items);
             return items;
         }
         if (kind == "Location")
@@ -670,6 +672,7 @@ public class PrimService
                 $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id), GridColumns.ContainerRow(c), GridColumns.ContainerColumns())));
             items.AddRange(locs.Select(l => new ChildItem("Location", l.Id, l.LocationName,
                 $"Location · {l.LocationType}", withKidsL.Contains(l.Id), GridColumns.LocationRow(l), GridColumns.LocationColumns())));
+            await FillChildLabelCellsAsync(items);
             return items;
         }
         if (kind == "User")
@@ -684,12 +687,28 @@ public class PrimService
                 $"Record · {r.RecordType} · {r.Barcode}", withKidsR.Contains(r.Id), GridColumns.RecordRow(r), GridColumns.RecordColumns())));
             items.AddRange(conts.Select(c => new ChildItem("Container", c.Id, c.ContainerName,
                 $"Container · {c.ContainerType} · {c.Barcode}", withKidsC.Contains(c.Id), GridColumns.ContainerRow(c), GridColumns.ContainerColumns())));
+            await FillChildLabelCellsAsync(items);
             return items;
         }
         return items;
     }
 
-    // ---------------- reads by id (workspace resolution) ----------------
+    
+    // Fills the "Labels" cell of each child row (children already carry the
+    // full column set via Cells/Columns; labels need one extra indexed query).
+    private async Task FillChildLabelCellsAsync(List<ChildItem> items)
+    {
+        foreach (var g in items.GroupBy(k => k.Kind))
+        {
+            var pairs = await GetObjectLabelPairsAsync(g.Key, g.Select(k => k.Id));
+            foreach (var k in g)
+                if (k.Cells != null)
+                    k.Cells["Labels"] = pairs.TryGetValue(k.Id, out var lp)
+                        ? string.Join(", ", lp.Select(x => x.Name)) : "";
+        }
+    }
+
+// ---------------- reads by id (workspace resolution) ----------------
     public async Task<List<RecordItem>> GetRecordsByIdsAsync(IEnumerable<int> ids)
     {
         using var db = _factory.CreateDbContext();
@@ -846,6 +865,155 @@ public class PrimService
         using var db = _factory.CreateDbContext();
         var s = await db.SavedSearches.FindAsync(id);
         if (s != null) { db.SavedSearches.Remove(s); await db.SaveChangesAsync(); }
+    }
+
+    // ---------------- labels: named collections of objects ----------------
+    public async Task<List<Label>> GetLabelsAsync()
+    {
+        using var db = _factory.CreateDbContext();
+        return await db.Labels.OrderBy(l => l.Name).ToListAsync();
+    }
+
+    public async Task<Label?> GetLabelAsync(int id)
+    {
+        using var db = _factory.CreateDbContext();
+        return await db.Labels.FindAsync(id);
+    }
+
+    public async Task<Dictionary<int, int>> GetLabelCountsAsync()
+    {
+        using var db = _factory.CreateDbContext();
+        return await db.ObjectLabels.GroupBy(o => o.LabelId)
+            .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+    }
+
+    public async Task<Label> GetOrCreateLabelAsync(string name, string actor)
+    {
+        name = (name ?? "").Trim();
+        if (name.Length == 0) throw new ArgumentException("Label name is required.", nameof(name));
+        using var db = _factory.CreateDbContext();
+        var upper = name.ToUpperInvariant();
+        var existing = await db.Labels.FirstOrDefaultAsync(l => l.Name.ToUpper() == upper);
+        if (existing != null) return existing;
+        var label = new Label { Name = name, CreatedUtc = DateTime.UtcNow, CreatedBy = actor };
+        db.Labels.Add(label);
+        await db.SaveChangesAsync();
+        await AuditAsync(db, "Label", label.Id, label.Name, "Created", actor);
+        return label;
+    }
+
+    public async Task RenameLabelAsync(int id, string newName, string actor)
+    {
+        newName = (newName ?? "").Trim();
+        if (newName.Length == 0) throw new ArgumentException("Label name is required.", nameof(newName));
+        using var db = _factory.CreateDbContext();
+        var label = await db.Labels.FindAsync(id) ?? throw new InvalidOperationException("Label not found.");
+        var upper = newName.ToUpperInvariant();
+        if (await db.Labels.AnyAsync(l => l.Id != id && l.Name.ToUpper() == upper))
+            throw new InvalidOperationException($"A label named '{newName}' already exists.");
+        var old = label.Name;
+        label.Name = newName;
+        await AuditAsync(db, "Label", label.Id, newName, "Renamed", actor, "Name", old, newName);
+    }
+
+    public async Task DeleteLabelAsync(int id, string actor)
+    {
+        using var db = _factory.CreateDbContext();
+        var label = await db.Labels.FindAsync(id);
+        if (label == null) return;
+        db.ObjectLabels.RemoveRange(db.ObjectLabels.Where(o => o.LabelId == id));
+        await AuditAsync(db, "Label", label.Id, label.Name, "Deleted", actor);
+        db.Labels.Remove(label);
+        await db.SaveChangesAsync();
+    }
+
+    // Label chips for grid rows: object id -> ordered (label id, name) pairs.
+    public async Task<Dictionary<int, List<(int Id, string Name)>>> GetObjectLabelPairsAsync(
+        string kind, IEnumerable<int> ids)
+    {
+        using var db = _factory.CreateDbContext();
+        var idList = ids.ToList();
+        var rows = await db.ObjectLabels
+            .Where(o => o.ObjectKind == kind && idList.Contains(o.ObjectId))
+            .Join(db.Labels, o => o.LabelId, l => l.Id,
+                (o, l) => new { o.ObjectId, l.Id, l.Name })
+            .OrderBy(x => x.Name).ToListAsync();
+        return rows.GroupBy(x => x.ObjectId)
+            .ToDictionary(g => g.Key, g => g.Select(x => (x.Id, x.Name)).ToList());
+    }
+
+    public async Task<List<string>> GetObjectLabelNamesAsync(string kind, int id)
+    {
+        var pairs = await GetObjectLabelPairsAsync(kind, new[] { id });
+        return pairs.TryGetValue(id, out var list) ? list.Select(x => x.Name).ToList() : new();
+    }
+
+    // Replaces an object's label set; creates unknown names. Writes one audit
+    // event naming the added/removed labels.
+    public async Task SetObjectLabelsAsync(string kind, int id, IEnumerable<string> names, string actor)
+    {
+        var wanted = names.Select(n => (n ?? "").Trim()).Where(n => n.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        using var db = _factory.CreateDbContext();
+        var upper = wanted.Select(w => w.ToUpperInvariant()).ToList();
+        var labels = await db.Labels.Where(l => upper.Contains(l.Name.ToUpper())).ToListAsync();
+        foreach (var w in wanted.Where(w => !labels.Any(l => l.Name.Equals(w, StringComparison.OrdinalIgnoreCase))))
+        {
+            var created = new Label { Name = w, CreatedUtc = DateTime.UtcNow, CreatedBy = actor };
+            db.Labels.Add(created);
+            labels.Add(created);
+        }
+        await db.SaveChangesAsync();
+        var wantedIds = labels.Select(l => l.Id).ToHashSet();
+        var current = await db.ObjectLabels
+            .Where(o => o.ObjectKind == kind && o.ObjectId == id).ToListAsync();
+        var currentIds = current.Select(o => o.LabelId).ToHashSet();
+        var toAdd = wantedIds.Except(currentIds).ToList();
+        var toRemove = current.Where(o => !wantedIds.Contains(o.LabelId)).ToList();
+        foreach (var lid in toAdd)
+            db.ObjectLabels.Add(new ObjectLabel { LabelId = lid, ObjectKind = kind, ObjectId = id });
+        db.ObjectLabels.RemoveRange(toRemove);
+        if (toAdd.Count > 0 || toRemove.Count > 0)
+        {
+            var nameOf = labels.ToDictionary(l => l.Id, l => l.Name);
+            var oldV = string.Join(", ", current.Select(o => nameOf.TryGetValue(o.LabelId, out var n) ? n : "?").OrderBy(n => n));
+            var newV = string.Join(", ", wanted.OrderBy(n => n));
+            var objLabel = await GetObjectLabelAsync(kind, id);
+            await AuditAsync(db, kind, id, objLabel, "Updated", actor, "Labels", oldV, newV);
+        }
+        await db.SaveChangesAsync();
+    }
+
+    // Every member of a label: (kind, id, display label), ordered by kind then label.
+    public async Task<List<(string Kind, int Id, string Label)>> GetLabelMembersAsync(int labelId)
+    {
+        using var db = _factory.CreateDbContext();
+        var rows = await db.ObjectLabels.Where(o => o.LabelId == labelId).ToListAsync();
+        var out_ = new List<(string Kind, int Id, string Label)>();
+        foreach (var g in rows.GroupBy(r => r.ObjectKind))
+        {
+            var ids = g.Select(r => r.ObjectId).ToList();
+            switch (g.Key)
+            {
+                case "Record":
+                    out_.AddRange(await db.Records.Where(r => ids.Contains(r.Id))
+                        .Select(r => new ValueTuple<string, int, string>("Record", r.Id, r.RecordNumber)).ToListAsync());
+                    break;
+                case "Container":
+                    out_.AddRange(await db.Containers.Where(c => ids.Contains(c.Id))
+                        .Select(c => new ValueTuple<string, int, string>("Container", c.Id, c.ContainerName)).ToListAsync());
+                    break;
+                case "Location":
+                    out_.AddRange(await db.Locations.Where(l => ids.Contains(l.Id))
+                        .Select(l => new ValueTuple<string, int, string>("Location", l.Id, l.LocationName)).ToListAsync());
+                    break;
+                case "User":
+                    out_.AddRange(await db.Users.Where(u => ids.Contains(u.Id))
+                        .Select(u => new ValueTuple<string, int, string>("User", u.Id, u.DisplayName)).ToListAsync());
+                    break;
+            }
+        }
+        return out_.OrderBy(x => x.Kind).ThenBy(x => x.Label).ToList();
     }
 
     // ---------------- reports (TIS-1288/1289) ----------------

@@ -42,6 +42,9 @@
                     <MudTextField T="string" Label="Description" @bind-Value="_model.Description" Lines="2" HelperText="Initial case." />
                 </MudItem>
                 <MudItem xs="12" md="6">
+                    <LabelPicker @bind-Selected="_labels" Actor="@App.CurrentUserId" />
+                </MudItem>
+                <MudItem xs="12" md="6">
                     <MudTextField T="string" Label="Home *" @bind-Value="_model.Home" Required="true" ReadOnly="true"
                                   Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickHome" />
                     <MudText Typo="Typo.caption">@_model.HomeKind</MudText>
@@ -68,9 +71,11 @@
     private MudForm _form = null!;
     private Container _model = new();
     private string? _error;
+    private List<string> _labels = new();
 
     protected override async Task OnInitializedAsync()
     {
+        if (Model.Id != 0) _labels = await Prim.GetObjectLabelNamesAsync("Container", Model.Id);
         _model = Model.Id == 0
             ? new Container { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : new Container
@@ -127,6 +132,7 @@
         var isNew = _model.Id == 0;
         var (ok, err) = await Prim.SaveContainerAsync(_model, App.CurrentUserId);
         if (!ok) { _error = err; return; }
+        await Prim.SetObjectLabelsAsync("Container", _model.Id, _labels, App.CurrentUserId);
         Snackbar.Add(isNew ? "Container created." : "Container updated.", Severity.Success);
         App.Log(isNew ? "Created container" : "Updated container", _model.ContainerName);
         MudDialog.Close(DialogResult.Ok(true));

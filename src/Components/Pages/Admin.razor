@@ -16,17 +16,19 @@
             <MudSpacer />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Load">Refresh</MudButton>
         </div>
-        <MudDataGrid Items="_deleted" Dense="true" Hover="true">
+        <MudDataGrid Items="_deletedRows" Dense="true" Hover="true" HorizontalScrollbar="true">
             <Columns>
-                <PropertyColumn Property="x => x.RecordNumber" Title="Record Number" />
-                <PropertyColumn Property="x => x.CaseNumber" Title="Case Number" />
-                <PropertyColumn Property="x => x.DeleteReason" Title="Reason" />
-                <PropertyColumn Property="x => x.MergedIntoBarcode" Title="Merged Into" />
-                <PropertyColumn Property="x => x.LastUpdatedBy" Title="Deleted By" />
-                <TemplateColumn Title="">
+                @foreach (var col in _deletedCols)
+                {
+                    var c = col;
+                    <TemplateColumn T="DeletedRow" Title="@c.Label">
+                        <CellTemplate>@context.Item.Cells.GetValueOrDefault(c.Key, "")</CellTemplate>
+                    </TemplateColumn>
+                }
+                <TemplateColumn T="DeletedRow" Title="">
                     <CellTemplate>
                         <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
-                                   OnClick="() => Restore(context.Item)">Restore</MudButton>
+                                   OnClick="() => Restore(context.Item.Item)">Restore</MudButton>
                     </CellTemplate>
                 </TemplateColumn>
             </Columns>
@@ -70,8 +72,14 @@
 
 @code {
     private List<RecordItem> _deleted = new();
+    // Deleted rows rendered with every record grid column, plus the
+    // deletion-specific fields (reason, merged-into, deleted by).
+    private List<DeletedRow> _deletedRows = new();
+    private List<(string Key, string Label)> _deletedCols = new();
     private string _announcement = "";
     private List<SavedSearch> _searches = new();
+
+    private record DeletedRow(RecordItem Item, Dictionary<string, string> Cells);
 
     protected override void OnInitialized()
     {
@@ -89,6 +97,18 @@
     {
         _deleted = await Prim.GetRecordsAsync(includeDeleted: true);
         _deleted = _deleted.Where(r => r.Deleted).ToList();
+        _deletedCols = GridColumns.RecordColumns();
+        _deletedCols.Add(("DeleteReason", "Reason"));
+        _deletedCols.Add(("MergedIntoBarcode", "Merged Into"));
+        _deletedCols.Add(("LastUpdatedBy", "Deleted By"));
+        _deletedRows = _deleted.Select(r =>
+        {
+            var cells = GridColumns.RecordRow(r);
+            cells["DeleteReason"] = r.DeleteReason ?? "";
+            cells["MergedIntoBarcode"] = r.MergedIntoBarcode ?? "";
+            cells["LastUpdatedBy"] = r.LastUpdatedBy ?? "";
+            return new DeletedRow(r, cells);
+        }).ToList();
         _announcement = await Prim.GetAnnouncementAsync() ?? "";
         _searches = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
         StateHasChanged();

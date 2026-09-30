@@ -1,0 +1,9 @@
+# Keep binary files byte-identical on every platform. Without this,
+# Git for Windows (autocrlf=true) rewrites LF bytes inside binaries on
+# checkout, silently corrupting images.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.ico binary
+*.zip binary

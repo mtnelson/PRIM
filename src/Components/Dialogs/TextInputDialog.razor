@@ -1,0 +1,42 @@
+@* Generic single-value text input dialog. *@
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">@Title</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_value" Label="@Label" Immediate="true"
+                      OnKeyDown="Key" Margin="Margin.Dense" />
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-2">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Ok">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string Title { get; set; } = "Enter value";
+    [Parameter] public string Label { get; set; } = "Value";
+    [Parameter] public string Value { get; set; } = "";
+
+    private string _value = "";
+    private string? _error;
+
+    protected override void OnInitialized() => _value = Value;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Ok();
+    }
+
+    private Task Ok()
+    {
+        if (string.IsNullOrWhiteSpace(_value)) { _error = "A value is required."; return Task.CompletedTask; }
+        MudDialog.Close(DialogResult.Ok(_value.Trim()));
+        return Task.CompletedTask;
+    }
+}

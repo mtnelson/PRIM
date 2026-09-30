@@ -8,6 +8,7 @@
             EditItem="EditItem" DeleteItems="DeleteItems"
             ExportCols="GridColumns.ContainerColumns()" RowToDict="RowWithPath"
             GetHomeRef="GetHomeRef" GetAssigneeRef="GetAssigneeRef" GetPath="GetPath"
+            GetLabelChips="GetChips"
             Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
             CanMove="@CanMove" CanDelete="@CanDelete"
             ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
@@ -29,10 +30,12 @@
 
     private Dictionary<int, List<PathSeg>> _paths = new();
     private HashSet<int> _withChildren = new();
+    private Dictionary<int, List<(int Id, string Name)>> _labelPairs = new();
 
     protected override async Task OnParametersSetAsync()
     {
         var ids = Items.Select(c => c.Id).ToList();
+        _labelPairs = await Prim.GetObjectLabelPairsAsync("Container", ids);
         _paths = await Prim.GetAncestorPathsAsync("Container", ids);
         _withChildren = await Prim.GetHasChildrenAsync("Container", ids);
     }
@@ -40,6 +43,7 @@
     private Dictionary<string, string> RowWithPath(Container c)
     {
         var d = GridColumns.ContainerRow(c);
+        d["Labels"] = _labelPairs.TryGetValue(c.Id, out var lp) ? string.Join(", ", lp.Select(x => x.Name)) : "";
         d["Path"] = _paths.TryGetValue(c.Id, out var segs) ? string.Join(" › ", segs.Select(s => s.Label)) : "";
         return d;
     }
@@ -56,6 +60,9 @@
     private bool HasKids(Container c) => _withChildren.Contains(c.Id);
 
     private Task<List<ChildItem>> GetKids(Container c) => Prim.GetChildItemsAsync("Container", c.Id);
+
+    private List<(int Id, string Name)> GetChips(Container c) =>
+        _labelPairs.TryGetValue(c.Id, out var lp2) ? lp2 : new();
 
     public void ClearSelection() => _grid?.ClearSelection();
 }

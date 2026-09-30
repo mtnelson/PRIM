@@ -26,7 +26,7 @@
                  OnExport="MenuExport" OnCopy="MenuCopy" OnSelectAll="SelectAll" OnUnselectAll="UnselectAll"
                  OnRemoveFromSlot="MenuRemoveFromSlot" ShowRemove="ShowRemoveFromSlot">
     <Activator>
-        <MudDataGrid @key="TabState" @ref="_mudGrid" T="T" Items="_gridItems" ServerData="_serveData" Dense="true" Hover="true" MultiSelection="true" Striped="false"
+        <MudDataGrid @key="TabState" @ref="_mudGrid" T="T" Items="_mudItems" ServerData="_serveData" Dense="true" Hover="true" MultiSelection="true" Striped="false"
                      HorizontalScrollbar="true"
                      SelectedItems="_selected" SelectedItemsChanged="@(EventCallback.Factory.Create<HashSet<T>>(this, OnSelChanged))"
                      RowClick="@(EventCallback.Factory.Create<DataGridRowClickEventArgs<T>>(this, OnRowClick))"
@@ -213,6 +213,9 @@
     private readonly Dictionary<string, Func<T, object>> _sortFuncs = new();
 
     private IEnumerable<T> _gridItems => ItemsProvider != null ? _rows : Items;
+    // MudDataGrid forbids supplying both Items and ServerData: in provider
+    // mode the Items parameter must be null (the grid reads via ServeData).
+    private IEnumerable<T>? _mudItems => ItemsProvider != null ? null : Items;
     private Func<GridState<T>, Task<GridData<T>>>? _serveData
         => ItemsProvider != null ? ServeData : null;
 

@@ -635,7 +635,11 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
                 // Keyset cursor only valid for default Id ordering.
                 afterId = string.IsNullOrEmpty(_sortCol) && rows.Count > 0
                     ? GetInfo(rows[^1]).Id : null;
-                if ((i + 1) % 10 == 0) busy.Update($"Selecting… {_selected.Count:N0} of {target:N0} row(s)");
+                if ((i + 1) % 10 == 0)
+                {
+                    busy.Update($"Selecting… {_selected.Count:N0} of {target:N0} row(s)");
+                    await BusyToast.YieldForPaintAsync();
+                }
                 if (rows.Count < PageSize) break;
             }
             busy.Complete($"Selected {_selected.Count:N0} row(s).");
@@ -706,7 +710,11 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
             var (kind, id, label) = GetInfo(x);
             if (await Prim.AddToWorkspaceAsync(App.CurrentUserId, slot, kind, id, label)) n++;
             labels.Add(label);
-            if (++i % 500 == 0) busy.Update($"Adding {i:N0} of {t.Count:N0} item(s) to {slot}…");
+            if (++i % 500 == 0)
+            {
+                busy.Update($"Adding {i:N0} of {t.Count:N0} item(s) to {slot}…");
+                await BusyToast.YieldForPaintAsync();
+            }
         }
         busy.Complete($"Added {n:N0} item(s) to {slot}.");
         App.LogItems("Added to " + slot, labels);
@@ -746,8 +754,16 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
                 await using var busy = BusyToast.Show(Snackbar, $"Exporting {rows.Count:N0} row(s)…");
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine(string.Join(",", sel.Select(c => Csv(c.Label))));
+                int er = 0;
                 foreach (var row in rows)
+                {
                     sb.AppendLine(string.Join(",", sel.Select(c => Csv(row.GetValueOrDefault(c.Key, "")))));
+                    if (++er % 500 == 0)
+                    {
+                        busy.Update($"Exporting {er:N0} of {rows.Count:N0} row(s)…");
+                        await BusyToast.YieldForPaintAsync();
+                    }
+                }
                 await PrimJs.TryInvokeVoidAsync(JS, "prim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
                 busy.Complete($"Exported {rows.Count:N0} row(s).");
                 App.LogItems("Exported CSV", t.Select(x => GetInfo(x).Label));
@@ -775,10 +791,16 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
         await using var busy = BusyToast.Show(Snackbar, $"Copying {t.Count:N0} row(s)…");
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(string.Join("\t", _effective.Select(c => c.Label)));
+        int cr = 0;
         foreach (var x in t)
         {
             var d = RowToDict(x);
             sb.AppendLine(string.Join("\t", _effective.Select(c => d.GetValueOrDefault(c.Key, ""))));
+            if (++cr % 500 == 0)
+            {
+                busy.Update($"Copying {cr:N0} of {t.Count:N0} row(s)…");
+                await BusyToast.YieldForPaintAsync();
+            }
         }
         var ok = await PrimJs.TryInvokeAsync<bool>(JS, "prim.copyText", sb.ToString());
         busy.Complete(ok ? $"Copied {t.Count:N0} row(s) with headers." : "Clipboard unavailable.",

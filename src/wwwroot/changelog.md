@@ -1,7 +1,11 @@
 # PRIM Changelog
 
+## v0.10.5 — 2026-09-30
+- Bulk-operation progress toasts now actually appear during long runs: tight loops (send-to-workspace, remove-from-workspace, CSV export, clipboard copy, select-all) periodically yield to the renderer — previously the UI thread stayed blocked until the operation finished, so the "working" toast never painted.
+- Ctrl+A reliability: the browser's hotkey list is now pushed the moment any component registers or unregisters a hotkey (previously it only synced when the main layout re-rendered), so Ctrl+A can no longer tag grid rows while the browser also performs its native select-all.
+
 ## v0.10.4 — 2026-09-30
-- Working indicators on every bulk operation (Danny's feedback): adding many records to a workspace, removing them, bulk delete, bulk move, CSV export, clipboard copy, and server-side select-all now show a persistent "working" toast with live progress (e.g. "Adding 3,000 of 50,000…"). The toast only appears if the operation takes longer than a moment, so quick actions never flash it. The Delete and Move dialogs now disable their buttons and show "Deleting…"/"Moving…" with a spinner and progress bar while they work.
+- Working indicators on every bulk operation: adding many records to a workspace, removing them, bulk delete, bulk move, CSV export, clipboard copy, and server-side select-all now show a persistent "working" toast with live progress (e.g. "Adding 3,000 of 50,000…"). The toast only appears if the operation takes longer than a moment, so quick actions never flash it. The Delete and Move dialogs now disable their buttons and show "Deleting…"/"Moving…" with a spinner and progress bar while they work.
 
 ## v0.10.3 — 2026-09-30
 - All data grids now use infinite scroll: the dashboard and workspace grids (which previously grew the page without any scrollbar) are virtualized with a compact 400px scroll height, matching the main screens' virtualized scrolling.

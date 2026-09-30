@@ -52,6 +52,15 @@ public sealed class BusyToast : IAsyncDisposable
         _toast = next;
     }
 
+    /// <summary>
+    /// Yield to the Blazor renderer so the working toast (and progress updates)
+    /// can actually paint. Call periodically inside bulk loops: with SQLite the
+    /// EF Core awaits often complete synchronously — and CPU-only loops never
+    /// await at all — so without an explicit yield the UI thread stays blocked
+    /// until the operation finishes and the toast never appears.
+    /// </summary>
+    public static async Task YieldForPaintAsync() => await Task.Yield();
+
     /// <summary>Remove the working toast and show the completion toast.</summary>
     public void Complete(string message, Severity severity = Severity.Success)
     {

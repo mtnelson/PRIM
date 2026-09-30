@@ -30,6 +30,9 @@ public partial class MainLayout : IDisposable
     protected override async Task OnInitializedAsync()
     {
         App.Changed += OnAppChanged;
+        // Push the browser's synchronous preventDefault set whenever the
+        // registered combos change, even if this layout doesn't re-render.
+        Hotkeys.CombosChanged += OnCombosChanged;
         App.ActiveAnnouncement = await Prim.GetAnnouncementAsync();
         Hotkeys.PushScope("shell");
         Hotkeys.Register("shell", "Alt+1", () => Nav.NavigateTo(""));
@@ -50,8 +53,10 @@ public partial class MainLayout : IDisposable
             _self = DotNetObjectReference.Create(this);
             await PrimJs.TryInvokeVoidAsync(JS, "prim.hotkeys.init", _self);
         }
-        // Keep the browser's synchronous preventDefault set in sync: pages
-        // register/unregister hotkeys as they navigate.
+        // Keep the browser's synchronous preventDefault set in sync. The
+        // CombosChanged event (subscribed in OnInitializedAsync) re-renders
+        // this layout whenever any component registers/unregisters, so the
+        // push happens even for dialogs and tab switches that don't navigate.
         if (Hotkeys.CombosDirty)
             await PrimJs.TryInvokeVoidAsync(JS, "prim.hotkeys.setCombos", Hotkeys.TakeCombos());
     }
@@ -73,9 +78,12 @@ public partial class MainLayout : IDisposable
     public void Dispose()
     {
         App.Changed -= OnAppChanged;
+        Hotkeys.CombosChanged -= OnCombosChanged;
         Hotkeys.UnregisterScope("shell");
         _self?.Dispose();
     }
+
+    private void OnCombosChanged() => InvokeAsync(StateHasChanged);
 
     private void ToggleLeft() => _leftOpen = !_leftOpen;
     private void ToggleView() => _viewOpen = !_viewOpen;

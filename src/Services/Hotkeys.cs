@@ -55,6 +55,15 @@ public class HotkeyManager
 
     public string CurrentScope => _scopes.TryPeek(out var s) ? s : "app";
 
+    /// <summary>
+    /// Fired whenever the registered combo set changes. MainLayout subscribes
+    /// so the browser's synchronous preventDefault set is pushed via JS even
+    /// when MainLayout itself doesn't re-render (dialogs, tab switches, …) —
+    /// otherwise Ctrl+A can reach .NET (rows get tagged) without the browser
+    /// suppressing its native select-all.
+    /// </summary>
+    public event Action? CombosChanged;
+
     public void PushScope(string scope) => _scopes.Push(scope);
 
     public void PopScope()
@@ -70,6 +79,7 @@ public class HotkeyManager
             _handlers[key] = list = new();
         list.Add((token, handler));
         CombosDirty = true;
+        CombosChanged?.Invoke();
         return new Registration(this, key, token);
     }
 
@@ -84,6 +94,7 @@ public class HotkeyManager
             if (list.Count == 0) _handlers.Remove(key);
         }
         CombosDirty = true;
+        CombosChanged?.Invoke();
     }
 
     public void UnregisterScope(string scope)
@@ -91,6 +102,7 @@ public class HotkeyManager
         foreach (var k in _handlers.Keys.Where(k => k.Scope == scope).ToList())
             _handlers.Remove(k);
         CombosDirty = true;
+        CombosChanged?.Invoke();
     }
 
     /// <summary>

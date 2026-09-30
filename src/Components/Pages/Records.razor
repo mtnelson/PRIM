@@ -60,7 +60,7 @@
         Hotkeys.PushScope("records");
         Hotkeys.Register("records", "Ctrl+N", NewRecord);
         Hotkeys.Register("records", "F9", Refresh);
-        Hotkeys.Register("records", "Ctrl+F", async () => await JS.InvokeVoidAsync("prim.focus", "#records-filter input"));
+        Hotkeys.Register("records", "Ctrl+F", async () => await PrimJs.TryInvokeVoidAsync(JS, "prim.focus", "#records-filter input"));
         await Load();
     }
 

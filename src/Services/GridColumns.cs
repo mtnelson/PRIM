@@ -81,5 +81,5 @@ public static class Csv
     public static string Escape(string s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
 
     public static async Task DownloadAsync(Microsoft.JSInterop.IJSRuntime js, string fileName, string content)
-        => await js.InvokeVoidAsync("prim.download", fileName, content, "text/csv");
+        => await PrimJs.TryInvokeVoidAsync(js, "prim.download", fileName, content, "text/csv");
 }

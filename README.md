@@ -1,1 +1,39 @@
-IyBQUklNIOKAlCBQaHlzaWNhbCBSZWNvcmRzIEludmVudG9yeSBNYW5hZ2VyCgpQUklNIGlzIGEgbWV0YWRhdGEtb25seSByZWNvcmRzIGludmVudG9yeSBzeXN0ZW0gKEJsYXpvciBTZXJ2ZXIgLyAuTkVUIDggLwpNdWRCbGF6b3IpOiByZWNvcmRzLCBjb250YWluZXJzLCBsb2NhdGlvbnMsIGFuZCB1c2VycyB3aXRoIGEgQ29udGVudApNYW5hZ2Vy4oCTc3R5bGUgZGVza3RvcCBzaGVsbC4gU1FMaXRlIGJ5IGRlZmF1bHQ7IFNRTCBTZXJ2ZXIgcGF0aCBkb2N1bWVudGVkLgoKVGhpcyByZXBvIGNvbnRhaW5zIHRoZSBmdWxsIHByb3RvdHlwZSBzb3VyY2UsIGludGVncmF0aW9uIHRlc3RzLCBhbmQKcGFja2FnaW5nIGRvY3MgKGBTTU9LRS1URVNULm1kYCwgYFN0YXJ0IFBSSU0uYmF0YCkuCgojIyBSdW4gb24geW91ciBQQwoKTm8gaW5zdGFsbHMgbmVlZGVkIOKAlCB0aGUgcG9ydGFibGUgcGFja2FnZSBpcyBzZWxmLWNvbnRhaW5lZCAobm8gLk5FVCBTREssCm5vIG5ldHdvcmsgZGVwZW5kZW5jaWVzKS4KCjEuICoqRG93bmxvYWQqKiB0aGUgcG9ydGFibGUgemlwICg1MyBNQik6CiAgIDxodHRwczovL211c2UuYWkvZmlsZXMvNTg4MjQ5MzA0MzgyMDI0LzE4MTAxNDYyMjcyNjU2NzQvYzJ0dGNhb3J6NmV1YmkyYjJhbXkxdGViL1BSSU0tcG9ydGFibGUtd2luLXg2NC56aXA+CjIuICoqVW56aXAqKiB0byBhbnkgZm9sZGVyLCBlLmcuIGBDOlxQUklNXGAgKGF2b2lkIGBDOlxQcm9ncmFtIEZpbGVzXGAgdW5sZXNzCiAgIHJ1bm5pbmcgYXMgYWRtaW5pc3RyYXRvciDigJQgdGhlIGFwcCB3cml0ZXMgaXRzIGRhdGFiYXNlIG5leHQgdG8gdGhlIGV4ZSkuCjMuICoqRG91YmxlLWNsaWNrIGBTdGFydCBQUklNLmJhdGAqKi4gWW91ciBicm93c2VyIG9wZW5zIHRvCiAgIGBodHRwOi8vbG9jYWxob3N0OjUwMDAvYC4KNC4gU2lnbiBpbiBvbiB0aGUgbG9naW4gc2NyZWVuLiBEZXYgY3JlZGVudGlhbHMgKHBhc3N3b3JkID0gdXNlcm5hbWUpOgogICBgYWRtaW4wMWAgKEFkbWluKSwgYHJlY29yZHNtZ3IwMWAgKFJlY29yZHMgTWFuYWdlciksIGBtdG5lbHNvbmAgKFN0YWZmKS4KNS4gUnVuIHRoZSA1LW1pbnV0ZSBzbW9rZSB0ZXN0IGluIGBTTU9LRS1URVNULm1kYC4KCllvdXIgZGF0YSBsaXZlcyBpbiBgZGF0YVxwcmltLmRiYCBuZXh0IHRvIGBQcmltLmV4ZWAg4oCUIGJhY2sgaXQgdXAgYnkgY29weWluZwp0aGF0IGZpbGUgd2hpbGUgdGhlIGFwcCBpcyBzdG9wcGVkLiBUbyBzdG9wIHRoZSBhcHAsIGNsb3NlIHRoZSAiUFJJTSBTZXJ2ZXIiCmNvbnNvbGUgd2luZG93LiBEZWZhdWx0IHBvcnQgaXMgNTAwMCAoY2hhbmdlIHZpYSBgUHJpbTpIdHRwUG9ydGAgaW4KYGFwcHNldHRpbmdzLmpzb25gLCBhbmQgdXBkYXRlIHRoZSBVUkwgaW4gYFN0YXJ0IFBSSU0uYmF0YCkuCgojIyBCdWlsZCBmcm9tIHNvdXJjZQoKUmVxdWlyZXMgdGhlIC5ORVQgOCBTREs6CgpgYGBiYXNoCmRvdG5ldCBidWlsZCAtYyBSZWxlYXNlCmRvdG5ldCB0ZXN0CmBgYAoKU2VlIHRoZSBzb3VyY2UgYFJFQURNRS5tZGAgaW4gdGhlIHJlcG8gcm9vdCBmb3IgZGV0YWlscy4K
+# PRIM — Physical Records Inventory Manager
+
+PRIM is a metadata-only records inventory system (Blazor Server / .NET 8 /
+MudBlazor): records, containers, locations, and users with a Content
+Manager–style desktop shell. SQLite by default; SQL Server path documented.
+
+This repo contains the full prototype source, integration tests, and
+packaging docs (`SMOKE-TEST.md`, `Start PRIM.bat`).
+
+## Run on your PC
+
+No installs needed — the portable package is self-contained (no .NET SDK,
+no network dependencies).
+
+1. **Download** the portable zip (53 MB):
+   <https://muse.ai/files/588249304382024/841302629040376/66en34f68vtbwa7n2g34f0ge/PRIM-portable-win-x64.zip>
+2. **Unzip** to any folder, e.g. `C:\PRIM\` (avoid `C:\Program Files\` unless
+   running as administrator — the app writes its database next to the exe).
+3. **Double-click `Start PRIM.bat`**. Your browser opens to
+   `http://localhost:5000/`.
+4. Sign in on the login screen. Dev credentials (password = username):
+   `admin01` (Admin), `recordsmgr01` (Records Manager), `mtnelson` (Staff).
+5. Run the 5-minute smoke test in `SMOKE-TEST.md`.
+
+Your data lives in `data\prim.db` next to `Prim.exe` — back it up by copying
+that file while the app is stopped. To stop the app, close the "PRIM Server"
+console window. Default port is 5000 (change via `Prim:HttpPort` in
+`appsettings.json`, and update the URL in `Start PRIM.bat`).
+
+## Build from source
+
+Requires the .NET 8 SDK:
+
+```bash
+dotnet build -c Release
+dotnet test
+```
+
+See the source `README.md` in the repo root for details.

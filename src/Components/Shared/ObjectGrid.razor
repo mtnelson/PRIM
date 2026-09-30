@@ -298,7 +298,7 @@
                 sb.AppendLine(string.Join(",", sel.Select(c => Csv(c.Label))));
                 foreach (var row in rows)
                     sb.AppendLine(string.Join(",", sel.Select(c => Csv(row.GetValueOrDefault(c.Key, "")))));
-                await JS.InvokeVoidAsync("prim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
+                await PrimJs.TryInvokeVoidAsync(JS, "prim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
                 App.Log("Exported CSV", $"{Kind}: {rows.Count} row(s)");
                 Snackbar.Add($"Exported {rows.Count} row(s).", Severity.Success);
             })
@@ -311,7 +311,7 @@
     private async Task MenuCopy()
     {
         var t = Targets(); if (t.Count == 0) return;
-        var ok = await JS.InvokeAsync<bool>("prim.copyText", string.Join("\n", t.Select(x => GetInfo(x).Label)));
+        var ok = await PrimJs.TryInvokeAsync<bool>(JS, "prim.copyText", string.Join("\n", t.Select(x => GetInfo(x).Label)));
         Snackbar.Add(ok ? $"Copied {t.Count} item(s)." : "Clipboard unavailable.", ok ? Severity.Success : Severity.Warning);
     }
 
@@ -326,7 +326,7 @@
             var d = RowToDict(x);
             sb.AppendLine(string.Join("\t", _effective.Select(c => d.GetValueOrDefault(c.Key, ""))));
         }
-        var ok = await JS.InvokeAsync<bool>("prim.copyText", sb.ToString());
+        var ok = await PrimJs.TryInvokeAsync<bool>(JS, "prim.copyText", sb.ToString());
         Snackbar.Add(ok ? $"Copied {t.Count} row(s) with headers." : "Clipboard unavailable.",
             ok ? Severity.Success : Severity.Warning);
     }

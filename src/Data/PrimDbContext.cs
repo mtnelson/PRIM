@@ -11,6 +11,7 @@ public class PrimDbContext : DbContext
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<AuditEventArchive> ArchivedAuditEvents => Set<AuditEventArchive>();
     public DbSet<WorkspaceItem> WorkspaceItems => Set<WorkspaceItem>();
     public DbSet<SavedSearch> SavedSearches => Set<SavedSearch>();
     public DbSet<SearchSession> SearchSessions => Set<SearchSession>();
@@ -32,5 +33,7 @@ public class PrimDbContext : DbContext
         m.Entity<Label>().HasIndex(l => l.Name).IsUnique();
         m.Entity<ObjectLabel>().HasIndex(o => new { o.LabelId, o.ObjectKind, o.ObjectId }).IsUnique();
         m.Entity<ObjectLabel>().HasIndex(o => new { o.ObjectKind, o.ObjectId });
+        m.Entity<AuditEvent>().HasIndex(a => new { a.ObjectKind, a.ObjectId });
+        m.Entity<AuditEventArchive>().HasIndex(a => new { a.ObjectKind, a.ObjectId });
     }
 }

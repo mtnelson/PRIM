@@ -84,6 +84,49 @@
             </MudButton>
         </MudPaper>
     </MudTabPanel>
+    <MudTabPanel Text="Audit Retention">
+        <MudPaper Elevation="1" Class="pa-4 mt-2" Style="max-width:960px">
+            <MudText Typo="Typo.subtitle1" Class="mb-2"><b>Audit log retention</b></MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:0.7">
+                Count-based, three tiers. The hot audit table is capped at @_auditStats.MaxHotRows rows —
+                overflow moves oldest-first into the archive table. The archive table is capped at
+                @_auditStats.MaxArchiveRows rows — overflow is exported to a checksummed file, verified,
+                then removed. Rows are never deleted without a verified copy elsewhere. Archived rows stay
+                visible in every item's audit log, including rows already exported to files.
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-1">
+                Hot rows: <b>@_auditStats.HotRows.ToString("N0")</b>
+                · Archived rows: <b>@_auditStats.ArchivedRows.ToString("N0")</b>
+                · Export files: <b>@_auditStats.ExportFiles</b>
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:0.7">Export folder: @_auditStats.ArchiveDirectory</MudText>
+            <div class="d-flex gap-2 mb-3">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_retentionBusy" OnClick="ArchiveNow">Archive now</MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_retentionBusy" OnClick="ExportNow">Export archive to file</MudButton>
+            </div>
+            @if (_exportFiles.Any())
+            {
+                <MudTable Items="_exportFiles" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>File</MudTh><MudTh>Rows</MudTh><MudTh>Size</MudTh>
+                        <MudTh>Created (UTC)</MudTh><MudTh>SHA-256</MudTh><MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="File">@context.FileName</MudTd>
+                        <MudTd DataLabel="Rows">@context.Rows.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Size">@FormatBytes(context.Bytes)</MudTd>
+                        <MudTd DataLabel="Created">@context.CreatedUtc.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                        <MudTd DataLabel="SHA-256"><span style="font-family:monospace">@(context.Sha256.Length > 16 ? context.Sha256[..16] + "…" : context.Sha256)</span></MudTd>
+                        <MudTd><MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="() => ViewExport(context)">View</MudButton></MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Style="opacity:0.6">No export files yet.</MudText>
+            }
+        </MudPaper>
+    </MudTabPanel>
 </MudTabs>
 
 @code {
@@ -127,6 +170,7 @@
         }).ToList();
         _announcement = await Prim.GetAnnouncementAsync() ?? "";
         _searches = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+        await LoadRetention();
         StateHasChanged();
     }
 
@@ -182,4 +226,54 @@
             _seeding = false;
         }
     }
+
+    // ---------------- audit retention ----------------
+    private PrimService.AuditStats _auditStats = new(0, 0, 0, 0, 0, "");
+    private List<PrimService.AuditExportInfo> _exportFiles = new();
+    private bool _retentionBusy;
+
+    private async Task LoadRetention()
+    {
+        _auditStats = await Prim.GetAuditStatsAsync();
+        _exportFiles = await Prim.GetAuditExportFilesAsync();
+    }
+
+    private async Task ArchiveNow()
+    {
+        _retentionBusy = true;
+        try
+        {
+            var moved = await Prim.ArchiveAuditIfNeededAsync();
+            Snackbar.Add(moved == 0
+                ? "Hot audit table is under its row cap — nothing archived."
+                : $"Archived {moved:N0} audit rows.", Severity.Success);
+            App.Log("Ran audit archival", moved == 0 ? "no-op" : $"{moved:N0} rows");
+            await LoadRetention();
+        }
+        finally { _retentionBusy = false; }
+    }
+
+    private async Task ExportNow()
+    {
+        _retentionBusy = true;
+        try
+        {
+            var path = await Prim.ExportAuditArchiveIfNeededAsync();
+            Snackbar.Add(path == null
+                ? "Archive table is under its row cap — nothing exported."
+                : $"Exported archive to {Path.GetFileName(path)}.", Severity.Success);
+            App.Log("Exported audit archive", path == null ? "no-op" : Path.GetFileName(path));
+            await LoadRetention();
+        }
+        finally { _retentionBusy = false; }
+    }
+
+    private async Task ViewExport(PrimService.AuditExportInfo f)
+    {
+        var parms = new DialogParameters { ["FileName"] = f.FileName };
+        await DialogService.ShowAsync<ArchiveFileDialog>("Audit archive file", parms);
+    }
+
+    private static string FormatBytes(long b)
+        => b < 1024 ? $"{b} B" : b < 1024 * 1024 ? $"{b / 1024.0:F1} KB" : $"{b / 1024.0 / 1024:F1} MB";
 }

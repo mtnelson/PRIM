@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Prim.Data;
 
@@ -133,6 +134,28 @@ public class AuditEvent
     public string? NewValue { get; set; }
     [Required] public string Actor { get; set; } = "";
     public DateTime TimestampUtc { get; set; }
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT ARCHIVE — cold tier of the count-based audit retention plan. Rows are
+// moved here (never written directly) when the hot AuditEvents table exceeds
+// its row cap. The per-item audit viewer reads both tables, so archived rows
+// stay retrievable; the file-export tier below this is the deep archive.
+// ---------------------------------------------------------------------------
+[Table("AuditEventArchive")]
+public class AuditEventArchive
+{
+    public int Id { get; set; }
+    [Required] public string ObjectKind { get; set; } = "";
+    public int ObjectId { get; set; }
+    [Required] public string ObjectLabel { get; set; } = "";
+    [Required] public string Action { get; set; } = "";
+    public string? FieldName { get; set; }
+    public string? OldValue { get; set; }
+    public string? NewValue { get; set; }
+    [Required] public string Actor { get; set; } = "";
+    public DateTime TimestampUtc { get; set; }
+    public DateTime ArchivedUtc { get; set; }
 }
 
 // ---------------------------------------------------------------------------

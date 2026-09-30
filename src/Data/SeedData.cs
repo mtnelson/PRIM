@@ -112,6 +112,31 @@ public static class SeedData
             CREATE INDEX IF NOT EXISTS IX_SearchSessions_Owner_Page_Open
             ON SearchSessions (OwnerUserId, PageKind, IsOpen)
             """);
+        // Audit retention cold tier: rows moved here when the hot AuditEvents
+        // table exceeds its row cap. Fresh DBs get it from EnsureCreated.
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS AuditEventArchive (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ObjectKind TEXT NOT NULL,
+                ObjectId INTEGER NOT NULL,
+                ObjectLabel TEXT NOT NULL,
+                Action TEXT NOT NULL,
+                FieldName TEXT,
+                OldValue TEXT,
+                NewValue TEXT,
+                Actor TEXT NOT NULL,
+                TimestampUtc TEXT NOT NULL,
+                ArchivedUtc TEXT NOT NULL
+            )
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_AuditEventArchive_Object
+            ON AuditEventArchive (ObjectKind, ObjectId)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_AuditEvents_Object
+            ON AuditEvents (ObjectKind, ObjectId)
+            """);
         BackfillLabels(db);
     }
 

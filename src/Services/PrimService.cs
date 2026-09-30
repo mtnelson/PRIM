@@ -1,5 +1,11 @@
+using System.IO.Compression;
 using System.Linq.Expressions;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Prim.Data;
 
 namespace Prim.Services;
@@ -14,8 +20,21 @@ public record ChildItem(string Kind, int Id, string Label, string Detail, bool H
 
 /// <summary>CRUD + audit + search over the four PRIM object types.</summary>
 public class PrimService
-{    private readonly IDbContextFactory<PrimDbContext> _factory;
-    public PrimService(IDbContextFactory<PrimDbContext> factory) => _factory = factory;
+{
+    private readonly IDbContextFactory<PrimDbContext> _factory;
+    private readonly int _maxHotRows;
+    private readonly int _maxArchiveRows;
+    private readonly string _auditArchiveDir;
+
+    public PrimService(IDbContextFactory<PrimDbContext> factory, IConfiguration? config = null, string? auditArchiveDir = null)
+    {
+        _factory = factory;
+        _maxHotRows = config?.GetValue<int?>("Audit:MaxHotRows") ?? 500_000;
+        _maxArchiveRows = config?.GetValue<int?>("Audit:MaxArchiveRows") ?? 5_000_000;
+        _auditArchiveDir = auditArchiveDir
+            ?? config?.GetValue<string>("Audit:ArchiveDirectory")
+            ?? Path.Combine(AppContext.BaseDirectory, "data", "audit-archive");
+    }
 
     // ---------------- reads ----------------
     public async Task<List<RecordItem>> GetRecordsAsync(bool includeDeleted = false)
@@ -52,8 +71,45 @@ public class PrimService
     public async Task<List<AuditEvent>> GetAuditAsync(string kind, int id)
     {
         using var db = _factory.CreateDbContext();
-        return await db.AuditEvents.Where(a => a.ObjectKind == kind && a.ObjectId == id)
-            .OrderByDescending(a => a.TimestampUtc).ToListAsync();
+        // Per-item sets are small: hot + archived + file tier are always combined
+        // so the retention plan never breaks an item's chain of custody.
+        var hot = await db.AuditEvents.Where(a => a.ObjectKind == kind && a.ObjectId == id).ToListAsync();
+        var archived = await db.ArchivedAuditEvents.Where(a => a.ObjectKind == kind && a.ObjectId == id)
+            .Select(a => new AuditEvent
+            {
+                Id = -a.Id, ObjectKind = a.ObjectKind, ObjectId = a.ObjectId, ObjectLabel = a.ObjectLabel,
+                Action = a.Action, FieldName = a.FieldName, OldValue = a.OldValue, NewValue = a.NewValue,
+                Actor = a.Actor, TimestampUtc = a.TimestampUtc
+            }).ToListAsync();
+        var all = hot.Concat(archived).ToList();
+        // File tier: scan export files for this item's rows. Cheap ordinal
+        // pre-filter on the ObjectId token (our own serializer writes it as
+        // "ObjectId":<id>), then deserialize candidates and verify exactly.
+        if (Directory.Exists(_auditArchiveDir))
+        {
+            var idNeedle = $"\"ObjectId\":{id}";
+            foreach (var path in Directory.GetFiles(_auditArchiveDir, "audit-archive-*.jsonl.gz").OrderBy(p => p))
+            {
+                await using var fs = File.OpenRead(path);
+                await using var gz = new GZipStream(fs, CompressionMode.Decompress);
+                using var sr = new StreamReader(gz);
+                string? line;
+                while ((line = await sr.ReadLineAsync()) != null)
+                {
+                    if (!line.Contains(idNeedle, StringComparison.Ordinal)) continue;
+                    var r = JsonSerializer.Deserialize<AuditEventArchive>(line);
+                    if (r == null || r.ObjectKind != kind || r.ObjectId != id) continue;
+                    all.Add(new AuditEvent
+                    {
+                        Id = -r.Id - 1_000_000_000, ObjectKind = r.ObjectKind, ObjectId = r.ObjectId,
+                        ObjectLabel = r.ObjectLabel, Action = r.Action, FieldName = r.FieldName,
+                        OldValue = r.OldValue, NewValue = r.NewValue, Actor = r.Actor,
+                        TimestampUtc = r.TimestampUtc
+                    });
+                }
+            }
+        }
+        return all.OrderByDescending(a => a.TimestampUtc).ThenByDescending(a => a.Id).ToList();
     }
 
     // ---------- Infinite-scroll paging (500-row chunks, server-side) ----------
@@ -216,6 +272,7 @@ public class PrimService
         var kids = list.Skip(parentCount).OrderBy(_ => rnd.Next()).Take(Math.Min(200, list.Count - parentCount)).ToList();
         foreach (var k in kids) k.ParentRecordId = parents[rnd.Next(parents.Count)].Id;
         await db.SaveChangesAsync();
+        await ArchiveAuditIfNeededAsync();
         return list.Select(r => r.RecordNumber).ToList();
     }
 
@@ -642,6 +699,7 @@ public class PrimService
             }
         }
         await db.SaveChangesAsync();
+        await ArchiveAuditIfNeededAsync();
         return n;
     }
 
@@ -666,6 +724,7 @@ public class PrimService
                 r.DeleteReason + (mergedInto != null ? $" (merged into {mergedInto})" : ""));
         }
         await db.SaveChangesAsync();
+        await ArchiveAuditIfNeededAsync();
         return items.Count;
     }
 
@@ -680,6 +739,7 @@ public class PrimService
             AddAudit(db, "Record", r.Id, r.RecordNumber, "Restored", actor);
         }
         await db.SaveChangesAsync();
+        await ArchiveAuditIfNeededAsync();
         return items.Count;
     }
 
@@ -706,6 +766,7 @@ public class PrimService
             AddAudit(db, "Container", c.Id, c.ContainerName, "Deleted", actor);
         db.Containers.RemoveRange(items);
         await db.SaveChangesAsync();
+        await ArchiveAuditIfNeededAsync();
         return items.Count;
     }
 
@@ -1342,5 +1403,147 @@ public class PrimService
             return $"{foCode} - {code} - {(type == "Pallet" ? "PLT" : "TRUCK")} - {seq}";
         }
         return $"{foCode}-{code}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+    }
+
+    // ---------------- audit retention (count-based) ----------------
+    // Three tiers: hot AuditEvents (capped at MaxHotRows) -> AuditEventArchive
+    // table (capped at MaxArchiveRows) -> checksummed .jsonl.gz files on disk.
+    // Rows are moved, never deleted, until a verified file copy exists.
+
+    public record AuditStats(long HotRows, long ArchivedRows, int ExportFiles,
+        int MaxHotRows, int MaxArchiveRows, string ArchiveDirectory);
+    public record AuditExportInfo(string FileName, long Rows, long Bytes, DateTime CreatedUtc, string Sha256);
+
+    public async Task<AuditStats> GetAuditStatsAsync()
+    {
+        using var db = _factory.CreateDbContext();
+        var hot = await db.AuditEvents.LongCountAsync();
+        var archived = await db.ArchivedAuditEvents.LongCountAsync();
+        var files = Directory.Exists(_auditArchiveDir)
+            ? Directory.GetFiles(_auditArchiveDir, "audit-archive-*.jsonl.gz").Length : 0;
+        return new AuditStats(hot, archived, files, _maxHotRows, _maxArchiveRows, _auditArchiveDir);
+    }
+
+    /// <summary>Moves oldest-first audit rows from the hot table to the archive
+    /// table when the hot row cap is exceeded. Returns rows moved (0 = under cap).</summary>
+    public async Task<int> ArchiveAuditIfNeededAsync(int? maxHotRows = null)
+    {
+        var cap = maxHotRows ?? _maxHotRows;
+        using var db = _factory.CreateDbContext();
+        var count = await db.AuditEvents.LongCountAsync();
+        if (count <= cap) return 0;
+        // Ids are insertion-ordered: everything below the keep-from Id is safe
+        // to move even if concurrent writers add newer rows mid-run.
+        var keepFromId = await db.AuditEvents.OrderBy(a => a.Id).Select(a => a.Id)
+            .Skip((int)(count - cap)).FirstAsync();
+        var moved = 0;
+        var now = DateTime.UtcNow;
+        while (true)
+        {
+            var batch = await db.AuditEvents.Where(a => a.Id < keepFromId)
+                .OrderBy(a => a.Id).Take(10_000).ToListAsync();
+            if (batch.Count == 0) break;
+            foreach (var e in batch)
+                db.ArchivedAuditEvents.Add(new AuditEventArchive
+                {
+                    ObjectKind = e.ObjectKind, ObjectId = e.ObjectId, ObjectLabel = e.ObjectLabel,
+                    Action = e.Action, FieldName = e.FieldName, OldValue = e.OldValue,
+                    NewValue = e.NewValue, Actor = e.Actor, TimestampUtc = e.TimestampUtc,
+                    ArchivedUtc = now
+                });
+            db.AuditEvents.RemoveRange(batch);
+            await db.SaveChangesAsync();
+            moved += batch.Count;
+        }
+        await ExportAuditArchiveIfNeededAsync();
+        return moved;
+    }
+
+    /// <summary>Exports oldest archive-table rows to a checksummed .jsonl.gz file
+    /// when the archive row cap is exceeded; deletes from the table only after the
+    /// file verifies (line count match). Returns the file path, or null if under cap.</summary>
+    public async Task<string?> ExportAuditArchiveIfNeededAsync(int? maxArchiveRows = null, string? directory = null)
+    {
+        var cap = maxArchiveRows ?? _maxArchiveRows;
+        var dir = directory ?? _auditArchiveDir;
+        List<AuditEventArchive> rows;
+        using (var db = _factory.CreateDbContext())
+        {
+            var count = await db.ArchivedAuditEvents.LongCountAsync();
+            if (count <= cap) return null;
+            rows = await db.ArchivedAuditEvents.OrderBy(a => a.Id)
+                .Take((int)(count - cap)).ToListAsync();
+        }
+        Directory.CreateDirectory(dir);
+        var name = $"audit-archive-{rows.First().Id:D8}-{rows.Last().Id:D8}.jsonl.gz";
+        var path = Path.Combine(dir, name);
+        await using (var fs = File.Create(path))
+        await using (var gz = new GZipStream(fs, CompressionLevel.Optimal))
+            foreach (var r in rows)
+            {
+                var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(r) + "\n");
+                await gz.WriteAsync(bytes);
+            }
+        // Verify before deleting: the file must decompress to exactly the row count.
+        long lines = 0;
+        await using (var fs = File.OpenRead(path))
+        await using (var gz = new GZipStream(fs, CompressionMode.Decompress))
+        using (var sr = new StreamReader(gz))
+            while (await sr.ReadLineAsync() != null) lines++;
+        if (lines != rows.Count)
+        {
+            File.Delete(path);
+            throw new InvalidOperationException(
+                $"Audit archive export verification failed: wrote {rows.Count} rows, file holds {lines}.");
+        }
+        await using (var fs = File.OpenRead(path))
+            await File.WriteAllTextAsync(path + ".sha256",
+                Convert.ToHexString(await SHA256.HashDataAsync(fs)) + "  " + name + "\n");
+        using (var db = _factory.CreateDbContext())
+        {
+            var maxId = rows.Last().Id;
+            var doomed = await db.ArchivedAuditEvents.Where(a => a.Id <= maxId).ToListAsync();
+            db.ArchivedAuditEvents.RemoveRange(doomed);
+            await db.SaveChangesAsync();
+        }
+        return path;
+    }
+
+    public Task<List<AuditExportInfo>> GetAuditExportFilesAsync()
+    {
+        var list = new List<AuditExportInfo>();
+        if (Directory.Exists(_auditArchiveDir))
+            foreach (var f in new DirectoryInfo(_auditArchiveDir)
+                .GetFiles("audit-archive-*.jsonl.gz").OrderBy(f => f.Name))
+            {
+                long rows = 0;
+                var m = Regex.Match(f.Name, @"audit-archive-(\d+)-(\d+)\.jsonl\.gz");
+                if (m.Success) rows = long.Parse(m.Groups[2].Value) - long.Parse(m.Groups[1].Value) + 1;
+                var sha = "";
+                var sidecar = f.FullName + ".sha256";
+                if (File.Exists(sidecar)) sha = File.ReadAllText(sidecar).Split(' ')[0].Trim();
+                list.Add(new AuditExportInfo(f.Name, rows, f.Length, f.CreationTimeUtc, sha));
+            }
+        return Task.FromResult(list);
+    }
+
+    /// <summary>Reads up to <paramref name="take"/> rows from an export file for the viewer.</summary>
+    public async Task<List<AuditEventArchive>> ReadAuditExportAsync(string fileName, int take = 500)
+    {
+        var path = Path.GetFullPath(Path.Combine(_auditArchiveDir, fileName));
+        if (!path.StartsWith(Path.GetFullPath(_auditArchiveDir) + Path.DirectorySeparatorChar))
+            throw new ArgumentException("Invalid file name.", nameof(fileName));
+        var rows = new List<AuditEventArchive>();
+        await using var fs = File.OpenRead(path);
+        await using var gz = new GZipStream(fs, CompressionMode.Decompress);
+        using var sr = new StreamReader(gz);
+        string? line;
+        while (rows.Count < take && (line = await sr.ReadLineAsync()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            var r = JsonSerializer.Deserialize<AuditEventArchive>(line);
+            if (r != null) rows.Add(r);
+        }
+        return rows;
     }
 }

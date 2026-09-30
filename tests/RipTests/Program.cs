@@ -2,6 +2,8 @@
 // exercising the same PrimService the Blazor UI uses. Exit code 0 = all pass.
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Primitives;
 using Prim.Data;
 using Prim.Services;
 
@@ -699,6 +701,83 @@ Check((await svc.GetOpenSessionsAsync("u1", "records")).Count == 9, "session gon
 var (cAfter, _, _) = await svc.CreateSessionAsync(new SearchSession { OwnerUserId = "u1", PageKind = "records", Title = "t-new" });
 Check(cAfter, "session create works again after delete (under cap)");
 
+// ---- audit retention: count-based hot cap + archive table + file export ----
+long hotBefore;
+using (var db = factory.CreateDbContext()) hotBefore = await db.AuditEvents.LongCountAsync();
+using (var db = factory.CreateDbContext())
+{
+    for (int i = 0; i < 30; i++)
+        db.AuditEvents.Add(new AuditEvent
+        {
+            ObjectKind = "Record", ObjectId = 999, ObjectLabel = $"R-RET-{i}",
+            Action = "Updated", Actor = "tester", TimestampUtc = DateTime.UtcNow.AddMinutes(i)
+        });
+    await db.SaveChangesAsync();
+}
+Check(await svc.ArchiveAuditIfNeededAsync(maxHotRows: 1_000_000) == 0, "archival no-op under cap");
+var moved = await svc.ArchiveAuditIfNeededAsync(maxHotRows: 10);
+Check(moved == hotBefore + 30 - 10, "archival moves overflow oldest-first", $"moved {moved}");
+using (var db = factory.CreateDbContext())
+{
+    Check(await db.AuditEvents.LongCountAsync() == 10, "hot table at cap after archival");
+    Check(await db.ArchivedAuditEvents.LongCountAsync() == hotBefore + 20, "archive holds the rest");
+    var hot999 = await db.AuditEvents.Where(a => a.ObjectKind == "Record" && a.ObjectId == 999)
+        .OrderBy(a => a.TimestampUtc).ToListAsync();
+    var archMaxTs = await db.ArchivedAuditEvents.Where(a => a.ObjectKind == "Record" && a.ObjectId == 999)
+        .MaxAsync(a => a.TimestampUtc);
+    Check(hot999.Count == 10, "newest 10 audit rows stay hot");
+    Check(hot999.First().TimestampUtc > archMaxTs, "hot/archive split is oldest-first");
+}
+var all999 = await svc.GetAuditAsync("Record", 999);
+Check(all999.Count == 30, "per-item audit log includes archived rows", $"got {all999.Count}");
+
+var tmpAudit = Path.Combine(Path.GetTempPath(), $"audittest-{Guid.NewGuid():N}");
+var svc2 = new PrimService(factory, null, tmpAudit);
+long archBefore;
+using (var db = factory.CreateDbContext()) archBefore = await db.ArchivedAuditEvents.LongCountAsync();
+Check(await svc2.ExportAuditArchiveIfNeededAsync(maxArchiveRows: 1_000_000) == null, "export no-op under cap");
+var expPath = await svc2.ExportAuditArchiveIfNeededAsync(maxArchiveRows: 5);
+Check(expPath != null && File.Exists(expPath), "export writes .jsonl.gz");
+Check(expPath != null && File.Exists(expPath + ".sha256"), "export writes .sha256 sidecar");
+if (expPath != null)
+{
+    var sha = File.ReadAllText(expPath + ".sha256").Split(' ')[0].Trim();
+    Check(sha.Length == 64 && sha.All(c => Uri.IsHexDigit(c)), "sha256 sidecar is 64 hex chars");
+}
+using (var db = factory.CreateDbContext())
+    Check(await db.ArchivedAuditEvents.LongCountAsync() == 5, "archive table at cap after export");
+var expName = Path.GetFileName(expPath)!;
+var readBack = await svc2.ReadAuditExportAsync(expName);
+Check(readBack.Count == archBefore - 5, "export file reads back all exported rows", $"got {readBack.Count}");
+var expFiles = await svc2.GetAuditExportFilesAsync();
+Check(expFiles.Count == 1 && expFiles[0].Rows == archBefore - 5, "export listed with row count");
+var afterExport = await svc2.GetAuditAsync("Record", 999);
+Check(afterExport.Count == 30, "per-item audit spans hot + archive + export files", $"got {afterExport.Count}");
+// path-traversal guard
+bool threw = false;
+try { await svc2.ReadAuditExportAsync("../../evil.gz"); } catch { threw = true; }
+Check(threw, "export reader rejects path traversal");
+try { Directory.Delete(tmpAudit, true); } catch { }
+
+// bulk-operation hook: archival runs automatically with a tiny configured cap
+var tinyCfg = new TestConfig(new Dictionary<string, string?> { ["Audit:MaxHotRows"] = "5" });
+var tmpAudit2 = Path.Combine(Path.GetTempPath(), $"audittest-{Guid.NewGuid():N}");
+var svc3 = new PrimService(factory, tinyCfg, tmpAudit2);
+using (var db = factory.CreateDbContext())
+{
+    for (int i = 0; i < 8; i++)
+        db.AuditEvents.Add(new AuditEvent
+        {
+            ObjectKind = "Record", ObjectId = 998, ObjectLabel = $"R-HOOK-{i}",
+            Action = "Moved", Actor = "tester", TimestampUtc = DateTime.UtcNow
+        });
+    await db.SaveChangesAsync();
+}
+await svc3.MoveItemsAsync("Record", Array.Empty<int>(), null, null, null, null, null, null, false, "tester");
+using (var db = factory.CreateDbContext())
+    Check(await db.AuditEvents.LongCountAsync() == 5, "bulk op triggers archival to configured cap");
+try { Directory.Delete(tmpAudit2, true); } catch { }
+
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }
 return fail == 0 ? 0 : 1;
@@ -706,4 +785,50 @@ return fail == 0 ? 0 : 1;
 sealed class TestFactory(DbContextOptions<PrimDbContext> opts) : IDbContextFactory<PrimDbContext>
 {
     public PrimDbContext CreateDbContext() => new(opts);
+}
+
+// Minimal IConfiguration for retention-cap tests (no extra packages).
+sealed class NullToken : IChangeToken
+{
+    public static readonly NullToken Instance = new();
+    public bool HasChanged => false;
+    public bool ActiveChangeCallbacks => false;
+    public IDisposable RegisterChangeCallback(Action<object?> callback, object? state)
+        => NoopDisposable.Instance;
+    sealed class NoopDisposable : IDisposable
+    {
+        public static readonly NoopDisposable Instance = new();
+        public void Dispose() { }
+    }
+}
+
+sealed class TestConfig(Dictionary<string, string?> values) : IConfiguration
+{
+    public string? this[string key]
+    {
+        get => values.TryGetValue(key, out var v) ? v : null;
+        set => values[key] = value;
+    }
+    public IEnumerable<IConfigurationSection> GetChildren() => Enumerable.Empty<IConfigurationSection>();
+    public IChangeToken GetReloadToken() => NullToken.Instance;
+    public IConfigurationSection GetSection(string key) => new TestSection(values, key);
+
+    sealed class TestSection(Dictionary<string, string?> values, string key) : IConfigurationSection
+    {
+        public string? this[string k]
+        {
+            get => values.TryGetValue(key + ":" + k, out var v) ? v : null;
+            set => values[key + ":" + k] = value;
+        }
+        public string Key => key;
+        public string Path => key;
+        public string? Value
+        {
+            get => values.TryGetValue(key, out var v) ? v : null;
+            set => values[key] = value;
+        }
+        public IEnumerable<IConfigurationSection> GetChildren() => Enumerable.Empty<IConfigurationSection>();
+        public IChangeToken GetReloadToken() => NullToken.Instance;
+        public IConfigurationSection GetSection(string k) => new TestSection(values, key + ":" + k);
+    }
 }

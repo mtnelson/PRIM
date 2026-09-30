@@ -1,0 +1,39 @@
+@inject PrimService Prim
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Audit archive file — @FileName</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2" Style="opacity:0.7">Showing up to 500 rows, oldest first.</MudText>
+        <MudTable Items="_rows" Dense="true" Hover="true" Style="max-height:400px;overflow-y:auto">
+            <HeaderContent>
+                <MudTh>When (UTC)</MudTh>
+                <MudTh>Who</MudTh>
+                <MudTh>Item</MudTh>
+                <MudTh>Action</MudTh>
+                <MudTh>Field</MudTh>
+                <MudTh>Old</MudTh>
+                <MudTh>New</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="When">@context.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+                <MudTd DataLabel="Who">@context.Actor</MudTd>
+                <MudTd DataLabel="Item">@context.ObjectLabel</MudTd>
+                <MudTd DataLabel="Action">@context.Action</MudTd>
+                <MudTd DataLabel="Field">@context.FieldName</MudTd>
+                <MudTd DataLabel="Old"><span class="audit-val">@context.OldValue</span></MudTd>
+                <MudTd DataLabel="New"><span class="audit-val">@context.NewValue</span></MudTd>
+            </RowTemplate>
+        </MudTable>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public string FileName { get; set; } = "";
+
+    private List<AuditEventArchive> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+        => _rows = await Prim.ReadAuditExportAsync(FileName);
+}

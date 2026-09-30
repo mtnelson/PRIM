@@ -7,6 +7,7 @@
     <AssemblyName>RipTests</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
     <ProjectReference Include="../../src/Prim.csproj" />
   </ItemGroup>
 </Project>

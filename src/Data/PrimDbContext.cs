@@ -15,6 +15,8 @@ public class PrimDbContext : DbContext
     public DbSet<SavedSearch> SavedSearches => Set<SavedSearch>();
     public DbSet<Announcement> Announcements => Set<Announcement>();
     public DbSet<UserGridLayout> UserGridLayouts => Set<UserGridLayout>();
+    public DbSet<Label> Labels => Set<Label>();
+    public DbSet<ObjectLabel> ObjectLabels => Set<ObjectLabel>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -25,5 +27,8 @@ public class PrimDbContext : DbContext
         m.Entity<AppUser>().HasIndex(u => u.UserId).IsUnique();
         m.Entity<WorkspaceItem>().HasIndex(w => new { w.OwnerUserId, w.Slot, w.ObjectKind, w.ObjectId }).IsUnique();
         m.Entity<UserGridLayout>().HasIndex(g => new { g.UserId, g.GridId }).IsUnique();
+        m.Entity<Label>().HasIndex(l => l.Name).IsUnique();
+        m.Entity<ObjectLabel>().HasIndex(o => new { o.LabelId, o.ObjectKind, o.ObjectId }).IsUnique();
+        m.Entity<ObjectLabel>().HasIndex(o => new { o.ObjectKind, o.ObjectId });
     }
 }

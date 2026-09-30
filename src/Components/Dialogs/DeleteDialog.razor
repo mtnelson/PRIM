@@ -8,7 +8,7 @@
         <DialogHotkeys OnSave="Submit" OnCancel="() => MudDialog.Cancel()" />
         <MudText Typo="Typo.body2" Class="mb-3">
             Deleted records are immediately excluded from search and moved to a deletion state.
-            A reason is required (TIS-370).
+            A reason is required.
         </MudText>
         <MudRadioGroup T="string" @bind-Value="_reason">
             <MudRadio Value="@("Duplicate entry")">Duplicate entry</MudRadio>

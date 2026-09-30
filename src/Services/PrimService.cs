@@ -538,7 +538,7 @@ public class PrimService
         input.LocationName = input.LocationName.ToUpperInvariant();
         var dup = await db.Locations.AnyAsync(l => l.Id != input.Id && l.LocationType == input.LocationType
             && l.ParentId == input.ParentId && l.LocationName == input.LocationName);
-        if (dup) return (false, "A location with this name already exists for this type and parent (TIS-345).");
+        if (dup) return (false, "A location with this name already exists for this type and parent.");
 
         if (input.Id == 0)
         {

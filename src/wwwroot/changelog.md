@@ -1,5 +1,8 @@
 # PRIM Changelog
 
+## v0.9.1 — 2026-09-30
+- Removed all Jira keys (TIS-xxxx) from user-visible text; they remain only in code comments.
+
 ## v0.9.0 — 2026-09-30
 - Version number shown on the login screen and at the bottom of the navigation drawer; click it to view this changelog.
 - PRIM logo added to the app bar (top left) and the login screen.

@@ -13,7 +13,7 @@
             <MudTextField T="string" Label="New Home" Value="_newHome" ReadOnly="true"
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickHome" />
             <MudText Typo="Typo.caption">@_newHomeKind</MudText>
-            <MudCheckBox T="bool" Label="Default the assignee to the home (TIS-2201)" @bind-Value="_assigneeFollowsHome" Class="mt-2" />
+            <MudCheckBox T="bool" Label="Default the assignee to the home" @bind-Value="_assigneeFollowsHome" Class="mt-2" />
         }
         <MudCheckBox T="bool" Label="Change Assignee" @bind-Value="_changeAssignee" Class="mt-2" />
         @if (_changeAssignee)

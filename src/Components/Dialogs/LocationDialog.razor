@@ -30,6 +30,9 @@
                 <MudItem xs="12">
                     <MudTextField T="string" Label="Description" @bind-Value="_model.Description" Lines="2" HelperText="Initial case." />
                 </MudItem>
+                <MudItem xs="12" md="6">
+                    <LabelPicker @bind-Selected="_labels" Actor="@App.CurrentUserId" />
+                </MudItem>
             </MudGrid>
             @if (!string.IsNullOrEmpty(_error)) { <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert> }
         </MudForm>
@@ -48,9 +51,11 @@
     private Location _model = new();
     private List<Location> _locs = new();
     private string? _error;
+    private List<string> _labels = new();
 
     protected override async Task OnInitializedAsync()
     {
+        if (Model.Id != 0) _labels = await Prim.GetObjectLabelNamesAsync("Location", Model.Id);
         _locs = await Prim.GetLocationsAsync();
         _model = Model.Id == 0 ? new Location() : new Location
         {
@@ -70,6 +75,7 @@
         var isNew = _model.Id == 0;
         var (ok, err) = await Prim.SaveLocationAsync(_model, App.CurrentUserId);
         if (!ok) { _error = err; return; }
+        await Prim.SetObjectLabelsAsync("Location", _model.Id, _labels, App.CurrentUserId);
         Snackbar.Add(isNew ? "Location created." : "Location updated.", Severity.Success);
         App.Log(isNew ? "Created location" : "Updated location", _model.LocationName);
         MudDialog.Close(DialogResult.Ok(true));

@@ -2,7 +2,7 @@
    Home/Assignee, breadcrumb Path column. Used by Containers, Dashboard, and Workspaces. *@
 @inject PrimService Prim
 
-<ObjectGrid @ref="_grid" T="Container" Items="Items" Kind="Container" GridId="@GridId" Scope="@Scope"
+<ObjectGrid @ref="_grid" T="Container" Items="Items" ItemsProvider="_provider" OnReset="ResetSupplemental" Kind="Container" GridId="@GridId" Scope="@Scope"
             GetInfo="@(c => ("Container", c.Id, c.ContainerName))"
             GetBarcode="c => c.Barcode"
             EditItem="EditItem" DeleteItems="DeleteItems"
@@ -18,6 +18,7 @@
     private ObjectGrid<Container>? _grid;
 
     [Parameter] public IEnumerable<Container> Items { get; set; } = Enumerable.Empty<Container>();
+    [Parameter] public Func<GridPageRequest, Task<GridPageResult<Container>>>? ItemsProvider { get; set; }
     [Parameter] public string GridId { get; set; } = "containers";
     [Parameter] public string Scope { get; set; } = "containers";
     [Parameter] public Func<Container, Task<bool>>? EditItem { get; set; }
@@ -34,6 +35,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (ItemsProvider != null) return; // provider mode enriches per chunk
         var ids = Items.Select(c => c.Id).ToList();
         _labelPairs = await Prim.GetObjectLabelPairsAsync("Container", ids);
         _paths = await Prim.GetAncestorPathsAsync("Container", ids);
@@ -64,5 +66,31 @@
     private List<(int Id, string Name)> GetChips(Container c) =>
         _labelPairs.TryGetValue(c.Id, out var lp2) ? lp2 : new();
 
+    private Func<GridPageRequest, Task<GridPageResult<Container>>>? _provider
+        => ItemsProvider == null ? null : ProvideAsync;
+
+    private async Task<GridPageResult<Container>> ProvideAsync(GridPageRequest req)
+    {
+        var page = await ItemsProvider!(req);
+        await EnrichChunkAsync(page.Rows);
+        return page;
+    }
+
+    public async Task EnrichChunkAsync(List<Container> rows)
+    {
+        var ids = rows.Select(r => r.Id).ToList();
+        if (ids.Count == 0) return;
+        foreach (var kv in await Prim.GetObjectLabelPairsAsync("Container", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var id in await Prim.GetHasChildrenAsync("Container", ids)) _withChildren.Add(id);
+        foreach (var kv in await Prim.GetAncestorPathsAsync("Container", ids)) _paths[kv.Key] = kv.Value;
+    }
+
+    private void ResetSupplemental()
+    {
+        _withChildren.Clear(); _labelPairs.Clear();
+        _paths.Clear();
+    }
+
     public void ClearSelection() => _grid?.ClearSelection();
+    public Task ResetAsync() => _grid?.ResetAsync() ?? Task.CompletedTask;
 }

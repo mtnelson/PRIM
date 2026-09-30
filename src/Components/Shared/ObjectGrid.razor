@@ -73,6 +73,17 @@
                             {
                                 <MudLink Typo="Typo.body2" OnClick="@(() => NavigateToObject(a.Kind, a.Id, true))">@CellVal(item, c.Key)</MudLink>
                             }
+                            else if (c.Key == "Labels" && GetLabelChips != null)
+                            {
+                                @* Label chips: clicking one opens the label's
+                                   member collection, like Home/Path links. *@
+                                @foreach (var chip in GetLabelChips(item))
+                                {
+                                    var cp = chip;
+                                    <MudChip T="string" Size="Size.Small" Class="mr-1 mb-1"
+                                             OnClick="@(() => Nav.NavigateTo($"/labels/{cp.Id}"))">@cp.Name</MudChip>
+                                }
+                            }
                             else
                             {
                                 @CellVal(item, c.Key)
@@ -117,6 +128,8 @@
     [Parameter] public Func<T, (string Kind, int Id)?>? GetHomeRef { get; set; }
     [Parameter] public Func<T, (string Kind, int Id)?>? GetAssigneeRef { get; set; }
     [Parameter] public Func<T, List<PathSeg>>? GetPath { get; set; }
+    // Label chips for the "Labels" column; click navigates to /labels/{id}.
+    [Parameter] public Func<T, List<(int Id, string Name)>>? GetLabelChips { get; set; }
 
     private HashSet<T> _selected = new();
     private T? _active;

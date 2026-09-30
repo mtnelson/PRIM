@@ -179,3 +179,26 @@ public class UserGridLayout
     [Required] public string ColumnsCsv { get; set; } = ""; // ordered visible column keys
     public DateTime UpdatedUtc { get; set; }
 }
+
+// ---------------------------------------------------------------------------
+// LABELS — named collections of objects. A label is created once (Labels
+// screen) and attached to any number of records, containers, locations, or
+// users via ObjectLabel. Clicking a label anywhere navigates to its members.
+// The legacy RecordItem.Labels comma-separated text is backfilled into these
+// tables on upgrade (SeedData.BackfillLabels).
+// ---------------------------------------------------------------------------
+public class Label
+{
+    public int Id { get; set; }
+    [Required] public string Name { get; set; } = "";
+    public DateTime CreatedUtc { get; set; }
+    [Required] public string CreatedBy { get; set; } = "";
+}
+
+public class ObjectLabel
+{
+    public int Id { get; set; }
+    public int LabelId { get; set; }
+    [Required] public string ObjectKind { get; set; } = ""; // Record | Container | Location | User
+    public int ObjectId { get; set; }
+}

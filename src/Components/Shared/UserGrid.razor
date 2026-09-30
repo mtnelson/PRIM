@@ -6,8 +6,9 @@
             GetInfo="@(u => ("User", u.Id, u.DisplayName))"
             GetBarcode="@(u => "")"
             EditItem="EditItem" DeleteItems="DeleteItems"
-            ExportCols="GridColumns.UserColumns()" RowToDict="GridColumns.UserRow"
+            ExportCols="GridColumns.UserColumns()" RowToDict="RowWithLabels"
             Expandable="true" HasChildren="HasKids" GetChildrenAsync="GetKids"
+            GetLabelChips="GetChips"
             CanMove="@CanMove" CanDelete="@CanDelete"
             ShowRemoveFromSlot="@ShowRemoveFromSlot" RemoveFromSlot="RemoveFromSlot"
             OnChanged="OnChanged" />
@@ -27,11 +28,23 @@
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private HashSet<int> _withChildren = new();
+    private Dictionary<int, List<(int Id, string Name)>> _labelPairs = new();
 
     protected override async Task OnParametersSetAsync()
     {
         _withChildren = await Prim.GetHasChildrenAsync("User", Items.Select(u => u.Id));
+        _labelPairs = await Prim.GetObjectLabelPairsAsync("User", Items.Select(u => u.Id));
     }
+
+    private Dictionary<string, string> RowWithLabels(AppUser u)
+    {
+        var d = GridColumns.UserRow(u);
+        d["Labels"] = _labelPairs.TryGetValue(u.Id, out var lp) ? string.Join(", ", lp.Select(x => x.Name)) : "";
+        return d;
+    }
+
+    private List<(int Id, string Name)> GetChips(AppUser u) =>
+        _labelPairs.TryGetValue(u.Id, out var lp2) ? lp2 : new();
 
     private bool HasKids(AppUser u) => _withChildren.Contains(u.Id);
 

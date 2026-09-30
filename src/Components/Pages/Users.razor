@@ -11,7 +11,7 @@
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Users</MudText>
     <MudSpacer />
-    <MudCheckBox T="bool" @bind-Value="_showInactive" Label="Show inactive" Dense="true" Class="mr-2" />
+    <MudCheckBox T="bool" Value="_showInactive" ValueChanged="OnShowInactiveChanged" Label="Show inactive" Dense="true" Class="mr-2" />
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="NewUser">New User (Ctrl+N)</MudButton>
 </div>
 
@@ -20,33 +20,36 @@
     assignees of records and containers. Right-click a row for actions. Users are deactivated, not deleted.
 </MudText>
 
-<UserGrid @ref="_grid" Items="Filtered" GridId="users" Scope="users"
-          EditItem="EditUser" OnChanged="Load" CanMove="false" />
+<UserGrid @ref="_grid" ItemsProvider="ProvideUsers" GridId="users" Scope="users"
+          EditItem="EditUser" OnChanged="OnGridChanged" CanMove="false" />
 
 @code {
     private UserGrid? _grid;
-    private List<AppUser> _items = new();
     private bool _showInactive;
 
-    private IEnumerable<AppUser> Filtered => _showInactive ? _items : _items.Where(u => u.Active);
+    private Task<GridPageResult<AppUser>> ProvideUsers(GridPageRequest req)
+        => Prim.GetUsersPageAsync(req, _showInactive);
 
-    protected override async Task OnInitializedAsync()
+    private async Task OnShowInactiveChanged(bool v)
+    {
+        _showInactive = v;
+        if (_grid != null) await _grid.ResetAsync();
+    }
+
+    protected override void OnInitialized()
     {
         Hotkeys.PushScope("users");
         Hotkeys.Register("users", "Ctrl+N", NewUser);
         Hotkeys.Register("users", "F9", Refresh);
-        await Load();
     }
 
     public void Dispose() => Hotkeys.UnregisterScope("users");
 
-    private async Task Refresh() { await Load(); Snackbar.Add("Users refreshed.", Severity.Info); }
+    private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Users refreshed.", Severity.Info); }
 
-    private async Task Load()
+    private async Task OnGridChanged()
     {
-        _items = await Prim.GetUsersAsync();
-        _grid?.ClearSelection();
-        StateHasChanged();
+        if (_grid != null) await _grid.ResetAsync();
     }
 
     private async Task NewUser()
@@ -54,7 +57,7 @@
         var d = await DialogService.ShowAsync<UserDialog>("New User",
             new DialogParameters { ["Model"] = new AppUser() },
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
-        if ((await d.Result) is { Canceled: false }) await Load();
+        if ((await d.Result) is { Canceled: false }) await OnGridChanged();
     }
 
     private async Task<bool> EditUser(AppUser u)

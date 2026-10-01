@@ -33,6 +33,8 @@ public static class SeedData
     // Idempotent: safe to run on every startup, on SQLite and SQL Server.
     public static void UpgradeSchema(RimDbContext db)
     {
+        // Ordering contract (B1): EVERY AddColumn runs before ANY backfill,
+        // so a prototype-era database never hits "no such column" at startup.
         AddColumn(db, "Users", "PasswordHash", "TEXT");
         AddColumn(db, "Users", "PasswordSalt", "TEXT");
         AddColumn(db, "Users", "LocationId", "INTEGER");
@@ -40,20 +42,39 @@ public static class SeedData
         AddColumn(db, "Users", "ThemePreference", "TEXT");  // v0.12.0: per-user dark/light mode
         AddColumn(db, "Records", "ParentRecordId", "INTEGER");
         AddColumn(db, "Records", "CompressedRole", "TEXT"); // v0.12.0: Parent | Child
-        BackfillUserBarcodes(db);
-        BackfillCompressedRoles(db);
-        BackfillChildHoming(db);
         AddColumn(db, "Records", "AssigneeKind", "TEXT");
-        AddColumn(db, "Containers", "AssigneeKind", "TEXT");
         AddColumn(db, "Records", "AssigneeRefId", "INTEGER");
+        AddColumn(db, "Containers", "AssigneeKind", "TEXT");
         AddColumn(db, "Containers", "AssigneeRefId", "INTEGER");
-        BackfillRefIds(db);
+
+        // Table/index DDL is provider-specific (B3): the SQLite dialect throws
+        // on SQL Server, which needs OBJECT_ID / sys.indexes existence guards,
+        // INT IDENTITY keys, and NVARCHAR / DATETIME2 types instead. Both
+        // paths are idempotent: safe to run on every startup.
+        if (db.Database.IsSqlServer())
+            CreateMissingTablesSqlServer(db);
+        else
+            CreateMissingTablesSqlite(db);
+
         // Existing rows predate the AssigneeKind column: their assignees were
         // always user IDs, so default to "User" (matches fresh seed data).
+        // Runs BEFORE BackfillRefIds (M1) so legacy rows resolve AssigneeRefId.
 #pragma warning disable EF1002
         db.Database.ExecuteSqlRaw("UPDATE Records SET AssigneeKind = 'User' WHERE AssigneeKind IS NULL");
         db.Database.ExecuteSqlRaw("UPDATE Containers SET AssigneeKind = 'User' WHERE AssigneeKind IS NULL");
 #pragma warning restore EF1002
+
+        BackfillUserBarcodes(db);
+        BackfillCompressedRoles(db);
+        BackfillChildHoming(db);
+        BackfillRefIds(db);
+        BackfillLabels(db);
+    }
+
+    // SQLite branch of the table/index backfill DDL. CREATE TABLE / CREATE
+    // INDEX IF NOT EXISTS keep this safe to run on every startup.
+    private static void CreateMissingTablesSqlite(RimDbContext db)
+    {
         db.Database.ExecuteSqlRaw("""
             CREATE TABLE IF NOT EXISTS UserGridLayouts (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,7 +182,161 @@ public static class SeedData
             CREATE INDEX IF NOT EXISTS IX_AuditEvents_Object
             ON AuditEvents (ObjectKind, ObjectId)
             """);
-        BackfillLabels(db);
+        // v0.13.1: backfill the EF-model indexes for existing databases.
+        // Fresh DBs get these from EnsureCreated. Barcode indexes are
+        // intentionally NON-unique here: a legacy database could contain
+        // duplicate barcodes, and a UNIQUE index would fail startup.
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Containers_Barcode ON Containers (Barcode)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Locations_Barcode ON Locations (Barcode)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Users_Barcode ON Users (Barcode)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Records_ParentRecordId ON Records (ParentRecordId)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Records_Home ON Records (HomeKind, HomeRefId)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Containers_ParentContainerId ON Containers (ParentContainerId)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Containers_Home ON Containers (HomeKind, HomeRefId)
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_Locations_ParentId ON Locations (ParentId)
+            """);
+    }
+
+    // SQL Server twin of CreateMissingTablesSqlite: same tables, index names,
+    // and nullability. Types mirror EF's SQL Server conventions (NVARCHAR(MAX),
+    // INT, BIT, FLOAT, DATETIME2) so the manual DDL matches what EnsureCreated
+    // generates on a fresh database.
+    private static void CreateMissingTablesSqlServer(RimDbContext db)
+    {
+        db.Database.ExecuteSqlRaw("""
+            IF OBJECT_ID('dbo.UserGridLayouts', 'U') IS NULL
+            CREATE TABLE dbo.UserGridLayouts (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                UserId NVARCHAR(MAX) NOT NULL,
+                GridId NVARCHAR(MAX) NOT NULL,
+                ColumnsCsv NVARCHAR(MAX) NOT NULL,
+                UpdatedUtc DATETIME2 NOT NULL
+            );
+            """);
+        CreateIndexSqlServer(db, "UserGridLayouts", "IX_UserGridLayouts_UserId_GridId", "UserId, GridId", unique: true);
+
+        db.Database.ExecuteSqlRaw("""
+            IF OBJECT_ID('dbo.Labels', 'U') IS NULL
+            CREATE TABLE dbo.Labels (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                Name NVARCHAR(MAX) NOT NULL,
+                CreatedUtc DATETIME2 NOT NULL,
+                CreatedBy NVARCHAR(MAX) NOT NULL
+            );
+            """);
+        CreateIndexSqlServer(db, "Labels", "IX_Labels_Name", "Name", unique: true);
+
+        db.Database.ExecuteSqlRaw("""
+            IF OBJECT_ID('dbo.ObjectLabels', 'U') IS NULL
+            CREATE TABLE dbo.ObjectLabels (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                LabelId INT NOT NULL,
+                ObjectKind NVARCHAR(MAX) NOT NULL,
+                ObjectId INT NOT NULL
+            );
+            """);
+        CreateIndexSqlServer(db, "ObjectLabels", "IX_ObjectLabels_Label_Object", "LabelId, ObjectKind, ObjectId", unique: true);
+        CreateIndexSqlServer(db, "ObjectLabels", "IX_ObjectLabels_Object", "ObjectKind, ObjectId", unique: false);
+
+        // Search activity log (Advanced Search page, Activity tab). Fresh DBs
+        // get the table from EnsureCreated; existing DBs are backfilled here.
+        db.Database.ExecuteSqlRaw("""
+            IF OBJECT_ID('dbo.SearchActivities', 'U') IS NULL
+            CREATE TABLE dbo.SearchActivities (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                UserId NVARCHAR(MAX) NOT NULL,
+                TimestampUtc DATETIME2 NOT NULL,
+                ObjectKind NVARCHAR(MAX) NOT NULL,
+                Logic NVARCHAR(MAX) NOT NULL,
+                CriteriaSummary NVARCHAR(MAX) NOT NULL,
+                ResultCount INT NOT NULL,
+                DurationMs FLOAT NOT NULL
+            );
+            """);
+        CreateIndexSqlServer(db, "SearchActivities", "IX_SearchActivities_User_Timestamp", "UserId, TimestampUtc", unique: false);
+
+        // Search-session tabs (per-page open search descriptors). Fresh DBs
+        // get the table from EnsureCreated; existing DBs are backfilled here.
+        db.Database.ExecuteSqlRaw("""
+            IF OBJECT_ID('dbo.SearchSessions', 'U') IS NULL
+            CREATE TABLE dbo.SearchSessions (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                OwnerUserId NVARCHAR(MAX) NOT NULL,
+                PageKind NVARCHAR(MAX) NOT NULL,
+                Title NVARCHAR(MAX) NOT NULL,
+                Filter NVARCHAR(MAX) NOT NULL,
+                CriteriaJson NVARCHAR(MAX) NOT NULL,
+                SortColumn NVARCHAR(MAX) NULL,
+                SortDescending BIT NOT NULL,
+                ColumnKeysCsv NVARCHAR(MAX) NOT NULL,
+                SelectedIdsCsv NVARCHAR(MAX) NOT NULL,
+                ExpandedIdsCsv NVARCHAR(MAX) NOT NULL,
+                IsOpen BIT NOT NULL,
+                CreatedUtc DATETIME2 NOT NULL,
+                LastUsedUtc DATETIME2 NOT NULL
+            );
+            """);
+        CreateIndexSqlServer(db, "SearchSessions", "IX_SearchSessions_Owner_Page_Open", "OwnerUserId, PageKind, IsOpen", unique: false);
+
+        // Audit retention cold tier: rows moved here when the hot AuditEvents
+        // table exceeds its row cap. Fresh DBs get it from EnsureCreated.
+        db.Database.ExecuteSqlRaw("""
+            IF OBJECT_ID('dbo.AuditEventArchive', 'U') IS NULL
+            CREATE TABLE dbo.AuditEventArchive (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                ObjectKind NVARCHAR(MAX) NOT NULL,
+                ObjectId INT NOT NULL,
+                ObjectLabel NVARCHAR(MAX) NOT NULL,
+                Action NVARCHAR(MAX) NOT NULL,
+                FieldName NVARCHAR(MAX) NULL,
+                OldValue NVARCHAR(MAX) NULL,
+                NewValue NVARCHAR(MAX) NULL,
+                Actor NVARCHAR(MAX) NOT NULL,
+                TimestampUtc DATETIME2 NOT NULL,
+                ArchivedUtc DATETIME2 NOT NULL
+            );
+            """);
+        CreateIndexSqlServer(db, "AuditEventArchive", "IX_AuditEventArchive_Object", "ObjectKind, ObjectId", unique: false);
+        CreateIndexSqlServer(db, "AuditEvents", "IX_AuditEvents_Object", "ObjectKind, ObjectId", unique: false);
+        // v0.13.1: same index backfill as the SQLite branch. Barcode indexes
+        // are non-unique here so legacy duplicate barcodes can't fail startup.
+        CreateIndexSqlServer(db, "Containers", "IX_Containers_Barcode", "Barcode", unique: false);
+        CreateIndexSqlServer(db, "Locations", "IX_Locations_Barcode", "Barcode", unique: false);
+        CreateIndexSqlServer(db, "Users", "IX_Users_Barcode", "Barcode", unique: false);
+        CreateIndexSqlServer(db, "Records", "IX_Records_ParentRecordId", "ParentRecordId", unique: false);
+        CreateIndexSqlServer(db, "Records", "IX_Records_Home", "HomeKind, HomeRefId", unique: false);
+        CreateIndexSqlServer(db, "Containers", "IX_Containers_ParentContainerId", "ParentContainerId", unique: false);
+        CreateIndexSqlServer(db, "Containers", "IX_Containers_Home", "HomeKind, HomeRefId", unique: false);
+        CreateIndexSqlServer(db, "Locations", "IX_Locations_ParentId", "ParentId", unique: false);
+    }
+
+    // Conditional CREATE [UNIQUE] INDEX for SQL Server, mirroring the
+    // IF NOT EXISTS semantics of the SQLite branch.
+    private static void CreateIndexSqlServer(RimDbContext db, string table, string name, string columns, bool unique)
+    {
+        // table/name/columns are fixed compile-time literals from
+        // CreateMissingTablesSqlServer above, never user input.
+#pragma warning disable EF1002
+        db.Database.ExecuteSqlRaw($"""
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}' AND object_id = OBJECT_ID('dbo.{table}'))
+                CREATE {(unique ? "UNIQUE " : "")}INDEX [{name}] ON dbo.[{table}] ({columns});
+            """);
+#pragma warning restore EF1002
     }
 
     // v0.12.0: a record filed under a compressed parent has the parent as
@@ -170,6 +345,9 @@ public static class SeedData
     // record so the invariant holds for legacy data too. Idempotent.
     private static void BackfillChildHoming(RimDbContext db)
     {
+        // Cheap skip (M13): no compressed children exist, so the UPDATE below
+        // would touch zero rows.
+        if (!db.Records.Any(r => r.ParentRecordId != null)) return;
 #pragma warning disable EF1002
         db.Database.ExecuteSqlRaw("""
             UPDATE Records SET
@@ -192,6 +370,13 @@ public static class SeedData
     // (non-nullable in the model), which would crash entity materialization.
     private static void BackfillUserBarcodes(RimDbContext db)
     {
+        // Cheap skip (M13): no user still needs a barcode.
+        // Raw SQL on purpose: Barcode is [Required] in the model, so EF would
+        // translate `u.Barcode == null` to WHERE 0 and never see legacy NULLs.
+        var probe = db.Database.IsSqlServer()
+            ? "SELECT TOP 1 1 AS Value FROM Users WHERE Barcode IS NULL OR Barcode = ''"
+            : "SELECT 1 AS Value FROM Users WHERE Barcode IS NULL OR Barcode = '' LIMIT 1";
+        if (!db.Database.SqlQueryRaw<int>(probe).Any()) return;
         var rows = db.Database.SqlQueryRaw<UserBarcodeRow>("SELECT Id, Barcode FROM Users").ToList();
         var max = 0;
         foreach (var r in rows)
@@ -222,6 +407,8 @@ public static class SeedData
     // keep a null role and must choose one the next time they are edited.
     private static void BackfillCompressedRoles(RimDbContext db)
     {
+        // Cheap skip (M13): no Compressed row still needs a role.
+        if (!db.Records.Any(r => r.RecordType == "Compressed" && r.CompressedRole == null)) return;
 #pragma warning disable EF1002
         db.Database.ExecuteSqlRaw("""
             UPDATE Records SET CompressedRole = 'Child'
@@ -240,6 +427,9 @@ public static class SeedData
     // labels are already fully assigned.
     public static void BackfillLabels(RimDbContext db)
     {
+        // Cheap skip (M13): no legacy comma-separated labels left to promote,
+        // so loading the label tables would be wasted work.
+        if (!db.Records.Any(r => r.Labels != null && r.Labels != "")) return;
         var existing = db.Labels.ToDictionary(l => l.Name, StringComparer.OrdinalIgnoreCase);
         var assigned = db.ObjectLabels
             .Where(o => o.ObjectKind == "Record")
@@ -273,6 +463,14 @@ public static class SeedData
     // renders as plain text) until the item is next saved.
     private static void BackfillRefIds(RimDbContext db)
     {
+        // Cheap skip (M13): four EXISTS probes; the name-resolution scan below
+        // only runs when some row still lacks a ref. (Rows whose names never
+        // resolve keep a null ref by design and are re-probed next startup.)
+        if (!db.Records.Any(r => r.AssigneeRefId == null)
+            && !db.Containers.Any(c => c.AssigneeRefId == null)
+            && !db.Records.Any(r => r.HomeRefId == null)
+            && !db.Containers.Any(c => c.HomeRefId == null))
+            return;
         var users = db.Users.ToList();
         var containers = db.Containers.ToList();
         var locations = db.Locations.ToList();
@@ -319,10 +517,31 @@ public static class SeedData
         // table/column/type are fixed compile-time literals from UpgradeSchema
         // above, never user input — the EF interpolation warning is suppressed.
 #pragma warning disable EF1002
-        var existing = db.Database.SqlQueryRaw<string>(
-                $"SELECT name FROM pragma_table_info('{table}')").ToList();
-        if (!existing.Contains(column))
-            db.Database.ExecuteSqlRaw($"ALTER TABLE {table} ADD COLUMN {column} {type}");
+        if (db.Database.IsSqlServer())
+        {
+            // The call sites pass SQLite type affinities; map them to the
+            // T-SQL equivalents so the same calls stay correct on SQL Server.
+            var sqlType = type.ToUpperInvariant() switch
+            {
+                "TEXT" => "NVARCHAR(MAX)",
+                "INTEGER" => "INT",
+                "REAL" => "FLOAT",
+                _ => type,
+            };
+            var exists = db.Database.SqlQueryRaw<int>($"""
+                SELECT COUNT(*) FROM sys.columns
+                WHERE object_id = OBJECT_ID('dbo.{table}') AND name = '{column}'
+                """).Single() > 0;
+            if (!exists)
+                db.Database.ExecuteSqlRaw($"ALTER TABLE dbo.[{table}] ADD [{column}] {sqlType} NULL");
+        }
+        else
+        {
+            var existing = db.Database.SqlQueryRaw<string>(
+                    $"SELECT name FROM pragma_table_info('{table}')").ToList();
+            if (!existing.Contains(column))
+                db.Database.ExecuteSqlRaw($"ALTER TABLE {table} ADD COLUMN {column} {type}");
+        }
 #pragma warning restore EF1002
     }
 
@@ -331,6 +550,8 @@ public static class SeedData
     // are identical in the dev seed).
     public static void BackfillDevCredentials(RimDbContext db)
     {
+        // Cheap skip (M13): every user already has a password hash.
+        if (!db.Users.Any(u => u.PasswordHash == null)) return;
         foreach (var u in db.Users.Where(u => u.PasswordHash == null).ToList())
         {
             var (hash, salt) = Rim.Services.PasswordHasher.Hash(u.UserId);

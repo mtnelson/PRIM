@@ -1,11 +1,14 @@
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Rim.Data;
 
 namespace Rim.Services;
@@ -26,11 +29,17 @@ public class RimService
     private readonly int _maxArchiveRows;
     private readonly string _auditArchiveDir;
     private readonly SearchQueryLog? _queryLog;
+    private readonly ILogger<RimService>? _logger;
 
-    public RimService(IDbContextFactory<RimDbContext> factory, IConfiguration? config = null, string? auditArchiveDir = null, SearchQueryLog? queryLog = null)
+    // Role strings (must match SeedData.Roles: "Admin", "Records Manager", "Staff").
+    private const string RoleAdmin = "Admin";
+    private const string RoleRecordsManager = "Records Manager";
+
+    public RimService(IDbContextFactory<RimDbContext> factory, IConfiguration? config = null, string? auditArchiveDir = null, SearchQueryLog? queryLog = null, ILogger<RimService>? logger = null)
     {
         _factory = factory;
         _queryLog = queryLog;
+        _logger = logger;
         _maxHotRows = config?.GetValue<int?>("Audit:MaxHotRows") ?? 500_000;
         _maxArchiveRows = config?.GetValue<int?>("Audit:MaxArchiveRows") ?? 5_000_000;
         _auditArchiveDir = auditArchiveDir
@@ -132,25 +141,25 @@ public class RimService
     public async Task<GridPageResult<RecordItem>> GetRecordsPageAsync(GridPageRequest req)
     {
         using var db = _factory.CreateDbContext();
-        return await PageAsync(RecordsQuery(db, req.Filter), req, RecordSortProps);
+        return await PageAsync(RecordsQuery(db, req.Filter), req, RecordSortProps, "records");
     }
 
     public async Task<GridPageResult<Container>> GetContainersPageAsync(GridPageRequest req)
     {
         using var db = _factory.CreateDbContext();
-        return await PageAsync(ContainersQuery(db, req.Filter), req, ContainerSortProps);
+        return await PageAsync(ContainersQuery(db, req.Filter), req, ContainerSortProps, "containers");
     }
 
     public async Task<GridPageResult<Location>> GetLocationsPageAsync(GridPageRequest req)
     {
         using var db = _factory.CreateDbContext();
-        return await PageAsync(LocationsQuery(db, req.Filter), req, LocationSortProps);
+        return await PageAsync(LocationsQuery(db, req.Filter), req, LocationSortProps, "locations");
     }
 
     public async Task<GridPageResult<AppUser>> GetUsersPageAsync(GridPageRequest req, bool includeInactive)
     {
         using var db = _factory.CreateDbContext();
-        return await PageAsync(UsersQuery(db, includeInactive), req, UserSortProps);
+        return await PageAsync(UsersQuery(db, includeInactive), req, UserSortProps, "users");
     }
 
     // Shared filtered query builders: the page, count, and id-list methods
@@ -250,7 +259,7 @@ public class RimService
     }
 
     private static async Task<GridPageResult<T>> PageAsync<T>(IQueryable<T> q, GridPageRequest req,
-        HashSet<string> sortProps, Action<string>? captureSql = null) where T : class
+        HashSet<string> sortProps, string queryKey, Action<string>? captureSql = null) where T : class
     {
         var take = Math.Clamp(req.Take, 1, 1000);
         List<T> rows;
@@ -279,12 +288,115 @@ public class RimService
                      .ThenBy(x => EF.Property<int>(x, "Id"))
                 : q.OrderBy(x => EF.Property<object>(x, req.SortColumn!))
                      .ThenBy(x => EF.Property<int>(x, "Id"));
-            var final = q.Skip(req.Skip).Take(take + 1);
+            // Sorted keyset resume: the grid evicts cached windows, so a deep
+            // sorted page arrives as a bare Skip. When this service previously
+            // served the adjacent chunk of the same query, its boundary (last
+            // row's sort value + Id) is still in the boundary cache below and
+            // the chunk is re-fetched with a keyset predicate instead of OFFSET.
+            var fingerprint = $"{queryKey}|{req.SortColumn}|{(req.SortDescending ? "D" : "A")}|{req.Filter}";
+            var chunkIndex = req.Skip / take;
+            Expression<Func<T, bool>>? keyset = null;
+            if (req.Skip > 0 && req.Skip % take == 0 &&
+                TryGetSortedBoundary(fingerprint, chunkIndex - 1, out var boundary))
+                keyset = BuildSortedKeyset<T>(req.SortColumn!, req.SortDescending,
+                    boundary.SortValue, boundary.Id);
+            var final = (keyset != null ? q.Where(keyset) : q.Skip(req.Skip)).Take(take + 1);
             CaptureSql(final, captureSql);
             rows = await final.ToListAsync();
+            if (rows.Count > 0)
+                StoreSortedBoundary(fingerprint, chunkIndex, req.SortColumn!, rows[Math.Min(take, rows.Count) - 1]);
         }
         var hasMore = rows.Count > take;
         return new GridPageResult<T> { Rows = rows.Take(take).ToList(), HasMore = hasMore };
+    }
+
+    // Per-chunk boundary cache for sorted paging. Keyed by a fingerprint of
+    // the query (page kind + sort + direction + filter); each entry maps a
+    // chunk index to the last row's (sort value, Id). Entries live outside
+    // the grid's evicted window so deep sorted pages can resume via keyset.
+    private sealed record SortedBoundary(object? SortValue, int Id);
+    private sealed class SortedPageState
+    {
+        public DateTime LastUsedUtc = DateTime.UtcNow;
+        public readonly Dictionary<int, SortedBoundary> Chunks = new();
+    }
+    private static readonly ConcurrentDictionary<string, SortedPageState> _sortedPageCache = new();
+
+    private static bool TryGetSortedBoundary(string fingerprint, int chunkIndex, out SortedBoundary boundary)
+    {
+        boundary = new SortedBoundary(null, 0);
+        if (!_sortedPageCache.TryGetValue(fingerprint, out var state)) return false;
+        lock (state)
+        {
+            if (DateTime.UtcNow - state.LastUsedUtc > TimeSpan.FromMinutes(15)) return false;
+            state.LastUsedUtc = DateTime.UtcNow;
+            return state.Chunks.TryGetValue(chunkIndex, out boundary!);
+        }
+    }
+
+    private static void StoreSortedBoundary(string fingerprint, int chunkIndex, string sortColumn, object row)
+    {
+        var prop = row.GetType().GetProperty(sortColumn);
+        var idProp = row.GetType().GetProperty("Id");
+        if (prop == null || idProp?.GetValue(row) is not int id) return;
+        var state = _sortedPageCache.GetOrAdd(fingerprint, _ => new SortedPageState());
+        lock (state)
+        {
+            state.LastUsedUtc = DateTime.UtcNow;
+            state.Chunks[chunkIndex] = new SortedBoundary(prop.GetValue(row), id);
+            if (state.Chunks.Count > 400)
+                foreach (var k in state.Chunks.Keys.OrderBy(k => k).Take(state.Chunks.Count - 400).ToList())
+                    state.Chunks.Remove(k);
+        }
+        // Bound the whole cache: drop the stalest fingerprints.
+        if (_sortedPageCache.Count > 500)
+            foreach (var k in _sortedPageCache.OrderBy(kv => kv.Value.LastUsedUtc)
+                         .Take(_sortedPageCache.Count - 500).Select(kv => kv.Key).ToList())
+                _sortedPageCache.TryRemove(k, out _);
+    }
+
+    // Keyset predicate for an explicitly sorted page: (sortCol, Id) past the
+    // boundary row. The tiebreaker is always ascending Id, mirroring the
+    // ThenBy(Id) in PageAsync. NULLs sort first in ASC and last in DESC on
+    // both SQLite and SQL Server.
+    private static Expression<Func<T, bool>>? BuildSortedKeyset<T>(string sortColumn, bool descending,
+        object? sortValue, int afterId)
+    {
+        var prop = typeof(T).GetProperty(sortColumn, BindingFlags.Public | BindingFlags.Instance);
+        if (prop == null || typeof(T).GetProperty("Id") == null) return null;
+        // Booleans have no ordering comparison in T-SQL (no `>` on bit):
+        // fall back to OFFSET for those columns.
+        if (prop.PropertyType == typeof(bool) || prop.PropertyType == typeof(bool?)) return null;
+        var param = Expression.Parameter(typeof(T), "x");
+        var efProp = typeof(EF).GetMethod(nameof(EF.Property), BindingFlags.Public | BindingFlags.Static);
+        if (efProp == null) return null;
+        var left = Expression.Call(efProp.MakeGenericMethod(prop.PropertyType),
+            param, Expression.Constant(sortColumn));
+        var idLeft = Expression.Call(efProp.MakeGenericMethod(typeof(int)),
+            param, Expression.Constant("Id"));
+        var afterIdConst = Expression.Constant(afterId);
+        var idPast = Expression.GreaterThan(idLeft, afterIdConst);
+        Expression body;
+        if (sortValue == null)
+        {
+            var isNull = Expression.Equal(left, Expression.Constant(null, prop.PropertyType));
+            var notNull = Expression.Not(isNull);
+            body = descending
+                ? Expression.AndAlso(isNull, idPast)                       // NULLs trail in DESC
+                : Expression.OrElse(Expression.AndAlso(isNull, idPast), notNull); // NULLs lead in ASC
+        }
+        else
+        {
+            var underlying = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+            var typed = Expression.Convert(
+                Expression.Constant(Convert.ChangeType(sortValue, underlying)), prop.PropertyType);
+            var colPast = descending
+                ? Expression.LessThan(left, typed)
+                : Expression.GreaterThan(left, typed);
+            body = Expression.OrElse(colPast,
+                Expression.AndAlso(Expression.Equal(left, typed), idPast));
+        }
+        return Expression.Lambda<Func<T, bool>>(body, param);
     }
 
     // Renders the final page SQL for the query log. Best-effort: a
@@ -299,8 +411,11 @@ public class RimService
     // repeated runs produce the same data). Inserts directly without
     // per-record audit events; numbering continues from the current max so
     // sequences stay consistent with records created through the UI.
-    public async Task<List<string>> SeedTestRecordsAsync(int count, string actor)
+    public async Task<(bool Ok, string? Error, List<string> Numbers)> SeedTestRecordsAsync(
+        int count, string actor, string actorRole)
     {
+        if (actorRole != RoleAdmin)
+            return (false, "Only administrators can generate test records.", new List<string>());
         using var db = _factory.CreateDbContext();
         var users = await db.Users.AsNoTracking().ToListAsync();
         var locations = await db.Locations.AsNoTracking().ToListAsync();
@@ -314,8 +429,8 @@ public class RimService
         var subjects = new[] { "Personnel file", "Contract records", "Case exhibits", "Correspondence",
             "Financial vouchers", "Travel orders", "Training files", "Investigative notes" };
 
-        int nextNum = MaxSuffix(await db.Records.Select(r => r.RecordNumber).ToListAsync(), "R-", 6) + 1;
-        int nextBar = MaxSuffix(await db.Records.Select(r => r.Barcode).ToListAsync(), "REC", 6) + 1;
+        int nextNum = await NextIntAsync(db.Records.Select(r => r.RecordNumber), "R-", 6);
+        int nextBar = await NextIntAsync(db.Records.Select(r => r.Barcode), "REC", 6);
 
         var now = DateTime.UtcNow;
         var list = new List<RecordItem>(count);
@@ -353,36 +468,38 @@ public class RimService
                 LastUpdatedUtc = now, LastUpdatedBy = actor,
             });
         }
-        db.Records.AddRange(list);
-        await db.SaveChangesAsync();
-
-        // Make some compressed parents and attach children, so expandable
-        // child rows have something to show during testing.
-        var parentCount = Math.Min(20, list.Count / 10);
-        var parents = list.Take(parentCount).ToList();
-        foreach (var p in parents) { p.RecordType = "Compressed"; p.CompressedRole = "Parent"; }
-        var kids = list.Skip(parentCount).OrderBy(_ => rnd.Next()).Take(Math.Min(200, list.Count - parentCount)).ToList();
-        foreach (var k in kids)
+        try
         {
-            var p = parents[rnd.Next(parents.Count)];
-            k.ParentRecordId = p.Id;
-            // Filed records have the parent record itself as Home and
-            // Assignee (v0.12.0) — a reference, so they move with the parent.
-            k.Home = p.RecordNumber; k.HomeKind = "Record"; k.HomeRefId = p.Id;
-            k.Assignee = p.RecordNumber; k.AssigneeKind = "Record"; k.AssigneeRefId = p.Id;
+            db.Records.AddRange(list);
+            await db.SaveChangesAsync();
+
+            // Make some compressed parents and attach children, so expandable
+            // child rows have something to show during testing.
+            var parentCount = Math.Min(20, list.Count / 10);
+            var parents = list.Take(parentCount).ToList();
+            foreach (var p in parents) { p.RecordType = "Compressed"; p.CompressedRole = "Parent"; }
+            var kids = list.Skip(parentCount).OrderBy(_ => rnd.Next()).Take(Math.Min(200, list.Count - parentCount)).ToList();
+            foreach (var k in kids)
+            {
+                var p = parents[rnd.Next(parents.Count)];
+                k.ParentRecordId = p.Id;
+                // Filed records have the parent record itself as Home and
+                // Assignee (v0.12.0) — a reference, so they move with the parent.
+                k.Home = p.RecordNumber; k.HomeKind = "Record"; k.HomeRefId = p.Id;
+                k.Assignee = p.RecordNumber; k.AssigneeKind = "Record"; k.AssigneeRefId = p.Id;
+            }
+            await db.SaveChangesAsync();
         }
-        await db.SaveChangesAsync();
-        await ArchiveAuditIfNeededAsync();
-        return list.Select(r => r.RecordNumber).ToList();
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "SeedTestRecordsAsync failed.");
+            return (false, "Could not generate test records. Please try again.", new List<string>());
+        }
+        RunAuditRetentionFireAndForget();
+        return (true, null, list.Select(r => r.RecordNumber).ToList());
     }
 
-    private static int MaxSuffix(IEnumerable<string> existing, string prefix, int width)
-    {
-        int max = 0;
-        foreach (var s in existing)
-            if (s.StartsWith(prefix) && int.TryParse(s[prefix.Length..], out var n) && n > max) max = n;
-        return max;
-    }
+    // MaxSuffix removed (M11): SeedTestRecordsAsync now uses server-side NextIntAsync.
 
     // ---------- Advanced search (AND/OR across criteria rows), SQL-side ----------
     // Every criterion compiles to EF.Functions.Like over its mapped column, so
@@ -475,6 +592,11 @@ public class RimService
         return q;
     }
 
+    // Fingerprint for the sorted-page boundary cache: the criteria rows are
+    // part of the key so two different advanced searches never share boundaries.
+    private static string AdvSearchKey(string kind, List<(string Field, string Op, string Value)> rows, string logic) =>
+        $"adv-{kind}|{logic}|{string.Join(";", rows.Select(r => $"{r.Field}|{r.Op}|{r.Value}"))}";
+
     public async Task<GridPageResult<RecordItem>> AdvancedSearchRecordsPageAsync(
         List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req,
         string? searchTag = null)
@@ -488,7 +610,7 @@ public class RimService
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return await PageAsync(q, req, RecordSortProps,
+            return await PageAsync(q, req, RecordSortProps, AdvSearchKey("records", rows, logic),
                 searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
         }
         finally
@@ -528,7 +650,7 @@ public class RimService
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return await PageAsync(q, req, ContainerSortProps,
+            return await PageAsync(q, req, ContainerSortProps, AdvSearchKey("containers", rows, logic),
                 searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
         }
         finally
@@ -567,7 +689,7 @@ public class RimService
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return await PageAsync(q, req, LocationSortProps,
+            return await PageAsync(q, req, LocationSortProps, AdvSearchKey("locations", rows, logic),
                 searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
         }
         finally
@@ -606,7 +728,7 @@ public class RimService
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return await PageAsync(q, req, UserSortProps,
+            return await PageAsync(q, req, UserSortProps, AdvSearchKey("users", rows, logic),
                 searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
         }
         finally
@@ -685,10 +807,10 @@ public class RimService
             _ => ToLike(value), // "Equals": wildcard match, * and ? supported
         };
         var like = typeof(DbFunctionsExtensions).GetMethod(nameof(DbFunctionsExtensions.Like),
-            new[] { typeof(DbFunctions), typeof(string), typeof(string) })!;
+            new[] { typeof(DbFunctions), typeof(string), typeof(string), typeof(string) })!;
         var call = Expression.Call(like,
             Expression.Property(null, typeof(EF).GetProperty(nameof(EF.Functions))!),
-            safe, Expression.Constant(pattern));
+            safe, Expression.Constant(pattern), Expression.Constant(LikeEscape));
         return Expression.Lambda<Func<T, bool>>(call, param);
     }
 
@@ -719,66 +841,80 @@ public class RimService
     }
 
     // ---------------- search (TIS-1742/1743): wildcards * and ? ----------------
+    // LIKE escaping is provider-consistent: backslash is the escape
+    // character and every EF.Functions.Like call passes it explicitly, so
+    // both SQLite and SQL Server generate `LIKE ... ESCAPE '\'`. (The old
+    // `[%]`/`[_]` bracket escaping is a SQL Server-ism — SQLite treats the
+    // brackets literally.)
+    private const string LikeEscape = "\\";
     private static string ToLike(string criteria) =>
-        criteria.Replace("%", "[%]").Replace("_", "[_]").Replace("*", "%").Replace("?", "_");
+        criteria.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_")
+                .Replace("*", "%").Replace("?", "_");
+
+    // Dashboard quick search is bounded: empty criteria return nothing
+    // (an unconstrained search must not dump the whole table), and results
+    // are capped at QuickSearchMax rows.
+    private const int QuickSearchMax = 2000;
 
     public async Task<List<RecordItem>> SearchRecordsAsync(Dictionary<string, string> filters)
     {
+        var active = filters.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
+        if (active.Count == 0) return new List<RecordItem>();
         using var db = _factory.CreateDbContext();
         var q = db.Records.Where(r => !r.Deleted).AsQueryable();
-        foreach (var (field, crit) in filters.Where(f => !string.IsNullOrWhiteSpace(f.Value)))
+        foreach (var (field, crit) in active)
         {
             var like = ToLike(crit.Trim());
             q = field switch
             {
-                "Barcode" => q.Where(r => EF.Functions.Like(r.Barcode, like)),
-                "Case Classification" or "CaseClassification" => q.Where(r => EF.Functions.Like(r.CaseClassification, like)),
-                "Field Office" or "FieldOffice" => q.Where(r => EF.Functions.Like(r.FieldOffice, like)),
-                "Case Number" or "CaseNumber" => q.Where(r => EF.Functions.Like(r.CaseNumber, like)),
-                "Subfile ID" or "SubfileId" => q.Where(r => r.SubfileId != null && EF.Functions.Like(r.SubfileId, like)),
-                "Volume" => q.Where(r => EF.Functions.Like(r.Volume, like)),
-                "Serial Start" or "SerialStart" => q.Where(r => r.SerialStart != null && EF.Functions.Like(r.SerialStart, like)),
-                "Serial End" or "SerialEnd" => q.Where(r => r.SerialEnd != null && EF.Functions.Like(r.SerialEnd, like)),
-                "Record Number" or "RecordNumber" => q.Where(r => EF.Functions.Like(r.RecordNumber, like)),
-                "Home" => q.Where(r => EF.Functions.Like(r.Home, like)),
-                "Assignee" => q.Where(r => EF.Functions.Like(r.Assignee, like)),
+                "Barcode" => q.Where(r => EF.Functions.Like(r.Barcode, like, LikeEscape)),
+                "Case Classification" or "CaseClassification" => q.Where(r => EF.Functions.Like(r.CaseClassification, like, LikeEscape)),
+                "Field Office" or "FieldOffice" => q.Where(r => EF.Functions.Like(r.FieldOffice, like, LikeEscape)),
+                "Case Number" or "CaseNumber" => q.Where(r => EF.Functions.Like(r.CaseNumber, like, LikeEscape)),
+                "Subfile ID" or "SubfileId" => q.Where(r => r.SubfileId != null && EF.Functions.Like(r.SubfileId, like, LikeEscape)),
+                "Volume" => q.Where(r => EF.Functions.Like(r.Volume, like, LikeEscape)),
+                "Serial Start" or "SerialStart" => q.Where(r => r.SerialStart != null && EF.Functions.Like(r.SerialStart, like, LikeEscape)),
+                "Serial End" or "SerialEnd" => q.Where(r => r.SerialEnd != null && EF.Functions.Like(r.SerialEnd, like, LikeEscape)),
+                "Record Number" or "RecordNumber" => q.Where(r => EF.Functions.Like(r.RecordNumber, like, LikeEscape)),
+                "Home" => q.Where(r => EF.Functions.Like(r.Home, like, LikeEscape)),
+                "Assignee" => q.Where(r => EF.Functions.Like(r.Assignee, like, LikeEscape)),
                 _ => q
             };
         }
-        return await q.OrderBy(r => r.RecordNumber).ToListAsync();
+        return await q.OrderBy(r => r.RecordNumber).Take(QuickSearchMax).ToListAsync();
     }
 
     public async Task<List<Container>> SearchContainersAsync(Dictionary<string, string> filters)
     {
+        var active = filters.Where(f => !string.IsNullOrWhiteSpace(f.Value)).ToList();
+        if (active.Count == 0) return new List<Container>();
         using var db = _factory.CreateDbContext();
         var q = db.Containers.AsQueryable();
-        foreach (var (field, crit) in filters.Where(f => !string.IsNullOrWhiteSpace(f.Value)))
+        foreach (var (field, crit) in active)
         {
             var like = ToLike(crit.Trim());
             q = field switch
             {
-                "Barcode" => q.Where(c => EF.Functions.Like(c.Barcode, like)),
-                "Container Name" or "ContainerName" => q.Where(c => EF.Functions.Like(c.ContainerName, like)),
-                "Field Office" or "FieldOffice" => q.Where(c => EF.Functions.Like(c.FieldOffice, like)),
-                "Container Code" or "ContainerCode" => q.Where(c => EF.Functions.Like(c.ContainerCode, like)),
-                "Home" => q.Where(c => EF.Functions.Like(c.Home, like)),
-                "Assignee" => q.Where(c => EF.Functions.Like(c.Assignee, like)),
+                "Barcode" => q.Where(c => EF.Functions.Like(c.Barcode, like, LikeEscape)),
+                "Container Name" or "ContainerName" => q.Where(c => EF.Functions.Like(c.ContainerName, like, LikeEscape)),
+                "Field Office" or "FieldOffice" => q.Where(c => EF.Functions.Like(c.FieldOffice, like, LikeEscape)),
+                "Container Code" or "ContainerCode" => q.Where(c => EF.Functions.Like(c.ContainerCode, like, LikeEscape)),
+                "Home" => q.Where(c => EF.Functions.Like(c.Home, like, LikeEscape)),
+                "Assignee" => q.Where(c => EF.Functions.Like(c.Assignee, like, LikeEscape)),
                 _ => q
             };
         }
-        return await q.OrderBy(c => c.ContainerName).ToListAsync();
+        return await q.OrderBy(c => c.ContainerName).Take(QuickSearchMax).ToListAsync();
     }
 
     public async Task<List<Location>> SearchLocationsAsync(string? nameCrit)
     {
+        if (string.IsNullOrWhiteSpace(nameCrit)) return new List<Location>();
         using var db = _factory.CreateDbContext();
-        var q = db.Locations.AsQueryable();
-        if (!string.IsNullOrWhiteSpace(nameCrit))
-        {
-            var like = ToLike(nameCrit.Trim());
-            q = q.Where(l => EF.Functions.Like(l.LocationName, like));
-        }
-        return await q.OrderBy(l => l.LocationName).ToListAsync();
+        var like = ToLike(nameCrit.Trim());
+        return await db.Locations
+            .Where(l => EF.Functions.Like(l.LocationName, like, LikeEscape))
+            .OrderBy(l => l.LocationName).Take(QuickSearchMax).ToListAsync();
     }
 
     // ---------------- writes ----------------
@@ -804,16 +940,103 @@ public class RimService
         await db.SaveChangesAsync();
     }
 
-    private static string NextNumber(IEnumerable<string> existing, string prefix, int width)
+    // Server-side next-number: candidates are pulled in descending string
+    // order and the numeric max is taken over parseable suffixes only.
+    // Lexicographic order equals numeric order for zero-padded fixed-width
+    // suffixes, but legacy non-conforming values (e.g. "R-CMP008") can sort
+    // above every conforming number and would poison a naive string MAX +
+    // TryParse (returning 1 and colliding on every create). Parsing the top
+    // candidates in memory ignores those rows; any residual collision is
+    // caught by the caller's unique-violation retry.
+    private static async Task<int> NextIntAsync(IQueryable<string> numbers, string prefix, int width)
     {
-        int max = 0;
-        foreach (var s in existing)
-            if (s.StartsWith(prefix) && int.TryParse(s[prefix.Length..], out var n) && n > max) max = n;
-        return prefix + (max + 1).ToString().PadLeft(width, '0');
+        var candidates = await numbers
+            .Where(s => s != null && s.StartsWith(prefix) && s.Length == prefix.Length + width)
+            .OrderByDescending(s => s)
+            .Take(1000)
+            .ToListAsync();
+        var max = 0;
+        foreach (var s in candidates)
+            if (int.TryParse(s.AsSpan(prefix.Length), out var n) && n > max) max = n;
+        return max + 1;
+    }
+
+    private static async Task<string> NextNumberAsync(IQueryable<string> numbers, string prefix, int width) =>
+        prefix + (await NextIntAsync(numbers, prefix, width)).ToString().PadLeft(width, '0');
+
+    // Chunks an IN-list so a query never exceeds SQL Server's 2100-parameter limit.
+    private static IEnumerable<T[]> ChunkIds<T>(IEnumerable<T> ids, int size = 1000)
+    {
+        var chunk = new List<T>(size);
+        foreach (var id in ids)
+        {
+            chunk.Add(id);
+            if (chunk.Count == size) { yield return chunk.ToArray(); chunk = new List<T>(size); }
+        }
+        if (chunk.Count > 0) yield return chunk.ToArray();
+    }
+
+    // True when the exception reports a unique-constraint violation —
+    // SQLite: "UNIQUE constraint failed", SQL Server: "Violation of UNIQUE
+    // KEY constraint". Heuristic on purpose: providers surface this differently.
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) ||
+        ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true;
+
+    // Assigns numbers via assignNumbers, saves, and on a unique collision
+    // (two writers racing NextIntAsync) recomputes the numbers once and
+    // retries. Returns null on success, else a user-facing error message.
+    private async Task<string?> SaveNewWithNumberRetryAsync(RimDbContext db, Func<Task> assignNumbers)
+    {
+        await assignNumbers();
+        try
+        {
+            await db.SaveChangesAsync();
+            return null;
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            _logger?.LogInformation(ex, "Number collision on create; retrying once with a recomputed number.");
+            await assignNumbers();
+            try
+            {
+                await db.SaveChangesAsync();
+                return null;
+            }
+            catch (DbUpdateException ex2)
+            {
+                _logger?.LogWarning(ex2, "Create failed after number-collision retry.");
+                return "Could not save: a duplicate number was detected. Please try again.";
+            }
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "Create failed.");
+            return "Could not save the new item. Please try again.";
+        }
+    }
+
+    // AuditAsync that returns a user-facing error instead of throwing, so an
+    // audit-write failure surfaces as a save error rather than tearing the circuit.
+    private async Task<string?> TryAuditAsync(RimDbContext db, string kind, int id, string label,
+        string action, string actor, string? field = null, string? oldV = null, string? newV = null)
+    {
+        try
+        {
+            await AuditAsync(db, kind, id, label, action, actor, field, oldV, newV);
+            return null;
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "Audit write failed for {Kind} {Id}.", kind, id);
+            return "The item was saved, but the audit entry could not be written. Please try again.";
+        }
     }
 
     // Returns (ok, error). Implements TIS-597 optimistic concurrency via RowVersion.
-    public async Task<(bool Ok, string? Error)> SaveRecordAsync(RecordItem input, string actor)
+    // actorRole is the caller's role ("Admin", "Records Manager", "Staff"):
+    // changing the record type requires Admin or Records Manager.
+    public async Task<(bool Ok, string? Error)> SaveRecordAsync(RecordItem input, string actor, string actorRole)
     {
         using var db = _factory.CreateDbContext();
         input.CaseClassification = input.CaseClassification.ToUpperInvariant();
@@ -858,13 +1081,17 @@ public class RimService
 
         if (input.Id == 0)
         {
-            input.RecordNumber = NextNumber(db.Records.Select(r => r.RecordNumber), "R-", 6);
-            input.Barcode = NextNumber(db.Records.Select(r => r.Barcode), "REC", 6);
             input.CreatedUtc = input.LastUpdatedUtc = DateTime.UtcNow;
             input.CreatedBy = input.LastUpdatedBy = actor;
             db.Records.Add(input);
-            await db.SaveChangesAsync();
-            await AuditAsync(db, "Record", input.Id, input.RecordNumber, "Created", actor);
+            var createErr = await SaveNewWithNumberRetryAsync(db, async () =>
+            {
+                input.RecordNumber = await NextNumberAsync(db.Records.Select(r => r.RecordNumber), "R-", 6);
+                input.Barcode = await NextNumberAsync(db.Records.Select(r => r.Barcode), "REC", 6);
+            });
+            if (createErr != null) return (false, createErr);
+            var auditErr = await TryAuditAsync(db, "Record", input.Id, input.RecordNumber, "Created", actor);
+            if (auditErr != null) return (false, auditErr);
             return (true, null);
         }
 
@@ -872,6 +1099,12 @@ public class RimService
         if (cur == null) return (false, "Record no longer exists.");
         if (cur.RowVersion != input.RowVersion)
             return (false, "Not the latest version — another user changed this record. Your view was refreshed.");
+
+        // Service-level role rule: changing the record type requires the
+        // Records Manager or Admin role.
+        if (cur.RecordType != input.RecordType
+            && actorRole != RoleAdmin && actorRole != RoleRecordsManager)
+            return (false, "Changing the record type requires the Records Manager role.");
 
         var tracked = new List<(string F, string? O, string? N)>();
         void Chg(string f, string? o, string? n) { if (o != n) tracked.Add((f, o, n)); }
@@ -891,13 +1124,25 @@ public class RimService
             tracked.Add(("Movement", $"Home={cur.Home}, Assignee={cur.Assignee}", $"Home={input.Home}, Assignee={input.Assignee}"));
 
         var typeChanged = cur.RecordType != input.RecordType;
-        db.Entry(cur).CurrentValues.SetValues(input);
-        cur.LastUpdatedUtc = DateTime.UtcNow; cur.LastUpdatedBy = actor; cur.RowVersion++;
-        await db.SaveChangesAsync();
-        foreach (var (f, o, n) in tracked)
-            AddAudit(db, "Record", cur.Id, cur.RecordNumber, typeChanged && f == "RecordType" ? "Type Changed" : "Updated", actor, f, o, n);
-        await db.SaveChangesAsync();
-        return (true, null);
+        try
+        {
+            db.Entry(cur).CurrentValues.SetValues(input);
+            cur.LastUpdatedUtc = DateTime.UtcNow; cur.LastUpdatedBy = actor; cur.RowVersion++;
+            await db.SaveChangesAsync();
+            foreach (var (f, o, n) in tracked)
+                AddAudit(db, "Record", cur.Id, cur.RecordNumber, typeChanged && f == "RecordType" ? "Type Changed" : "Updated", actor, f, o, n);
+            await db.SaveChangesAsync();
+            return (true, null);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return (false, "This record was changed by someone else. Please refresh and try again.");
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "SaveRecordAsync update failed for record {Id}.", input.Id);
+            return (false, "Could not save the record. Please try again.");
+        }
     }
 
     public async Task<(bool Ok, string? Error)> SaveContainerAsync(Container input, string actor)
@@ -915,12 +1160,16 @@ public class RimService
 
         if (input.Id == 0)
         {
-            input.Barcode = NextNumber(db.Containers.Select(c => c.Barcode), "CON", 6);
             input.CreatedUtc = input.LastUpdatedUtc = DateTime.UtcNow;
             input.CreatedBy = input.LastUpdatedBy = actor;
             db.Containers.Add(input);
-            await db.SaveChangesAsync();
-            await AuditAsync(db, "Container", input.Id, input.ContainerName, "Created", actor);
+            var createErr = await SaveNewWithNumberRetryAsync(db, async () =>
+            {
+                input.Barcode = await NextNumberAsync(db.Containers.Select(c => c.Barcode), "CON", 6);
+            });
+            if (createErr != null) return (false, createErr);
+            var auditErr = await TryAuditAsync(db, "Container", input.Id, input.ContainerName, "Created", actor);
+            if (auditErr != null) return (false, auditErr);
             return (true, null);
         }
         var cur = await db.Containers.FindAsync(input.Id);
@@ -928,13 +1177,25 @@ public class RimService
         if (cur.RowVersion != input.RowVersion)
             return (false, "Not the latest version — another user changed this container.");
         var oldName = cur.ContainerName; var oldHome = cur.Home; var oldAssignee = cur.Assignee;
-        db.Entry(cur).CurrentValues.SetValues(input);
-        cur.LastUpdatedUtc = DateTime.UtcNow; cur.LastUpdatedBy = actor; cur.RowVersion++;
-        await db.SaveChangesAsync();
-        await AuditAsync(db, "Container", cur.Id, cur.ContainerName, "Updated", actor, "Fields",
-            $"Name={oldName}, Home={oldHome}, Assignee={oldAssignee}",
-            $"Name={cur.ContainerName}, Home={cur.Home}, Assignee={cur.Assignee}");
-        return (true, null);
+        try
+        {
+            db.Entry(cur).CurrentValues.SetValues(input);
+            cur.LastUpdatedUtc = DateTime.UtcNow; cur.LastUpdatedBy = actor; cur.RowVersion++;
+            await db.SaveChangesAsync();
+            await AuditAsync(db, "Container", cur.Id, cur.ContainerName, "Updated", actor, "Fields",
+                $"Name={oldName}, Home={oldHome}, Assignee={oldAssignee}",
+                $"Name={cur.ContainerName}, Home={cur.Home}, Assignee={cur.Assignee}");
+            return (true, null);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return (false, "This container was changed by someone else. Please refresh and try again.");
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "SaveContainerAsync update failed for container {Id}.", input.Id);
+            return (false, "Could not save the container. Please try again.");
+        }
     }
 
     public async Task<(bool Ok, string? Error)> SaveLocationAsync(Location input, string actor)
@@ -947,12 +1208,16 @@ public class RimService
 
         if (input.Id == 0)
         {
-            input.Barcode = NextNumber(db.Locations.Select(l => l.Barcode), "LOC", 6);
             input.CreatedUtc = input.LastUpdatedUtc = DateTime.UtcNow;
             input.CreatedBy = input.LastUpdatedBy = actor;
             db.Locations.Add(input);
-            await db.SaveChangesAsync();
-            await AuditAsync(db, "Location", input.Id, input.LocationName, "Created", actor);
+            var createErr = await SaveNewWithNumberRetryAsync(db, async () =>
+            {
+                input.Barcode = await NextNumberAsync(db.Locations.Select(l => l.Barcode), "LOC", 6);
+            });
+            if (createErr != null) return (false, createErr);
+            var auditErr = await TryAuditAsync(db, "Location", input.Id, input.LocationName, "Created", actor);
+            if (auditErr != null) return (false, auditErr);
             return (true, null);
         }
         var cur = await db.Locations.FindAsync(input.Id);
@@ -961,26 +1226,46 @@ public class RimService
             return (false, "Not the latest version — another user changed this location.");
         if (input.ParentId == input.Id) return (false, "A location cannot be its own parent.");
         var old = $"{cur.LocationName}|{cur.LocationType}|{cur.ParentId}";
-        db.Entry(cur).CurrentValues.SetValues(input);
-        cur.LastUpdatedUtc = DateTime.UtcNow; cur.LastUpdatedBy = actor; cur.RowVersion++;
-        await db.SaveChangesAsync();
-        await AuditAsync(db, "Location", cur.Id, cur.LocationName, "Updated", actor, "Fields", old,
-            $"{cur.LocationName}|{cur.LocationType}|{cur.ParentId}");
-        return (true, null);
+        try
+        {
+            db.Entry(cur).CurrentValues.SetValues(input);
+            cur.LastUpdatedUtc = DateTime.UtcNow; cur.LastUpdatedBy = actor; cur.RowVersion++;
+            await db.SaveChangesAsync();
+            await AuditAsync(db, "Location", cur.Id, cur.LocationName, "Updated", actor, "Fields", old,
+                $"{cur.LocationName}|{cur.LocationType}|{cur.ParentId}");
+            return (true, null);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return (false, "This location was changed by someone else. Please refresh and try again.");
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "SaveLocationAsync update failed for location {Id}.", input.Id);
+            return (false, "Could not save the location. Please try again.");
+        }
     }
 
-    public async Task<(bool Ok, string? Error)> SaveUserAsync(AppUser input, string actor)
+    // actorRole is the caller's role ("Admin", "Records Manager", "Staff"):
+    // managing users requires the Admin role.
+    public async Task<(bool Ok, string? Error)> SaveUserAsync(AppUser input, string actor, string actorRole)
     {
+        if (actorRole != RoleAdmin)
+            return (false, "Only administrators can manage users.");
         using var db = _factory.CreateDbContext();
         var dup = await db.Users.AnyAsync(u => u.Id != input.Id && u.UserId == input.UserId);
         if (dup) return (false, "User ID already exists.");
         if (input.Id == 0)
         {
-            input.Barcode = NextNumber(db.Users.Select(u => u.Barcode), "USR", 6); // v0.12.0: system-assigned
             input.CreatedUtc = DateTime.UtcNow;
             db.Users.Add(input);
-            await db.SaveChangesAsync();
-            await AuditAsync(db, "User", input.Id, input.UserId, "Created", actor);
+            var createErr = await SaveNewWithNumberRetryAsync(db, async () =>
+            {
+                input.Barcode = await NextNumberAsync(db.Users.Select(u => u.Barcode), "USR", 6); // v0.12.0: system-assigned
+            });
+            if (createErr != null) return (false, createErr);
+            var auditErr = await TryAuditAsync(db, "User", input.Id, input.UserId, "Created", actor);
+            if (auditErr != null) return (false, auditErr);
             return (true, null);
         }
         var cur = await db.Users.FindAsync(input.Id);
@@ -993,9 +1278,21 @@ public class RimService
         cur.Role = input.Role; cur.Email = input.Email;
         cur.LocationId = input.LocationId; cur.Active = input.Active;
         cur.RowVersion++;
-        await db.SaveChangesAsync();
-        await AuditAsync(db, "User", cur.Id, cur.UserId, "Updated", actor);
-        return (true, null);
+        try
+        {
+            await db.SaveChangesAsync();
+            await AuditAsync(db, "User", cur.Id, cur.UserId, "Updated", actor);
+            return (true, null);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return (false, "This user was changed by someone else. Please refresh and try again.");
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "SaveUserAsync update failed for user {Id}.", input.Id);
+            return (false, "Could not save the user. Please try again.");
+        }
     }
 
     // TIS-2219 Move Items: change Home and/or Assignee, multi-row.
@@ -1057,48 +1354,78 @@ public class RimService
             }
         }
         await db.SaveChangesAsync();
-        await ArchiveAuditIfNeededAsync();
+        RunAuditRetentionFireAndForget();
         return n;
     }
 
     // TIS-370 deletion reason workflow: flag + reason, excluded from standard search.
-    public async Task<int> DeleteRecordsAsync(IEnumerable<int> ids, string reason, string? mergedInto, string? otherText, string actor)
+    public async Task<(bool Ok, string? Error, int Count)> DeleteRecordsAsync(IEnumerable<int> ids, string reason, string? mergedInto, string? otherText, string actor)
     {
         // Domain rules enforced here, not just in the dialog:
         // "Merged with case file" requires the target barcode; "Other" requires free text.
         if (reason == "Merged with case file" && string.IsNullOrWhiteSpace(mergedInto))
-            throw new ArgumentException("Merged Into barcode is required when the reason is 'Merged with case file'.", nameof(mergedInto));
+            return (false, "Merged Into barcode is required when the reason is 'Merged with case file'.", 0);
         if (reason == "Other" && string.IsNullOrWhiteSpace(otherText))
-            throw new ArgumentException("A reason is required when the reason is 'Other'.", nameof(otherText));
+            return (false, "A reason is required when the reason is 'Other'.", 0);
         using var db = _factory.CreateDbContext();
         var items = await db.Records.Where(r => ids.Contains(r.Id) && !r.Deleted).ToListAsync();
-        foreach (var r in items)
+        // M4: refuse soft-deleting a compressed Parent that has live
+        // (non-deleted) children — mirrors the type-change block in
+        // ValidateCompressedRoleAsync.
+        var parentIds = items.Where(r => r.RecordType == "Compressed" && r.CompressedRole == "Parent")
+            .Select(r => r.Id).ToList();
+        if (parentIds.Count > 0)
         {
-            r.Deleted = true;
-            r.DeleteReason = reason == "Other" ? $"Other: {otherText}" : reason;
-            r.MergedIntoBarcode = mergedInto;
-            r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
-            AddAudit(db, "Record", r.Id, r.RecordNumber, "Deleted", actor, "DeleteReason", null,
-                r.DeleteReason + (mergedInto != null ? $" (merged into {mergedInto})" : ""));
+            var withLiveKids = await db.Records
+                .Where(r => !r.Deleted && r.ParentRecordId != null && parentIds.Contains(r.ParentRecordId.Value))
+                .Select(r => r.ParentRecordId!.Value).Distinct().ToListAsync();
+            if (withLiveKids.Count > 0)
+                return (false, "Cannot delete a compressed parent that has live children. " +
+                               "Move the children out or delete them first.", 0);
         }
-        await db.SaveChangesAsync();
-        await ArchiveAuditIfNeededAsync();
-        return items.Count;
+        try
+        {
+            foreach (var r in items)
+            {
+                r.Deleted = true;
+                r.DeleteReason = reason == "Other" ? $"Other: {otherText}" : reason;
+                r.MergedIntoBarcode = mergedInto;
+                r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
+                AddAudit(db, "Record", r.Id, r.RecordNumber, "Deleted", actor, "DeleteReason", null,
+                    r.DeleteReason + (mergedInto != null ? $" (merged into {mergedInto})" : ""));
+            }
+            await db.SaveChangesAsync();
+            RunAuditRetentionFireAndForget();
+            return (true, null, items.Count);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "DeleteRecordsAsync failed.");
+            return (false, "Could not delete the records. Please try again.", 0);
+        }
     }
 
-    public async Task<int> RestoreRecordsAsync(IEnumerable<int> ids, string actor)
+    public async Task<(bool Ok, string? Error, int Count)> RestoreRecordsAsync(IEnumerable<int> ids, string actor)
     {
         using var db = _factory.CreateDbContext();
         var items = await db.Records.Where(r => ids.Contains(r.Id) && r.Deleted).ToListAsync();
-        foreach (var r in items)
+        try
         {
-            r.Deleted = false; r.DeleteReason = null; r.MergedIntoBarcode = null;
-            r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
-            AddAudit(db, "Record", r.Id, r.RecordNumber, "Restored", actor);
+            foreach (var r in items)
+            {
+                r.Deleted = false; r.DeleteReason = null; r.MergedIntoBarcode = null;
+                r.LastUpdatedUtc = DateTime.UtcNow; r.LastUpdatedBy = actor; r.RowVersion++;
+                AddAudit(db, "Record", r.Id, r.RecordNumber, "Restored", actor);
+            }
+            await db.SaveChangesAsync();
+            RunAuditRetentionFireAndForget();
+            return (true, null, items.Count);
         }
-        await db.SaveChangesAsync();
-        await ArchiveAuditIfNeededAsync();
-        return items.Count;
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "RestoreRecordsAsync failed.");
+            return (false, "Could not restore the records. Please try again.", 0);
+        }
     }
 
     // Containers are hard-deleted (the source requirements define a deletion
@@ -1106,26 +1433,52 @@ public class RimService
     // Guard: a container with child containers cannot be deleted, otherwise
     // the children's ParentContainerId would dangle. (Records reference
     // containers only via free-text Home, so no FK orphan there.)
-    public async Task<int> DeleteContainersAsync(IEnumerable<int> ids, string actor)
+    // M2: the guard also covers records/containers homed TO the container
+    // (HomeKind='Container' + HomeRefId) — those would dangle the same way.
+    public async Task<(bool Ok, string? Error, int Count)> DeleteContainersAsync(IEnumerable<int> ids, string actor)
     {
         using var db = _factory.CreateDbContext();
-        var items = await db.Containers.Where(c => ids.Contains(c.Id)).ToListAsync();
+        var idList = ids.ToList();
+        var items = await db.Containers.Where(c => idList.Contains(c.Id)).ToListAsync();
         var withChildren = await db.Containers
-            .Where(c => c.ParentContainerId != null && ids.Contains(c.ParentContainerId.Value))
+            .Where(c => c.ParentContainerId != null && idList.Contains(c.ParentContainerId.Value))
             .Select(c => c.ParentContainerId!.Value).Distinct().ToListAsync();
         if (withChildren.Count > 0)
         {
             var names = await db.Containers.Where(c => withChildren.Contains(c.Id))
                 .Select(c => c.ContainerName).ToListAsync();
-            throw new InvalidOperationException(
-                "Cannot delete container(s) with child containers: " + string.Join(", ", names));
+            return (false, "Cannot delete container(s) with child containers: " + string.Join(", ", names), 0);
         }
-        foreach (var c in items)
-            AddAudit(db, "Container", c.Id, c.ContainerName, "Deleted", actor);
-        db.Containers.RemoveRange(items);
-        await db.SaveChangesAsync();
-        await ArchiveAuditIfNeededAsync();
-        return items.Count;
+        var homed = (await db.Records
+                .Where(r => !r.Deleted && r.HomeKind == "Container" && r.HomeRefId != null
+                    && idList.Contains(r.HomeRefId.Value))
+                .Select(r => r.HomeRefId!.Value).Distinct().ToListAsync())
+            .Concat(await db.Containers
+                .Where(c => c.HomeKind == "Container" && c.HomeRefId != null
+                    && idList.Contains(c.HomeRefId.Value))
+                .Select(c => c.HomeRefId!.Value).Distinct().ToListAsync())
+            .Distinct().ToList();
+        if (homed.Count > 0)
+        {
+            var names = await db.Containers.Where(c => homed.Contains(c.Id))
+                .Select(c => c.ContainerName).ToListAsync();
+            return (false, "Cannot delete container(s) with homed records or containers: " +
+                           string.Join(", ", names) + ". Move them out first.", 0);
+        }
+        try
+        {
+            foreach (var c in items)
+                AddAudit(db, "Container", c.Id, c.ContainerName, "Deleted", actor);
+            db.Containers.RemoveRange(items);
+            await db.SaveChangesAsync();
+            RunAuditRetentionFireAndForget();
+            return (true, null, items.Count);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "DeleteContainersAsync failed.");
+            return (false, "Could not delete the containers. Please try again.", 0);
+        }
     }
 
     // ---------------- homing rules / compressed children / grid layouts / passwords ----------------
@@ -1142,6 +1495,7 @@ public class RimService
         if (input.Id != 0 && pid == input.Id) return "A record cannot be its own parent.";
         var parent = await db.Records.FindAsync(pid);
         if (parent == null) return "The parent record does not exist.";
+        if (parent.Deleted) return "Cannot file under a deleted record."; // M3
         if (parent.RecordType != "Compressed" || parent.CompressedRole != "Parent")
             return "Records can only be filed under a compressed parent.";
         // Cycle check: walk the ancestor chain.
@@ -1167,8 +1521,31 @@ public class RimService
         if (input.RecordType == "Compressed"
             && input.CompressedRole != "Parent" && input.CompressedRole != "Child")
             return "Select whether this compressed record is a Parent or a Child.";
-        if (input.RecordType != "Compressed")
-            input.CompressedRole = null; // the role only applies to the Compressed type
+        // The stored row, so transition-only rules below don't fire on every
+        // edit of a non-Compressed record.
+        var cur = input.Id != 0
+            ? await db.Records.AsNoTracking().FirstOrDefaultAsync(r => r.Id == input.Id)
+            : null;
+        var leavingCompressed = cur != null && cur.RecordType == "Compressed"
+            && input.RecordType != "Compressed";
+        if (leavingCompressed)
+        {
+            // M5: leaving the Compressed type unfiles the record — the role is
+            // cleared AND so is the parent link (a dangling ParentRecordId on a
+            // non-Compressed record would silently keep the parent's Home/
+            // Assignee override). The caller must then supply a valid home
+            // (records home to containers, locations, or users); otherwise the
+            // homing-rule check in SaveRecordAsync rejects the save.
+            // Any other record type may keep (or gain) a ParentRecordId —
+            // filing under a compressed parent keeps its type.
+            input.CompressedRole = null;
+            input.ParentRecordId = null;
+        }
+        else if (input.RecordType != "Compressed")
+        {
+            // Not a transition: a non-Compressed record simply carries no role.
+            input.CompressedRole = null;
+        }
         if (input.CompressedRole == "Child" && input.ParentRecordId == null)
             return "A compressed child must select a compressed parent.";
         if (input.CompressedRole == "Parent" && input.ParentRecordId != null)
@@ -1180,11 +1557,7 @@ public class RimService
             if (input.CompressedRole == "Child" && hasChildren)
                 return "A compressed child cannot have children of its own.";
             // A parent with children cannot change to a non-Compressed type.
-            // (The current row is read fresh — input carries the new type.)
-            var cur = await db.Records.AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Id == input.Id);
-            if (cur != null && cur.RecordType == "Compressed" && input.RecordType != "Compressed"
-                && hasChildren)
+            if (leavingCompressed && hasChildren)
                 return "Cannot change the type of a compressed parent that has children. " +
                        "Move the children out first.";
         }
@@ -1200,65 +1573,124 @@ public class RimService
 
     // ---------------- hierarchy: expandable child rows + breadcrumb paths ----------------
 
-    /// <summary>Root-first ancestor path for each requested object, including the object itself.</summary>
+    /// <summary>Root-first ancestor path for each requested object, including the object itself.
+    /// Batched frontier walk: each round issues one WHERE Id IN (...) query per
+    /// object kind that still has unresolved ancestors. Whole tables are never
+    /// materialized, so this stays cheap at 20M rows.</summary>
     public async Task<Dictionary<int, List<PathSeg>>> GetAncestorPathsAsync(string kind, IEnumerable<int> ids)
     {
         using var db = _factory.CreateDbContext();
         var result = new Dictionary<int, List<PathSeg>>();
         var idList = ids.Distinct().ToList();
         if (idList.Count == 0) return result;
-
-        var recMap = await db.Records.Where(r => !r.Deleted)
-            .ToDictionaryAsync(r => r.Id, r => (r.RecordNumber, r.HomeKind, r.HomeRefId, r.ParentRecordId));
-        var contMap = await db.Containers
-            .ToDictionaryAsync(c => c.Id, c => (c.ContainerName, c.ParentContainerId, c.HomeKind, c.HomeRefId, c.LocationId));
-        var locMap = await db.Locations
-            .ToDictionaryAsync(l => l.Id, l => (l.LocationName, l.ParentId));
-        var userMap = await db.Users
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName);
-
-        string? LabelOf(string k, int id) => k switch
+        if (kind is not ("Record" or "Container" or "Location" or "User"))
         {
-            "Record" => recMap.TryGetValue(id, out var r) ? r.RecordNumber : null,
-            "Container" => contMap.TryGetValue(id, out var c) ? c.ContainerName : null,
-            "Location" => locMap.TryGetValue(id, out var l) ? l.LocationName : null,
-            "User" => userMap.TryGetValue(id, out var u) ? u : null,
-            _ => null
+            foreach (var id in idList) result[id] = new List<PathSeg>();
+            return result;
+        }
+
+        // id -> (label, parentKind, parentId) for every ancestor discovered.
+        var recNodes = new Dictionary<int, (string Label, string? PKind, int? PId)>();
+        var contNodes = new Dictionary<int, (string Label, string? PKind, int? PId)>();
+        var locNodes = new Dictionary<int, (string Label, int? PId)>();
+        var userNodes = new Dictionary<int, string>();
+
+        var frontier = new Dictionary<string, HashSet<int>>
+        {
+            ["Record"] = new(), ["Container"] = new(), ["Location"] = new(), ["User"] = new(),
         };
-        (string Kind, int Id)? ParentOf(string k, int id) => k switch
+        frontier[kind].UnionWith(idList);
+        var visited = new HashSet<(string, int)>();
+
+        for (var depth = 0; depth < 50; depth++) // depth cap + visited set = cycle protection
         {
-            // A record enclosed in a compressed record paths through that parent;
-            // otherwise the path follows the storage home.
-            "Record" => recMap.TryGetValue(id, out var r)
-                ? r.ParentRecordId != null ? ("Record", r.ParentRecordId.Value)
-                  : r.HomeKind != null && r.HomeRefId != null ? (r.HomeKind, r.HomeRefId.Value)
-                  : ((string, int)?)null
-                : null,
-            "Container" => contMap.TryGetValue(id, out var c)
-                ? c.ParentContainerId != null ? ("Container", c.ParentContainerId.Value)
-                  : c.HomeKind != null && c.HomeRefId != null ? (c.HomeKind, c.HomeRefId.Value)
-                  : c.LocationId != null ? ("Location", c.LocationId.Value)
-                  : ((string, int)?)null
-                : null,
-            "Location" => locMap.TryGetValue(id, out var l) && l.ParentId != null
-                ? ("Location", l.ParentId.Value) : null,
+            var next = new Dictionary<string, HashSet<int>>
+            {
+                ["Record"] = new(), ["Container"] = new(), ["Location"] = new(), ["User"] = new(),
+            };
+            var progressed = false;
+
+            foreach (var chunk in ChunkIds(frontier["Record"].Where(id => visited.Add(("Record", id))).ToList()))
+            {
+                progressed = true;
+                var rows = await db.Records.AsNoTracking()
+                    .Where(r => !r.Deleted && chunk.Contains(r.Id))
+                    .Select(r => new { r.Id, r.RecordNumber, r.HomeKind, r.HomeRefId, r.ParentRecordId })
+                    .ToListAsync();
+                foreach (var r in rows)
+                {
+                    // A record enclosed in a compressed record paths through that
+                    // parent; otherwise the path follows the storage home.
+                    string? pk = null; int? pid = null;
+                    if (r.ParentRecordId != null) { pk = "Record"; pid = r.ParentRecordId; }
+                    else if (r.HomeKind != null && r.HomeRefId != null) { pk = r.HomeKind; pid = r.HomeRefId; }
+                    recNodes[r.Id] = (r.RecordNumber, pk, pid);
+                    if (pk != null && next.ContainsKey(pk)) next[pk].Add(pid!.Value);
+                }
+            }
+            foreach (var chunk in ChunkIds(frontier["Container"].Where(id => visited.Add(("Container", id))).ToList()))
+            {
+                progressed = true;
+                var rows = await db.Containers.AsNoTracking().Where(c => chunk.Contains(c.Id))
+                    .Select(c => new { c.Id, c.ContainerName, c.ParentContainerId, c.HomeKind, c.HomeRefId, c.LocationId })
+                    .ToListAsync();
+                foreach (var c in rows)
+                {
+                    string? pk = null; int? pid = null;
+                    if (c.ParentContainerId != null) { pk = "Container"; pid = c.ParentContainerId; }
+                    else if (c.HomeKind != null && c.HomeRefId != null) { pk = c.HomeKind; pid = c.HomeRefId; }
+                    else if (c.LocationId != null) { pk = "Location"; pid = c.LocationId; }
+                    contNodes[c.Id] = (c.ContainerName, pk, pid);
+                    if (pk != null && next.ContainsKey(pk)) next[pk].Add(pid!.Value);
+                }
+            }
+            foreach (var chunk in ChunkIds(frontier["Location"].Where(id => visited.Add(("Location", id))).ToList()))
+            {
+                progressed = true;
+                var rows = await db.Locations.AsNoTracking().Where(l => chunk.Contains(l.Id))
+                    .Select(l => new { l.Id, l.LocationName, l.ParentId })
+                    .ToListAsync();
+                foreach (var l in rows)
+                {
+                    locNodes[l.Id] = (l.LocationName, l.ParentId);
+                    if (l.ParentId != null) next["Location"].Add(l.ParentId.Value);
+                }
+            }
+            foreach (var chunk in ChunkIds(frontier["User"].Where(id => visited.Add(("User", id))).ToList()))
+            {
+                progressed = true;
+                var rows = await db.Users.AsNoTracking().Where(u => chunk.Contains(u.Id))
+                    .Select(u => new { u.Id, u.DisplayName })
+                    .ToListAsync();
+                foreach (var u in rows) userNodes[u.Id] = u.DisplayName;
+            }
+
+            if (!progressed) break;
+            frontier = next;
+        }
+
+        (string Label, string? PKind, int? PId)? NodeOf(string k, int id) => k switch
+        {
+            "Record" => recNodes.TryGetValue(id, out var r) ? (r.Label, r.PKind, r.PId) : null,
+            "Container" => contNodes.TryGetValue(id, out var c) ? (c.Label, c.PKind, c.PId) : null,
+            "Location" => locNodes.TryGetValue(id, out var l) ? (l.Label, "Location", l.PId) : null,
+            "User" => userNodes.TryGetValue(id, out var u) ? (u, (string?)null, (int?)null) : null,
             _ => null
         };
 
         foreach (var id in idList)
         {
             var segs = new List<PathSeg>();
-            var visited = new HashSet<(string, int)>();
-            var cur = (Kind: kind, Id: id);
+            var seenPath = new HashSet<(string, int)>();
+            var curK = kind; var curId = id;
             for (var depth = 0; depth < 50; depth++)
             {
-                if (!visited.Add((cur.Kind, cur.Id))) break;      // cycle guard
-                var label = LabelOf(cur.Kind, cur.Id);
-                if (label == null) break;                          // dangling reference
-                segs.Add(new PathSeg(cur.Kind, cur.Id, label));
-                var parent = ParentOf(cur.Kind, cur.Id);
-                if (parent == null) break;
-                cur = parent.Value;
+                if (!seenPath.Add((curK, curId))) break;   // cycle guard
+                var node = NodeOf(curK, curId);
+                if (node == null) break;                    // dangling reference
+                segs.Add(new PathSeg(curK, curId, node.Value.Label));
+                if (node.Value.PKind == null || node.Value.PId == null) break;
+                curK = node.Value.PKind; curId = node.Value.PId.Value;
             }
             segs.Reverse();
             result[id] = segs;
@@ -1481,18 +1913,30 @@ public class RimService
     }
 
     // ---------------- dev passwords (DevPasswordAuthProvider) ----------------
-    public async Task<(bool Ok, string? Error)> SetUserPasswordAsync(string userId, string password, string actor)
+    // actorRole is the caller's role ("Admin", "Records Manager", "Staff"):
+    // resetting passwords requires the Admin role.
+    public async Task<(bool Ok, string? Error)> SetUserPasswordAsync(string userId, string password, string actor, string actorRole)
     {
-        if (string.IsNullOrWhiteSpace(password) || password.Length < 4)
-            return (false, "Password must be at least 4 characters.");
+        if (actorRole != RoleAdmin)
+            return (false, "Only administrators can reset passwords.");
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 8)
+            return (false, "Password must be at least 8 characters.");
         using var db = _factory.CreateDbContext();
         var u = await db.Users.FirstOrDefaultAsync(x => x.UserId == userId);
         if (u == null) return (false, "User not found.");
         var (hash, salt) = PasswordHasher.Hash(password);
         u.PasswordHash = hash; u.PasswordSalt = salt; u.RowVersion++;
-        await db.SaveChangesAsync();
-        await AuditAsync(db, "User", u.Id, u.UserId, "Updated", actor, "Password", null, "(changed)");
-        return (true, null);
+        try
+        {
+            await db.SaveChangesAsync();
+            await AuditAsync(db, "User", u.Id, u.UserId, "Updated", actor, "Password", null, "(changed)");
+            return (true, null);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "SetUserPasswordAsync failed for user {UserId}.", userId);
+            return (false, "Could not update the password. Please try again.");
+        }
     }
 
     public async Task<string?> GetUserLocationNameAsync(int? locationId)
@@ -1572,8 +2016,8 @@ public class RimService
 
     /// <summary>
     /// Resolves scanned barcodes to objects across records, containers,
-    /// locations, and users. One indexed query per table (IN clause) — the
-    /// 20M-safe path, not a per-barcode round-trip.
+    /// locations, and users. One indexed query per table per 1000-barcode
+    /// chunk (IN clause) — the 20M-safe path, not a per-barcode round-trip.
     /// </summary>
     public async Task<Dictionary<string, BarcodeHit>> ResolveBarcodesAsync(IEnumerable<string> barcodes)
     {
@@ -1581,14 +2025,17 @@ public class RimService
         var map = new Dictionary<string, BarcodeHit>(StringComparer.OrdinalIgnoreCase);
         if (list.Count == 0) return map;
         using var db = _factory.CreateDbContext();
-        foreach (var r in await db.Records.Where(x => !x.Deleted && list.Contains(x.Barcode)).ToListAsync())
-            map[r.Barcode] = new BarcodeHit("Record", r.Id, r.RecordNumber, $"{r.RecordNumber} · {r.Barcode}", r.Barcode);
-        foreach (var c in await db.Containers.Where(x => list.Contains(x.Barcode)).ToListAsync())
-            map[c.Barcode] = new BarcodeHit("Container", c.Id, c.ContainerName, $"{c.ContainerName} · {c.Barcode}", c.Barcode);
-        foreach (var l in await db.Locations.Where(x => list.Contains(x.Barcode)).ToListAsync())
-            map[l.Barcode] = new BarcodeHit("Location", l.Id, l.LocationName, $"{l.LocationName} · {l.Barcode}", l.Barcode);
-        foreach (var u in await db.Users.Where(x => list.Contains(x.Barcode)).ToListAsync())
-            map[u.Barcode] = new BarcodeHit("User", u.Id, u.DisplayName, $"{u.DisplayName} · {u.Barcode}", u.Barcode);
+        foreach (var chunk in ChunkIds(list))
+        {
+            foreach (var r in await db.Records.Where(x => !x.Deleted && chunk.Contains(x.Barcode)).ToListAsync())
+                map[r.Barcode] = new BarcodeHit("Record", r.Id, r.RecordNumber, $"{r.RecordNumber} · {r.Barcode}", r.Barcode);
+            foreach (var c in await db.Containers.Where(x => chunk.Contains(x.Barcode)).ToListAsync())
+                map[c.Barcode] = new BarcodeHit("Container", c.Id, c.ContainerName, $"{c.ContainerName} · {c.Barcode}", c.Barcode);
+            foreach (var l in await db.Locations.Where(x => chunk.Contains(x.Barcode)).ToListAsync())
+                map[l.Barcode] = new BarcodeHit("Location", l.Id, l.LocationName, $"{l.LocationName} · {l.Barcode}", l.Barcode);
+            foreach (var u in await db.Users.Where(x => chunk.Contains(x.Barcode)).ToListAsync())
+                map[u.Barcode] = new BarcodeHit("User", u.Id, u.DisplayName, $"{u.DisplayName} · {u.Barcode}", u.Barcode);
+        }
         return map;
     }
 
@@ -1638,6 +2085,11 @@ public class RimService
         string homeBarcode, string userBarcode, string actor)
         => await BarcodeMoveAsync(barcodes, homeBarcode, userBarcode, actor);
 
+    // Batched: one ResolveBarcodesAsync call covers the scanned codes plus the
+    // destination/assignee, then one indexed query per table loads all target
+    // records/containers (and their compressed parents) into dictionaries —
+    // no per-barcode round-trips. IN lists are chunked at 1000 parameters
+    // (SQL Server allows 2100 per query).
     private async Task<BarcodeActionResult> BarcodeMoveAsync(IEnumerable<string> barcodes,
         string? homeBarcode, string? userBarcode, string actor)
     {
@@ -1646,26 +2098,50 @@ public class RimService
         static BarcodeActionResult FailAll(List<string> all, string msg)
             => new(all.Select(bc => new BarcodeOutcome(bc, false, msg)).ToList());
 
+        var allCodes = codes.ToList();
+        if (!string.IsNullOrWhiteSpace(homeBarcode)) allCodes.Add(NormBarcode(homeBarcode));
+        if (!string.IsNullOrWhiteSpace(userBarcode)) allCodes.Add(NormBarcode(userBarcode));
+        var hits = await ResolveBarcodesAsync(allCodes);
+
         BarcodeHit? home = null, assignee = null;
         if (homeBarcode != null)
         {
-            home = await ResolveBarcodeAsync(homeBarcode);
-            if (home == null)
+            if (!hits.TryGetValue(NormBarcode(homeBarcode), out home))
                 return FailAll(codes, $"Destination barcode '{NormBarcode(homeBarcode)}' not found.");
             if (home.Kind is not ("Location" or "Container" or "User"))
                 return FailAll(codes, $"'{home.Label}' is a {home.Kind} — home must be a location, container, or user.");
         }
         if (userBarcode != null)
         {
-            assignee = await ResolveBarcodeAsync(userBarcode);
-            if (assignee == null)
+            if (!hits.TryGetValue(NormBarcode(userBarcode), out assignee))
                 return FailAll(codes, $"Assignee barcode '{NormBarcode(userBarcode)}' not found.");
             if (assignee.Kind != "User")
                 return FailAll(codes, $"'{assignee.Label}' is a {assignee.Kind} — assignee must be a user.");
         }
 
         using var db = _factory.CreateDbContext();
-        var hits = await ResolveBarcodesAsync(codes);
+        var recIds = codes
+            .Select(bc => hits.TryGetValue(bc, out var h) && h.Kind == "Record" ? h.Id : 0)
+            .Where(id => id != 0).ToList();
+        var contIds = codes
+            .Select(bc => hits.TryGetValue(bc, out var h) && h.Kind == "Container" ? h.Id : 0)
+            .Where(id => id != 0).ToList();
+        var recs = new Dictionary<int, RecordItem>();
+        foreach (var chunk in ChunkIds(recIds))
+            foreach (var r in await db.Records.Where(r => chunk.Contains(r.Id)).ToListAsync())
+                recs[r.Id] = r;
+        var conts = new Dictionary<int, Container>();
+        foreach (var chunk in ChunkIds(contIds))
+            foreach (var c in await db.Containers.Where(c => chunk.Contains(c.Id)).ToListAsync())
+                conts[c.Id] = c;
+        var parentNums = new Dictionary<int, string>();
+        var parentIds = recs.Values
+            .Where(r => r.ParentRecordId != null).Select(r => r.ParentRecordId!.Value).Distinct().ToList();
+        foreach (var chunk in ChunkIds(parentIds))
+            foreach (var p in await db.Records.Where(r => chunk.Contains(r.Id))
+                .Select(r => new { r.Id, r.RecordNumber }).ToListAsync())
+                parentNums[p.Id] = p.RecordNumber;
+
         foreach (var bc in codes)
         {
             if (!hits.TryGetValue(bc, out var hit))
@@ -1675,14 +2151,13 @@ public class RimService
 
             if (hit.Kind == "Record")
             {
-                var rec = await db.Records.FindAsync(hit.Id);
-                if (rec == null || rec.Deleted)
+                if (!recs.TryGetValue(hit.Id, out var rec) || rec.Deleted)
                 { outcomes.Add(new BarcodeOutcome(bc, false, "Record no longer exists.")); continue; }
                 if (rec.ParentRecordId != null)
                 {
-                    var p = await db.Records.FindAsync(rec.ParentRecordId.Value);
+                    parentNums.TryGetValue(rec.ParentRecordId.Value, out var pNum);
                     outcomes.Add(new BarcodeOutcome(bc, false,
-                        $"Filed under compressed parent {p?.RecordNumber ?? "?"} — it moves with its parent."));
+                        $"Filed under compressed parent {pNum ?? "?"} — it moves with its parent."));
                     continue;
                 }
                 var old = $"Home={rec.Home}, Assignee={rec.Assignee}";
@@ -1694,8 +2169,7 @@ public class RimService
             }
             else
             {
-                var cont = await db.Containers.FindAsync(hit.Id);
-                if (cont == null)
+                if (!conts.TryGetValue(hit.Id, out var cont))
                 { outcomes.Add(new BarcodeOutcome(bc, false, "Container no longer exists.")); continue; }
                 var old = $"Home={cont.Home}, Assignee={cont.Assignee}";
                 if (home != null) { cont.Home = home.Name; cont.HomeKind = home.Kind; cont.HomeRefId = home.Id; }
@@ -1707,8 +2181,16 @@ public class RimService
             outcomes.Add(new BarcodeOutcome(bc, true,
                 $"Moved{(home != null ? $" home → {home.Name}" : "")}{(assignee != null ? $" assignee → {assignee.Name}" : "")}."));
         }
-        await db.SaveChangesAsync();
-        await ArchiveAuditIfNeededAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger?.LogWarning(ex, "BarcodeMoveAsync failed.");
+            return FailAll(codes, "Could not save the move (database error). Please try again.");
+        }
+        RunAuditRetentionFireAndForget();
         return new BarcodeActionResult(outcomes);
     }
 
@@ -2026,26 +2508,40 @@ public class RimService
             .ToList();
     }
 
+    /// <summary>Server-side grouping for the Reports page: GROUP BY is
+    /// translated to SQL with counts, so no rows are materialized. Prefer
+    /// this over the Func-based GroupRecordsAsync (kept for compatibility).
+    /// <paramref name="field"/> must be one of the advanced-search record fields.</summary>
+    public async Task<List<(string Label, int Count)>> GroupRecordsByFieldAsync(string field)
+    {
+        if (!AdvSearchRecordFields.Contains(field)) return new List<(string, int)>();
+        using var db = _factory.CreateDbContext();
+        var groups = await db.Records.Where(r => !r.Deleted)
+            .GroupBy(r => EF.Property<string>(r, field))
+            .Select(g => new { Key = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ToListAsync();
+        return groups
+            .Select(x => (Label: string.IsNullOrWhiteSpace(x.Key) ? "(blank)" : x.Key, Count: x.Count))
+            .ToList();
+    }
+
     // Container name preview per TIS-1278 (simplified, documented).
     public async Task<string> PreviewContainerNameAsync(string type, string foCode, string code)
     {
         using var db = _factory.CreateDbContext();
         foCode = foCode.ToUpperInvariant(); code = code.ToUpperInvariant();
         if (type == "Bin")
-        {
-            var nums = await db.Containers.Where(c => c.ContainerType == "Bin").Select(c => c.FormattedNumber).ToListAsync();
-            return NextNumber(nums, "BIN", 6);
-        }
+            return await NextNumberAsync(
+                db.Containers.Where(c => c.ContainerType == "Bin").Select(c => c.FormattedNumber), "BIN", 6);
         if (type == "Tote")
-        {
-            var nums = await db.Containers.Where(c => c.ContainerType == "Tote").Select(c => c.FormattedNumber).ToListAsync();
-            return NextNumber(nums, "TOTE", 5);
-        }
+            return await NextNumberAsync(
+                db.Containers.Where(c => c.ContainerType == "Tote").Select(c => c.FormattedNumber), "TOTE", 5);
         if (type == "Pallet" || type == "Truck")
         {
-            var existing = await db.Containers.Where(c => c.ContainerType == type && c.FieldOffice == foCode && c.ContainerCode == code)
-                .Select(c => c.FormattedNumber).ToListAsync();
-            var seq = NextNumber(existing, "", 5);
+            var seq = await NextNumberAsync(
+                db.Containers.Where(c => c.ContainerType == type && c.FieldOffice == foCode && c.ContainerCode == code)
+                    .Select(c => c.FormattedNumber), "", 5);
             return $"{foCode} - {code} - {(type == "Pallet" ? "PLT" : "TRUCK")} - {seq}";
         }
         return $"{foCode}-{code}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
@@ -2071,8 +2567,27 @@ public class RimService
     }
 
     /// <summary>Moves oldest-first audit rows from the hot table to the archive
-    /// table when the hot row cap is exceeded. Returns rows moved (0 = under cap).</summary>
-    public async Task<int> ArchiveAuditIfNeededAsync(int? maxHotRows = null)
+    /// table when the hot row cap is exceeded. Admin-only ("archive now").
+    /// Returns rows moved (0 = under cap).</summary>
+    public async Task<(bool Ok, string? Error, int Moved)> ArchiveAuditIfNeededAsync(
+        string actorRole, int? maxHotRows = null)
+    {
+        if (actorRole != RoleAdmin)
+            return (false, "Only administrators can archive audit events.", 0);
+        try
+        {
+            return (true, null, await ArchiveAuditCoreAsync(maxHotRows));
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Audit archiving failed.");
+            return (false, "Audit archiving failed. Please try again.", 0);
+        }
+    }
+
+    // Retention core used by the fire-and-forget path below (system-initiated,
+    // no actor role involved). Never called directly with user input.
+    private async Task<int> ArchiveAuditCoreAsync(int? maxHotRows = null)
     {
         var cap = maxHotRows ?? _maxHotRows;
         using var db = _factory.CreateDbContext();
@@ -2101,58 +2616,101 @@ public class RimService
             await db.SaveChangesAsync();
             moved += batch.Count;
         }
-        await ExportAuditArchiveIfNeededAsync();
+        await ExportAuditArchiveCoreAsync(_maxArchiveRows, _auditArchiveDir);
         return moved;
     }
 
-    /// <summary>Exports oldest archive-table rows to a checksummed .jsonl.gz file
-    /// when the archive row cap is exceeded; deletes from the table only after the
-    /// file verifies (line count match). Returns the file path, or null if under cap.</summary>
-    public async Task<string?> ExportAuditArchiveIfNeededAsync(int? maxArchiveRows = null, string? directory = null)
+    // M7: audit retention runs OFF the write path. Fire-and-forget with its
+    // own try/catch + logging — a retention failure must never fail the
+    // user's save.
+    private void RunAuditRetentionFireAndForget()
     {
-        var cap = maxArchiveRows ?? _maxArchiveRows;
-        var dir = directory ?? _auditArchiveDir;
-        List<AuditEventArchive> rows;
-        using (var db = _factory.CreateDbContext())
+        _ = Task.Run(async () =>
         {
-            var count = await db.ArchivedAuditEvents.LongCountAsync();
-            if (count <= cap) return null;
-            rows = await db.ArchivedAuditEvents.OrderBy(a => a.Id)
-                .Take((int)(count - cap)).ToListAsync();
-        }
-        Directory.CreateDirectory(dir);
-        var name = $"audit-archive-{rows.First().Id:D8}-{rows.Last().Id:D8}.jsonl.gz";
-        var path = Path.Combine(dir, name);
-        await using (var fs = File.Create(path))
-        await using (var gz = new GZipStream(fs, CompressionLevel.Optimal))
-            foreach (var r in rows)
+            try { await ArchiveAuditCoreAsync(); }
+            catch (Exception ex) { _logger?.LogError(ex, "Background audit retention failed."); }
+        });
+    }
+
+    /// <summary>Exports oldest archive-table rows to a checksummed .jsonl.gz file
+    /// when the archive row cap is exceeded. Admin-only ("export now").
+    /// A null path means under cap; a failure returns an error and leaves the
+    /// rows in the archive table for retry.</summary>
+    public async Task<(bool Ok, string? Error, string? Path)> ExportAuditArchiveIfNeededAsync(
+        string actorRole, int? maxArchiveRows = null, string? directory = null)
+    {
+        if (actorRole != RoleAdmin)
+            return (false, "Only administrators can export the audit archive.", null);
+        var (path, failed) = await ExportAuditArchiveCoreAsync(
+            maxArchiveRows ?? _maxArchiveRows, directory ?? _auditArchiveDir);
+        return failed
+            ? (false, "Audit archive export failed (see server logs). Rows were left in the archive table for retry.", null)
+            : (true, null, path);
+    }
+
+    // M9: all file IO is inside try/catch — a failure (e.g. disk full) is
+    // logged, returns failure, and leaves the rows for retry instead of
+    // poisoning the write that triggered retention.
+    private async Task<(string? Path, bool Failed)> ExportAuditArchiveCoreAsync(int cap, string dir)
+    {
+        try
+        {
+            List<AuditEventArchive> rows;
+            using (var db = _factory.CreateDbContext())
             {
-                var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(r) + "\n");
-                await gz.WriteAsync(bytes);
+                var count = await db.ArchivedAuditEvents.LongCountAsync();
+                if (count <= cap) return (null, false);
+                rows = await db.ArchivedAuditEvents.OrderBy(a => a.Id)
+                    .Take((int)(count - cap)).ToListAsync();
             }
-        // Verify before deleting: the file must decompress to exactly the row count.
-        long lines = 0;
-        await using (var fs = File.OpenRead(path))
-        await using (var gz = new GZipStream(fs, CompressionMode.Decompress))
-        using (var sr = new StreamReader(gz))
-            while (await sr.ReadLineAsync() != null) lines++;
-        if (lines != rows.Count)
-        {
-            File.Delete(path);
-            throw new InvalidOperationException(
-                $"Audit archive export verification failed: wrote {rows.Count} rows, file holds {lines}.");
+            Directory.CreateDirectory(dir);
+            var name = $"audit-archive-{rows.First().Id:D8}-{rows.Last().Id:D8}.jsonl.gz";
+            var path = Path.Combine(dir, name);
+            await using (var fs = File.Create(path))
+            await using (var gz = new GZipStream(fs, CompressionLevel.Optimal))
+                foreach (var r in rows)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(r) + "\n");
+                    await gz.WriteAsync(bytes);
+                }
+            // Verify before deleting: the file must decompress to exactly the row count.
+            long lines = 0;
+            await using (var fs = File.OpenRead(path))
+            await using (var gz = new GZipStream(fs, CompressionMode.Decompress))
+            using (var sr = new StreamReader(gz))
+                while (await sr.ReadLineAsync() != null) lines++;
+            if (lines != rows.Count)
+            {
+                File.Delete(path);
+                _logger?.LogError(
+                    "Audit archive export verification failed: wrote {Wrote} rows, file holds {Lines}. Rows left for retry.",
+                    rows.Count, lines);
+                return (null, true);
+            }
+            await using (var fs = File.OpenRead(path))
+                await File.WriteAllTextAsync(path + ".sha256",
+                    Convert.ToHexString(await SHA256.HashDataAsync(fs)) + "  " + name + "\n");
+            try
+            {
+                using var db = _factory.CreateDbContext();
+                var maxId = rows.Last().Id;
+                var doomed = await db.ArchivedAuditEvents.Where(a => a.Id <= maxId).ToListAsync();
+                db.ArchivedAuditEvents.RemoveRange(doomed);
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                // The export file verified fine; the rows stay for the next
+                // run to clean up. Not a failure of the export itself.
+                _logger?.LogError(ex, "Audit export file verified but archive-table cleanup failed; will retry.");
+            }
+            return (path, false);
         }
-        await using (var fs = File.OpenRead(path))
-            await File.WriteAllTextAsync(path + ".sha256",
-                Convert.ToHexString(await SHA256.HashDataAsync(fs)) + "  " + name + "\n");
-        using (var db = _factory.CreateDbContext())
+        catch (Exception ex)
         {
-            var maxId = rows.Last().Id;
-            var doomed = await db.ArchivedAuditEvents.Where(a => a.Id <= maxId).ToListAsync();
-            db.ArchivedAuditEvents.RemoveRange(doomed);
-            await db.SaveChangesAsync();
+            _logger?.LogError(ex, "Audit archive export failed; rows left in the archive table for retry.");
+            return (null, true);
         }
-        return path;
     }
 
     public Task<List<AuditExportInfo>> GetAuditExportFilesAsync()

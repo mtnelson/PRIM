@@ -27,6 +27,16 @@ public class RimDbContext : DbContext
         m.Entity<Container>().HasIndex(c => new { c.ContainerType, c.ContainerName }).IsUnique();
         m.Entity<RecordItem>().HasIndex(r => r.RecordNumber).IsUnique();
         m.Entity<RecordItem>().HasIndex(r => r.Barcode).IsUnique();
+        // H3: unique barcode indexes so barcode scans resolve on every table.
+        m.Entity<Container>().HasIndex(c => c.Barcode).IsUnique().HasDatabaseName("IX_Containers_Barcode");
+        m.Entity<Location>().HasIndex(l => l.Barcode).IsUnique().HasDatabaseName("IX_Locations_Barcode");
+        m.Entity<AppUser>().HasIndex(u => u.Barcode).IsUnique().HasDatabaseName("IX_Users_Barcode");
+        // H5: covering the hot lookup paths (child expansion, home navigation).
+        m.Entity<RecordItem>().HasIndex(r => r.ParentRecordId).HasDatabaseName("IX_Records_ParentRecordId");
+        m.Entity<RecordItem>().HasIndex(r => new { r.HomeKind, r.HomeRefId }).HasDatabaseName("IX_Records_Home");
+        m.Entity<Container>().HasIndex(c => c.ParentContainerId).HasDatabaseName("IX_Containers_ParentContainerId");
+        m.Entity<Container>().HasIndex(c => new { c.HomeKind, c.HomeRefId }).HasDatabaseName("IX_Containers_Home");
+        m.Entity<Location>().HasIndex(l => l.ParentId).HasDatabaseName("IX_Locations_ParentId");
         m.Entity<AppUser>().HasIndex(u => u.UserId).IsUnique();
         m.Entity<WorkspaceItem>().HasIndex(w => new { w.OwnerUserId, w.Slot, w.ObjectKind, w.ObjectId }).IsUnique();
         m.Entity<SearchSession>().HasIndex(s => new { s.OwnerUserId, s.PageKind, s.IsOpen });

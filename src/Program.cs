@@ -31,10 +31,17 @@ builder.Services.AddDbContextFactory<RimDbContext>(opt =>
 builder.Services.AddScoped<RimService>();
 builder.Services.AddScoped<AppState>();
 builder.Services.AddScoped<HotkeyManager>();
-// Authentication is always behind IAuthProvider: DevPasswordAuthProvider for the
-// prototype (temporary username/password logins), OAuth/SSO later. Never read
-// AppUser.PasswordHash/PasswordSalt directly from UI code.
-builder.Services.AddScoped<IAuthProvider, DevPasswordAuthProvider>();
+// Authentication is always behind IAuthProvider. Development password logins
+// are opt-in and fail closed: DevPasswordAuthProvider registers ONLY when
+// Auth:AllowDevPasswords is explicitly true; otherwise a disabled provider is
+// registered and password login is impossible. Production registers an
+// OAuth/SSO IAuthProvider. Never read AppUser.PasswordHash/PasswordSalt
+// directly from UI code.
+var allowDevPasswords = builder.Configuration.GetValue<bool>("Auth:AllowDevPasswords");
+if (allowDevPasswords)
+    builder.Services.AddScoped<IAuthProvider, DevPasswordAuthProvider>();
+else
+    builder.Services.AddScoped<IAuthProvider, DisabledAuthProvider>();
 
 // Port is configurable via appsettings.json (Prim:HttpPort); defaults to 5000.
 // An explicit --urls argument (or ASPNETCORE_URLS) still takes precedence.
@@ -45,6 +52,13 @@ if (string.IsNullOrEmpty(builder.Configuration["urls"]))
 }
 
 var app = builder.Build();
+
+// H6: loud startup warning when development password auth is active —
+// this must never run in production.
+if (allowDevPasswords)
+    app.Logger.LogWarning("SECURITY WARNING: development password authentication is ENABLED " +
+        "(Auth:AllowDevPasswords=true). Do not use in production — register an OAuth/SSO " +
+        "IAuthProvider and remove the flag.");
 
 // Seed on startup. EnsureCreated does NOT add new columns/tables to an
 // existing database, so SchemaUpgrader backfills anything the old file lacks

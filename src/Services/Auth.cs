@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Rim.Data;
@@ -55,6 +56,7 @@ public static class PasswordHasher
 /// <summary>
 /// Development username+password provider. Seeded users get dev passwords in
 /// SeedData. Not for production — production registers an OAuth/SSO IAuthProvider.
+/// Registration is opt-in via Auth:AllowDevPasswords (default false, fail closed).
 /// </summary>
 public class DevPasswordAuthProvider : IAuthProvider
 {
@@ -62,10 +64,46 @@ public class DevPasswordAuthProvider : IAuthProvider
     public DevPasswordAuthProvider(IDbContextFactory<RimDbContext> factory) => _factory = factory;
     public string Name => "Development password provider";
 
+    // H6: login-attempt throttling — max 5 failures per rolling minute per
+    // username, then a 5-minute lockout. App-wide (static) so it holds across
+    // circuits; a successful login clears the entry.
+    private static readonly ConcurrentDictionary<string, AttemptState> _attempts = new();
+    private const int MaxFailuresPerMinute = 5;
+    private static readonly TimeSpan AttemptWindow = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(5);
+    private sealed record AttemptState(int Failures, DateTimeOffset FirstFailureUtc, DateTimeOffset? LockedUntilUtc);
+
     public async Task<AuthResult> AuthenticateAsync(string userId, string password)
     {
         if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrEmpty(password))
             return AuthResult.Fail("Enter a username and password.");
+        var key = userId.Trim().ToUpperInvariant();
+        var now = DateTimeOffset.UtcNow;
+        if (_attempts.TryGetValue(key, out var state) && state.LockedUntilUtc > now)
+            return AuthResult.Fail("Too many failed login attempts. Try again in a few minutes.");
+        var result = await AuthenticateCoreAsync(userId, password);
+        if (result.Ok)
+        {
+            _attempts.TryRemove(key, out _);
+            return result;
+        }
+        _attempts.AddOrUpdate(key,
+            _ => new AttemptState(1, now, null),
+            (_, prev) =>
+            {
+                var (failures, first) = prev.FirstFailureUtc <= now - AttemptWindow
+                    ? (1, now)
+                    : (prev.Failures + 1, prev.FirstFailureUtc);
+                var lockedUntil = failures >= MaxFailuresPerMinute
+                    ? (DateTimeOffset?)(now + LockoutDuration)
+                    : null;
+                return new AttemptState(failures, first, lockedUntil);
+            });
+        return result;
+    }
+
+    private async Task<AuthResult> AuthenticateCoreAsync(string userId, string password)
+    {
         using var db = _factory.CreateDbContext();
         var u = await db.Users.FirstOrDefaultAsync(x => x.UserId == userId.Trim() && x.Active);
         if (u == null || string.IsNullOrEmpty(u.PasswordHash) || string.IsNullOrEmpty(u.PasswordSalt))
@@ -74,4 +112,18 @@ public class DevPasswordAuthProvider : IAuthProvider
             return AuthResult.Fail("Invalid username or password.");
         return AuthResult.Success(u.UserId, u.DisplayName, u.Role);
     }
+}
+
+/// <summary>
+/// Fail-closed IAuthProvider: registered when Auth:AllowDevPasswords is not
+/// enabled. Password login is impossible; production wires an OAuth/SSO
+/// provider in its place.
+/// </summary>
+public class DisabledAuthProvider : IAuthProvider
+{
+    public string Name => "Disabled (password login not enabled)";
+
+    public Task<AuthResult> AuthenticateAsync(string userId, string password)
+        => Task.FromResult(AuthResult.Fail(
+            "Password sign-in is disabled on this server. Contact your administrator."));
 }

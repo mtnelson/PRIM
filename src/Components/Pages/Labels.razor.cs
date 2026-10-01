@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Labels : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
@@ -49,22 +49,22 @@ public partial class Labels : ComponentBase, IDisposable
     {
         if (LabelId == null)
         {
-            _labels = await Prim.GetLabelsAsync();
-            _counts = await Prim.GetLabelCountsAsync();
+            _labels = await Rim.GetLabelsAsync();
+            _counts = await Rim.GetLabelCountsAsync();
         }
         else
         {
-            _label = await Prim.GetLabelAsync(LabelId.Value);
+            _label = await Rim.GetLabelAsync(LabelId.Value);
             if (_label == null)
             {
                 _records = new(); _containers = new(); _locations = new(); _users = new();
             }
             else
             {
-                _records = await Prim.GetLabelRecordsAsync(LabelId.Value);
-                _containers = await Prim.GetLabelContainersAsync(LabelId.Value);
-                _locations = await Prim.GetLabelLocationsAsync(LabelId.Value);
-                _users = await Prim.GetLabelUsersAsync(LabelId.Value);
+                _records = await Rim.GetLabelRecordsAsync(LabelId.Value);
+                _containers = await Rim.GetLabelContainersAsync(LabelId.Value);
+                _locations = await Rim.GetLabelLocationsAsync(LabelId.Value);
+                _users = await Rim.GetLabelUsersAsync(LabelId.Value);
             }
         }
     }
@@ -82,7 +82,7 @@ public partial class Labels : ComponentBase, IDisposable
         if (name.Length == 0) return;
         try
         {
-            var label = await Prim.GetOrCreateLabelAsync(name, App.CurrentUserId);
+            var label = await Rim.GetOrCreateLabelAsync(name, App.CurrentUserId);
             App.Log("Created label", label.Name);
             _newName = "";
             await Load();
@@ -101,7 +101,7 @@ public partial class Labels : ComponentBase, IDisposable
         {
             try
             {
-                await Prim.RenameLabelAsync(label.Id, newName, App.CurrentUserId);
+                await Rim.RenameLabelAsync(label.Id, newName, App.CurrentUserId);
                 App.Log("Renamed label", $"{label.Name} → {newName.Trim()}");
                 await Load();
                 Snackbar.Add("Label renamed.", Severity.Success);
@@ -116,7 +116,7 @@ public partial class Labels : ComponentBase, IDisposable
             $"Delete the label '{label.Name}'? It will be removed from all items. This cannot be undone.",
             yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return;
-        await Prim.DeleteLabelAsync(label.Id, App.CurrentUserId);
+        await Rim.DeleteLabelAsync(label.Id, App.CurrentUserId);
         App.Log("Deleted label", label.Name);
         Snackbar.Add("Label deleted.", Severity.Success);
         if (LabelId != null) Nav.NavigateTo("/labels");
@@ -165,10 +165,10 @@ public partial class Labels : ComponentBase, IDisposable
         await using var busy = BusyToast.Show(Snackbar, $"Deleting {ids.Count:N0} container(s)…");
         try
         {
-            var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
+            var n = await Rim.DeleteContainersAsync(ids, App.CurrentUserId);
             busy.Complete($"Deleted {n:N0} container(s).");
             var names = new List<string>();
-            foreach (var id in ids) names.Add(await Prim.GetObjectLabelAsync("Container", id));
+            foreach (var id in ids) names.Add(await Rim.GetObjectLabelAsync("Container", id));
             App.LogItems("Deleted containers", names);
             return true;
         }

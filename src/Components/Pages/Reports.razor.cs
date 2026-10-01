@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Reports : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public IJSRuntime JS { get; set; } = default!;
 
     private Dictionary<string, int> _counts = new();
@@ -26,13 +26,13 @@ public partial class Reports : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        _counts = await Prim.GetCountsAsync();
+        _counts = await Rim.GetCountsAsync();
 
-        var byType = await Prim.GroupRecordsAsync(r => r.RecordType);
+        var byType = await Rim.GroupRecordsAsync(r => r.RecordType);
         _typeData = byType.Select(g => (double)g.Count).ToArray();
         _typeLabels = byType.Select(g => $"{g.Label} ({g.Count})").ToArray();
 
-        var byOffice = await Prim.GroupRecordsAsync(r => r.FieldOffice);
+        var byOffice = await Rim.GroupRecordsAsync(r => r.FieldOffice);
         _foData = byOffice.Select(g => (double)g.Count).ToArray();
         _foLabels = byOffice.Select(g => $"{g.Label} ({g.Count})").ToArray();
     }
@@ -41,6 +41,6 @@ public partial class Reports : ComponentBase
     {
         var csv = "Metric,Count\r\n" + string.Join("\r\n",
             _counts.Select(kv => $"{Csv.Escape(kv.Key)},{kv.Value}"));
-        await Csv.DownloadAsync(JS, "prim-totals.csv", csv);
+        await Csv.DownloadAsync(JS, "rim-totals.csv", csv);
     }
 }

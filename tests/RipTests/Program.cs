@@ -1,17 +1,17 @@
-// Integration tests for Prim services: runs against a temp SQLite database,
-// exercising the same PrimService the Blazor UI uses. Exit code 0 = all pass.
+// Integration tests for Rim services: runs against a temp SQLite database,
+// exercising the same RimService the Blazor UI uses. Exit code 0 = all pass.
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Primitives;
-using Prim.Data;
-using Prim.Services;
+using Rim.Data;
+using Rim.Services;
 
 var dbPath = Path.Combine(Path.GetTempPath(), $"riptest-{Guid.NewGuid():N}.db");
 var factory = new TestFactory(
-    new DbContextOptionsBuilder<PrimDbContext>().UseSqlite($"Data Source={dbPath}").Options);
+    new DbContextOptionsBuilder<RimDbContext>().UseSqlite($"Data Source={dbPath}").Options);
 using (var db = factory.CreateDbContext()) { db.Database.EnsureCreated(); SeedData.EnsureSeeded(db); }
-var svc = new PrimService(factory);
+var svc = new RimService(factory);
 
 int pass = 0, fail = 0;
 void Check(bool cond, string name, string? detail = null)
@@ -874,7 +874,7 @@ var all999 = await svc.GetAuditAsync("Record", 999);
 Check(all999.Count == 30, "per-item audit log includes archived rows", $"got {all999.Count}");
 
 var tmpAudit = Path.Combine(Path.GetTempPath(), $"audittest-{Guid.NewGuid():N}");
-var svc2 = new PrimService(factory, null, tmpAudit);
+var svc2 = new RimService(factory, null, tmpAudit);
 long archBefore;
 using (var db = factory.CreateDbContext()) archBefore = await db.ArchivedAuditEvents.LongCountAsync();
 Check(await svc2.ExportAuditArchiveIfNeededAsync(maxArchiveRows: 1_000_000) == null, "export no-op under cap");
@@ -904,7 +904,7 @@ try { Directory.Delete(tmpAudit, true); } catch { }
 // bulk-operation hook: archival runs automatically with a tiny configured cap
 var tinyCfg = new TestConfig(new Dictionary<string, string?> { ["Audit:MaxHotRows"] = "5" });
 var tmpAudit2 = Path.Combine(Path.GetTempPath(), $"audittest-{Guid.NewGuid():N}");
-var svc3 = new PrimService(factory, tinyCfg, tmpAudit2);
+var svc3 = new RimService(factory, tinyCfg, tmpAudit2);
 using (var db = factory.CreateDbContext())
 {
     for (int i = 0; i < 8; i++)
@@ -923,7 +923,7 @@ try { Directory.Delete(tmpAudit2, true); } catch { }
 // ---- advanced search: SQL tab query log ----
 {
     var log = new SearchQueryLog();
-    var svcLog = new PrimService(factory, queryLog: log);
+    var svcLog = new RimService(factory, queryLog: log);
     var crit = new List<(string, string, string)> { ("CaseNumber", "Contains", "123") };
     var runId = Guid.NewGuid();
     var n = await svcLog.AdvancedSearchRecordsCountAsync(crit, "AND", $"AdvancedSearch:Record:{runId:N}:count");
@@ -992,18 +992,44 @@ try { Directory.Delete(tmpAudit2, true); } catch { }
 // ---- upgrade: SearchActivities created on table-less DB ----
 {
     var dbPath2 = Path.Combine(Path.GetTempPath(), $"riptest-upg-{Guid.NewGuid():N}.db");
-    var opts = new DbContextOptionsBuilder<PrimDbContext>().UseSqlite($"Data Source={dbPath2}").Options;
-    await using (var db = new PrimDbContext(opts))
+    var opts = new DbContextOptionsBuilder<RimDbContext>().UseSqlite($"Data Source={dbPath2}").Options;
+    await using (var db = new RimDbContext(opts))
     {
         await db.Database.EnsureCreatedAsync();
         await db.Database.ExecuteSqlRawAsync("DROP TABLE SearchActivities");
     }
-    await using (var db = new PrimDbContext(opts))
+    await using (var db = new RimDbContext(opts))
     {
         SeedData.UpgradeSchema(db);
         Check(await db.SearchActivities.CountAsync() == 0, "UpgradeSchema recreates missing SearchActivities table");
     }
     try { File.Delete(dbPath2); } catch { }
+}
+
+// ---- v0.13.0: UpgradeSchema backfills user barcodes on legacy DBs ----
+// Pre-v0.12.0 databases hold NULL in the (nullable, ALTER-added) Barcode
+// column; the old backfill crashed materializing those rows. Simulate it.
+{
+    var dbPath4 = Path.Combine(Path.GetTempPath(), $"riptest-upg-{Guid.NewGuid():N}.db");
+    var opts4 = new DbContextOptionsBuilder<RimDbContext>().UseSqlite($"Data Source={dbPath4}").Options;
+    await using (var db = new RimDbContext(opts4))
+    {
+        await db.Database.EnsureCreatedAsync();
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users DROP COLUMN Barcode");
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN Barcode TEXT");
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT INTO Users (UserId, DisplayName, Role, Email, Active, CreatedUtc, RowVersion, Barcode) " +
+            "VALUES ('legacy01','Legacy User','Staff',NULL,1,'2026-01-01',1,NULL)");
+    }
+    await using (var db = new RimDbContext(opts4))
+    {
+        SeedData.UpgradeSchema(db); // must not throw on NULL Barcode
+        var barcodes = await db.Users.Select(u => u.Barcode).ToListAsync();
+        Check(barcodes.Count > 0 && barcodes.All(b => b != null && b.StartsWith("USR")),
+            "v0.13.0 UpgradeSchema backfills NULL user barcodes without crashing",
+            string.Join(",", barcodes));
+    }
+    try { File.Delete(dbPath4); } catch { }
 }
 
 // ---- v0.12.0: user barcodes ----
@@ -1013,7 +1039,7 @@ Check(usersNow.First(u => u.UserId == "admin01").Barcode == "USR000001" &&
       usersNow.First(u => u.UserId == "mtnelson").Barcode == "USR000003",
     "v0.12.0 seed users have sequential USR barcodes");
 var expectedUsr = "USR" + (usersNow.Count + 1).ToString("D6");
-var nusr = new AppUser { UserId = "scantest01", DisplayName = "Scan Test", Role = "Staff", Email = "scan@prim.local", PasswordHash = "x", PasswordSalt = "y" };
+var nusr = new AppUser { UserId = "scantest01", DisplayName = "Scan Test", Role = "Staff", Email = "scan@rim.local", PasswordHash = "x", PasswordSalt = "y" };
 var nusrRes = await svc.SaveUserAsync(nusr, "harness");
 Check(nusrRes.Ok && nusr.Barcode == expectedUsr, "v0.12.0 new user gets next USR barcode", $"{nusrRes.Error}/{nusr.Barcode}");
 nusr.DisplayName = "Scan Test 2";
@@ -1159,7 +1185,7 @@ Check(hitCon != null && hitCon.Kind == "Container" && hitCon.Name == "HQ-SHIP-LD
 var hitLoc = await svc.ResolveBarcodeAsync("LOC000001");
 Check(hitLoc != null && hitLoc.Kind == "Location" && hitLoc.Name == "BLDG CRC", "v0.12.0 resolve LOC000001");
 var hitUsr = await svc.ResolveBarcodeAsync("USR000001");
-Check(hitUsr != null && hitUsr.Kind == "User" && hitUsr.Name == "PRIM Administrator", "v0.12.0 resolve USR000001");
+Check(hitUsr != null && hitUsr.Kind == "User" && hitUsr.Name == "RIM Administrator", "v0.12.0 resolve USR000001");
 Check(await svc.ResolveBarcodeAsync("ZZZ999999") == null, "v0.12.0 resolve unknown -> null");
 Check(await svc.ResolveBarcodeAsync("") == null, "v0.12.0 resolve empty -> null");
 
@@ -1207,9 +1233,9 @@ Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }
 return fail == 0 ? 0 : 1;
 
-sealed class TestFactory(DbContextOptions<PrimDbContext> opts) : IDbContextFactory<PrimDbContext>
+sealed class TestFactory(DbContextOptions<RimDbContext> opts) : IDbContextFactory<RimDbContext>
 {
-    public PrimDbContext CreateDbContext() => new(opts);
+    public RimDbContext CreateDbContext() => new(opts);
 }
 
 // Minimal IConfiguration for retention-cap tests (no extra packages).

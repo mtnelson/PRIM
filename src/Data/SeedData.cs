@@ -1,7 +1,7 @@
-namespace Prim.Data;
+namespace Rim.Data;
 
 using Microsoft.EntityFrameworkCore;
-using Prim.Services;
+using Rim.Services;
 
 /// <summary>Demo dataset so the app is usable the first time it starts.</summary>
 public static class SeedData
@@ -9,7 +9,7 @@ public static class SeedData
     // Typo corrections applied 2026-09-29: Cincinnati (was "Cincinnatti"),
     // Las Vegas (was "Las"), Minneapolis (was "Minneapolios").
     public static readonly (string Code, string Name)[] FieldOffices =
-        Prim.Services.FieldOffices.Offices.ToArray();
+        Rim.Services.FieldOffices.Offices.ToArray();
 
     public static readonly string[] RecordTypes =
         { "Case File", "Compressed", "Abstract", "HQ Bureau Applicant", "HQ In Service", "HQ Out of Service" };
@@ -31,7 +31,7 @@ public static class SeedData
     // EnsureCreated never alters an existing SQLite file, so this adds any
     // columns/tables introduced after the database was first created.
     // Idempotent: safe to run on every startup, on SQLite and SQL Server.
-    public static void UpgradeSchema(PrimDbContext db)
+    public static void UpgradeSchema(RimDbContext db)
     {
         AddColumn(db, "Users", "PasswordHash", "TEXT");
         AddColumn(db, "Users", "PasswordSalt", "TEXT");
@@ -168,7 +168,7 @@ public static class SeedData
     // its Home and Assignee (reference, not a copy). Pre-existing children
     // stored the parent's old home instead — rewrite them to the parent
     // record so the invariant holds for legacy data too. Idempotent.
-    private static void BackfillChildHoming(PrimDbContext db)
+    private static void BackfillChildHoming(RimDbContext db)
     {
 #pragma warning disable EF1002
         db.Database.ExecuteSqlRaw("""
@@ -188,31 +188,39 @@ public static class SeedData
     // v0.12.0: existing users predate system-assigned barcodes. Assign
     // USRnnnnnn sequentially (same scheme as records/containers/locations).
     // Idempotent: only touches rows with a null/empty barcode.
-    private static void BackfillUserBarcodes(PrimDbContext db)
+    // Reads via a nullable DTO: old databases hold NULL in the Barcode column
+    // (non-nullable in the model), which would crash entity materialization.
+    private static void BackfillUserBarcodes(RimDbContext db)
     {
-        var users = db.Users.ToList();
+        var rows = db.Database.SqlQueryRaw<UserBarcodeRow>("SELECT Id, Barcode FROM Users").ToList();
         var max = 0;
-        foreach (var u in users)
-            if (u.Barcode != null && u.Barcode.StartsWith("USR")
-                && int.TryParse(u.Barcode[3..], out var n) && n > max) max = n;
-        var changed = false;
-        foreach (var u in users.OrderBy(u => u.Id))
+        foreach (var r in rows)
+            if (r.Barcode != null && r.Barcode.StartsWith("USR")
+                && int.TryParse(r.Barcode[3..], out var n) && n > max) max = n;
+#pragma warning disable EF1002
+        foreach (var r in rows.OrderBy(r => r.Id))
         {
-            if (string.IsNullOrWhiteSpace(u.Barcode))
+            if (string.IsNullOrWhiteSpace(r.Barcode))
             {
                 max++;
-                u.Barcode = "USR" + max.ToString("D6");
-                changed = true;
+                db.Database.ExecuteSqlRaw("UPDATE Users SET Barcode = {0} WHERE Id = {1}",
+                    "USR" + max.ToString("D6"), r.Id);
             }
         }
-        if (changed) db.SaveChanges();
+#pragma warning restore EF1002
+    }
+
+    private sealed class UserBarcodeRow
+    {
+        public int Id { get; set; }
+        public string? Barcode { get; set; }
     }
 
     // v0.12.0: existing Compressed rows predate the Parent/Child role.
     // A compressed record that already has children becomes a Parent; one
     // already filed under another record becomes a Child. Rows with neither
     // keep a null role and must choose one the next time they are edited.
-    private static void BackfillCompressedRoles(PrimDbContext db)
+    private static void BackfillCompressedRoles(RimDbContext db)
     {
 #pragma warning disable EF1002
         db.Database.ExecuteSqlRaw("""
@@ -230,7 +238,7 @@ public static class SeedData
     // One-time promotion of the legacy RecordItem.Labels comma-separated text
     // into the Labels / ObjectLabels tables. Idempotent: skips records whose
     // labels are already fully assigned.
-    public static void BackfillLabels(PrimDbContext db)
+    public static void BackfillLabels(RimDbContext db)
     {
         var existing = db.Labels.ToDictionary(l => l.Name, StringComparer.OrdinalIgnoreCase);
         var assigned = db.ObjectLabels
@@ -263,7 +271,7 @@ public static class SeedData
     // home/assignee names against Users/Containers/Locations so old links navigate.
     // Best-effort and idempotent; unresolvable names keep a null ref (link
     // renders as plain text) until the item is next saved.
-    private static void BackfillRefIds(PrimDbContext db)
+    private static void BackfillRefIds(RimDbContext db)
     {
         var users = db.Users.ToList();
         var containers = db.Containers.ToList();
@@ -306,7 +314,7 @@ public static class SeedData
         db.SaveChanges();
     }
 
-    private static void AddColumn(PrimDbContext db, string table, string column, string type)
+    private static void AddColumn(RimDbContext db, string table, string column, string type)
     {
         // table/column/type are fixed compile-time literals from UpgradeSchema
         // above, never user input — the EF interpolation warning is suppressed.
@@ -321,11 +329,11 @@ public static class SeedData
     // Existing databases predate password logins: give every user without a
     // password the dev password matching their username (username/password
     // are identical in the dev seed).
-    public static void BackfillDevCredentials(PrimDbContext db)
+    public static void BackfillDevCredentials(RimDbContext db)
     {
         foreach (var u in db.Users.Where(u => u.PasswordHash == null).ToList())
         {
-            var (hash, salt) = Prim.Services.PasswordHasher.Hash(u.UserId);
+            var (hash, salt) = Rim.Services.PasswordHasher.Hash(u.UserId);
             u.PasswordHash = hash; u.PasswordSalt = salt;
         }
         db.SaveChanges();
@@ -334,7 +342,7 @@ public static class SeedData
     private static AppUser NewDevUser(string userId, string displayName, string role, string email, DateTime now)
     {
         // Dev password == username (explicitly temporary; production uses OAuth/SSO).
-        var (hash, salt) = Prim.Services.PasswordHasher.Hash(userId);
+        var (hash, salt) = Rim.Services.PasswordHasher.Hash(userId);
         return new AppUser
         {
             UserId = userId, DisplayName = displayName, Role = role, Email = email,
@@ -342,7 +350,7 @@ public static class SeedData
         };
     }
 
-    public static void EnsureSeeded(PrimDbContext db)
+    public static void EnsureSeeded(RimDbContext db)
     {
         if (db.Users.Any()) return;
         var now = DateTime.UtcNow;
@@ -354,9 +362,9 @@ public static class SeedData
         //   mtnelson / mtnelson     — Staff
         var users = new[]
         {
-            NewDevUser("admin01", "PRIM Administrator", "Admin", "admin01@prim.local", now),
-            NewDevUser("recordsmgr01", "Records Manager", "Records Manager", "recordsmgr01@prim.local", now),
-            NewDevUser("mtnelson", "Mike Nelson", "Staff", "mtnelson@prim.local", now),
+            NewDevUser("admin01", "RIM Administrator", "Admin", "admin01@rim.local", now),
+            NewDevUser("recordsmgr01", "Records Manager", "Records Manager", "recordsmgr01@rim.local", now),
+            NewDevUser("mtnelson", "Mike Nelson", "Staff", "mtnelson@rim.local", now),
         };
         // System-assigned user barcodes (v0.12.0) — same scheme as the
         // backfill for existing databases.

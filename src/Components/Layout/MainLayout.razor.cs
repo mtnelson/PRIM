@@ -5,18 +5,18 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Layout;
+namespace Rim.Components.Layout;
 
 public partial class MainLayout : IDisposable
 {
     [Inject] public AppState App { get; set; } = default!;
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public NavigationManager Nav { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
@@ -40,7 +40,7 @@ public partial class MainLayout : IDisposable
         // Push the browser's synchronous preventDefault set whenever the
         // registered combos change, even if this layout doesn't re-render.
         Hotkeys.CombosChanged += OnCombosChanged;
-        App.ActiveAnnouncement = await Prim.GetAnnouncementAsync();
+        App.ActiveAnnouncement = await Rim.GetAnnouncementAsync();
         await LoadThemeAsync();
         Hotkeys.PushScope("shell");
         Hotkeys.Register("shell", "Alt+1", () => Nav.NavigateTo(""));
@@ -63,24 +63,24 @@ public partial class MainLayout : IDisposable
         if (firstRender)
         {
             _self = DotNetObjectReference.Create(this);
-            await PrimJs.TryInvokeVoidAsync(JS, "prim.hotkeys.init", _self);
+            await RimJs.TryInvokeVoidAsync(JS, "rim.hotkeys.init", _self);
             // No stored preference: fall back to the OS color-scheme setting.
             // (JS is only available after the first render — never call it
             // from OnInitializedAsync, which also runs during prerendering.)
             if (App.IsAuthenticated && _themeLoadedFor == App.CurrentUserId
-                && await Prim.GetThemePreferenceAsync(App.CurrentUserId) == null)
+                && await Rim.GetThemePreferenceAsync(App.CurrentUserId) == null)
             {
-                _darkMode = await PrimJs.TryInvokeAsync<bool>(JS, "prim.theme.prefersDark") == true;
+                _darkMode = await RimJs.TryInvokeAsync<bool>(JS, "rim.theme.prefersDark") == true;
                 StateHasChanged();
             }
-            await PrimJs.TryInvokeVoidAsync(JS, "prim.theme.setDark", _darkMode);
+            await RimJs.TryInvokeVoidAsync(JS, "rim.theme.setDark", _darkMode);
         }
         // Keep the browser's synchronous preventDefault set in sync. The
         // CombosChanged event (subscribed in OnInitializedAsync) re-renders
         // this layout whenever any component registers/unregisters, so the
         // push happens even for dialogs and tab switches that don't navigate.
         if (Hotkeys.CombosDirty)
-            await PrimJs.TryInvokeVoidAsync(JS, "prim.hotkeys.setCombos", Hotkeys.TakeCombos());
+            await RimJs.TryInvokeVoidAsync(JS, "rim.hotkeys.setCombos", Hotkeys.TakeCombos());
     }
 
     [JSInvokable]
@@ -147,7 +147,7 @@ public partial class MainLayout : IDisposable
         {
             try
             {
-                var label = await Prim.GetOrCreateLabelAsync(name.Trim(), App.CurrentUserId);
+                var label = await Rim.GetOrCreateLabelAsync(name.Trim(), App.CurrentUserId);
                 App.Log("Created label", label.Name);
                 Snackbar.Add($"Label '{label.Name}' created.", Severity.Success);
             }
@@ -159,7 +159,7 @@ public partial class MainLayout : IDisposable
     {
         if (!App.IsAuthenticated) return null;
         _themeLoadedFor = App.CurrentUserId;
-        var pref = await Prim.GetThemePreferenceAsync(App.CurrentUserId);
+        var pref = await Rim.GetThemePreferenceAsync(App.CurrentUserId);
         if (pref != null) _darkMode = pref == "Dark";
         // pref == null: OS default is resolved via JS in OnAfterRenderAsync
         // (first render) or in OnAppChanged (user switch) — never before the
@@ -170,9 +170,9 @@ public partial class MainLayout : IDisposable
     private async Task ToggleTheme()
     {
         _darkMode = !_darkMode;
-        await PrimJs.TryInvokeVoidAsync(JS, "prim.theme.setDark", _darkMode);
+        await RimJs.TryInvokeVoidAsync(JS, "rim.theme.setDark", _darkMode);
         if (App.IsAuthenticated)
-            await Prim.SetThemePreferenceAsync(App.CurrentUserId, _darkMode ? "Dark" : "Light");
+            await Rim.SetThemePreferenceAsync(App.CurrentUserId, _darkMode ? "Dark" : "Light");
     }
 
     private void OnAppChanged() => InvokeAsync(async () =>
@@ -182,8 +182,8 @@ public partial class MainLayout : IDisposable
         {
             var pref = await LoadThemeAsync();
             if (pref == null)
-                _darkMode = await PrimJs.TryInvokeAsync<bool>(JS, "prim.theme.prefersDark") == true;
-            await PrimJs.TryInvokeVoidAsync(JS, "prim.theme.setDark", _darkMode);
+                _darkMode = await RimJs.TryInvokeAsync<bool>(JS, "rim.theme.prefersDark") == true;
+            await RimJs.TryInvokeVoidAsync(JS, "rim.theme.setDark", _darkMode);
         }
         else if (!App.IsAuthenticated)
         {

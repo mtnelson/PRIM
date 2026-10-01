@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Dialogs;
+namespace Rim.Components.Dialogs;
 
 public partial class RecordDialog : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
 
@@ -34,14 +34,14 @@ public partial class RecordDialog : ComponentBase
     {
         // v0.12.0: only Compressed Parents can accept filed children (no
         // nesting); a record can never be its own parent.
-        _compressedParents = (await Prim.GetRecordsAsync())
+        _compressedParents = (await Rim.GetRecordsAsync())
             .Where(r => r.RecordType == "Compressed" && r.CompressedRole == "Parent" && r.Id != Model.Id)
             .ToList();
         _model = Model.Id == 0
             ? new RecordItem { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : Clone(Model);
         _originalType = _model.RecordType;
-        if (_model.Id != 0) _labels = await Prim.GetObjectLabelNamesAsync("Record", _model.Id);
+        if (_model.Id != 0) _labels = await Rim.GetObjectLabelNamesAsync("Record", _model.Id);
     }
 
     private static RecordItem Clone(RecordItem r) => new()
@@ -113,9 +113,9 @@ public partial class RecordDialog : ComponentBase
         }
 
         var isNew = _model.Id == 0;
-        var (ok2, err) = await Prim.SaveRecordAsync(_model, App.CurrentUserId);
+        var (ok2, err) = await Rim.SaveRecordAsync(_model, App.CurrentUserId);
         if (!ok2) { _error = err; return; }
-        await Prim.SetObjectLabelsAsync("Record", _model.Id, _labels, App.CurrentUserId);
+        await Rim.SetObjectLabelsAsync("Record", _model.Id, _labels, App.CurrentUserId);
         Snackbar.Add(isNew ? "Record created." : "Record updated.", Severity.Success);
         App.Log(isNew ? "Created record" : "Updated record", _model.RecordNumber);
         MudDialog.Close(DialogResult.Ok(true));

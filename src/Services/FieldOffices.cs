@@ -1,4 +1,4 @@
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>
 /// Field Office / Auxiliary Office list. Codes are stored uppercase (existing rule).

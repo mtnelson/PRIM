@@ -6,9 +6,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Prim.Data;
+using Rim.Data;
 
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>One breadcrumb segment in an object's ancestor path (root first).</summary>
 public record PathSeg(string Kind, int Id, string Label);
@@ -18,16 +18,16 @@ public record PathSeg(string Kind, int Id, string Label);
 public record ChildItem(string Kind, int Id, string Label, string Detail, bool HasChildren,
     Dictionary<string, string>? Cells = null, List<(string Key, string Label)>? Columns = null);
 
-/// <summary>CRUD + audit + search over the four PRIM object types.</summary>
-public class PrimService
+/// <summary>CRUD + audit + search over the four RIM object types.</summary>
+public class RimService
 {
-    private readonly IDbContextFactory<PrimDbContext> _factory;
+    private readonly IDbContextFactory<RimDbContext> _factory;
     private readonly int _maxHotRows;
     private readonly int _maxArchiveRows;
     private readonly string _auditArchiveDir;
     private readonly SearchQueryLog? _queryLog;
 
-    public PrimService(IDbContextFactory<PrimDbContext> factory, IConfiguration? config = null, string? auditArchiveDir = null, SearchQueryLog? queryLog = null)
+    public RimService(IDbContextFactory<RimDbContext> factory, IConfiguration? config = null, string? auditArchiveDir = null, SearchQueryLog? queryLog = null)
     {
         _factory = factory;
         _queryLog = queryLog;
@@ -156,7 +156,7 @@ public class PrimService
     // Shared filtered query builders: the page, count, and id-list methods
     // below must apply the exact same predicate so virtualization totals and
     // select-all stay consistent with the rows shown.
-    private static IQueryable<RecordItem> RecordsQuery(PrimDbContext db, string? filter)
+    private static IQueryable<RecordItem> RecordsQuery(RimDbContext db, string? filter)
     {
         IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
         if (!string.IsNullOrWhiteSpace(filter))
@@ -168,7 +168,7 @@ public class PrimService
         return q;
     }
 
-    private static IQueryable<Container> ContainersQuery(PrimDbContext db, string? filter)
+    private static IQueryable<Container> ContainersQuery(RimDbContext db, string? filter)
     {
         IQueryable<Container> q = db.Containers.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(filter))
@@ -180,7 +180,7 @@ public class PrimService
         return q;
     }
 
-    private static IQueryable<Location> LocationsQuery(PrimDbContext db, string? filter)
+    private static IQueryable<Location> LocationsQuery(RimDbContext db, string? filter)
     {
         IQueryable<Location> q = db.Locations.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(filter))
@@ -192,7 +192,7 @@ public class PrimService
         return q;
     }
 
-    private static IQueryable<AppUser> UsersQuery(PrimDbContext db, bool includeInactive)
+    private static IQueryable<AppUser> UsersQuery(RimDbContext db, bool includeInactive)
     {
         IQueryable<AppUser> q = db.Users.AsNoTracking();
         if (!includeInactive) q = q.Where(u => u.Active);
@@ -437,7 +437,7 @@ public class PrimService
     private static readonly HashSet<string> AdvSearchUserFields = new()
         { "UserId","DisplayName","Role","Email","Barcode" };
 
-    private static IQueryable<RecordItem> AdvancedSearchQuery(PrimDbContext db,
+    private static IQueryable<RecordItem> AdvancedSearchQuery(RimDbContext db,
         List<(string Field, string Op, string Value)> rows, string logic)
     {
         IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
@@ -446,7 +446,7 @@ public class PrimService
         return q;
     }
 
-    private static IQueryable<Container> AdvancedSearchContainersQuery(PrimDbContext db,
+    private static IQueryable<Container> AdvancedSearchContainersQuery(RimDbContext db,
         List<(string Field, string Op, string Value)> rows, string logic)
     {
         IQueryable<Container> q = db.Containers.AsNoTracking();
@@ -455,7 +455,7 @@ public class PrimService
         return q;
     }
 
-    private static IQueryable<Location> AdvancedSearchLocationsQuery(PrimDbContext db,
+    private static IQueryable<Location> AdvancedSearchLocationsQuery(RimDbContext db,
         List<(string Field, string Op, string Value)> rows, string logic)
     {
         IQueryable<Location> q = db.Locations.AsNoTracking();
@@ -466,7 +466,7 @@ public class PrimService
 
     // Users: searches active AND inactive users (unlike the Users page's
     // default active-only view) — a search should surface deactivated users too.
-    private static IQueryable<AppUser> AdvancedSearchUsersQuery(PrimDbContext db,
+    private static IQueryable<AppUser> AdvancedSearchUsersQuery(RimDbContext db,
         List<(string Field, string Op, string Value)> rows, string logic)
     {
         IQueryable<AppUser> q = db.Users.AsNoTracking();
@@ -786,7 +786,7 @@ public class PrimService
     // SaveChangesAsync, so bulk operations (move/delete/restore of many
     // items, multi-field updates) cost one database round-trip instead of
     // one per event. Single-item paths keep using AuditAsync.
-    private static void AddAudit(PrimDbContext db, string kind, int id, string label,
+    private static void AddAudit(RimDbContext db, string kind, int id, string label,
         string action, string actor, string? field = null, string? oldV = null, string? newV = null)
     {
         db.AuditEvents.Add(new AuditEvent
@@ -797,7 +797,7 @@ public class PrimService
         });
     }
 
-    private async Task AuditAsync(PrimDbContext db, string kind, int id, string label,
+    private async Task AuditAsync(RimDbContext db, string kind, int id, string label,
         string action, string actor, string? field = null, string? oldV = null, string? newV = null)
     {
         AddAudit(db, kind, id, label, action, actor, field, oldV, newV);
@@ -1135,7 +1135,7 @@ public class PrimService
     /// role is part of the rule, not just the type); rejects missing
     /// parents, non-parent targets, self-parenting, and cycles.
     /// </summary>
-    private static async Task<string?> ValidateRecordParentAsync(PrimDbContext db, RecordItem input)
+    private static async Task<string?> ValidateRecordParentAsync(RimDbContext db, RecordItem input)
     {
         if (input.ParentRecordId == null) return null;
         var pid = input.ParentRecordId.Value;
@@ -1162,7 +1162,7 @@ public class PrimService
     /// anything (no nesting); a Child cannot have children of its own; and a
     /// parent that has children cannot change to a non-Compressed type.
     /// </summary>
-    private static async Task<string?> ValidateCompressedRoleAsync(PrimDbContext db, RecordItem input)
+    private static async Task<string?> ValidateCompressedRoleAsync(RimDbContext db, RecordItem input)
     {
         if (input.RecordType == "Compressed"
             && input.CompressedRole != "Parent" && input.CompressedRole != "Child")
@@ -1443,7 +1443,7 @@ public class PrimService
 
     // Best-effort assignee name -> id resolution, so assignee links navigate
     // even when the caller only supplied a display name.
-    private async Task<int?> ResolveAssigneeRefAsync(PrimDbContext db, string? kind, string? name)
+    private async Task<int?> ResolveAssigneeRefAsync(RimDbContext db, string? kind, string? name)
     {
         if (string.IsNullOrWhiteSpace(kind) || string.IsNullOrWhiteSpace(name)) return null;
         return kind switch

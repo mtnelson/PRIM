@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Dialogs;
+namespace Rim.Components.Dialogs;
 
 public partial class UserDialog : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
 
@@ -31,8 +31,8 @@ public partial class UserDialog : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        if (Model.Id != 0) _labels = await Prim.GetObjectLabelNamesAsync("User", Model.Id);
-        _locations = await Prim.GetLocationsAsync();
+        if (Model.Id != 0) _labels = await Rim.GetObjectLabelNamesAsync("User", Model.Id);
+        _locations = await Rim.GetLocationsAsync();
         _model = Model.Id == 0 ? new AppUser() : new AppUser
         {
             Id = Model.Id, UserId = Model.UserId, DisplayName = Model.DisplayName,
@@ -47,12 +47,12 @@ public partial class UserDialog : ComponentBase
         await _form.Validate();
         if (!_form.IsValid) return;
         var isNew = _model.Id == 0;
-        var (ok, err) = await Prim.SaveUserAsync(_model, App.CurrentUserId);
+        var (ok, err) = await Rim.SaveUserAsync(_model, App.CurrentUserId);
         if (!ok) { _error = err; return; }
-        await Prim.SetObjectLabelsAsync("User", _model.Id, _labels, App.CurrentUserId);
+        await Rim.SetObjectLabelsAsync("User", _model.Id, _labels, App.CurrentUserId);
         if (!string.IsNullOrEmpty(_password))
         {
-            var (pok, perr) = await Prim.SetUserPasswordAsync(_model.UserId, _password, App.CurrentUserId);
+            var (pok, perr) = await Rim.SetUserPasswordAsync(_model.UserId, _password, App.CurrentUserId);
             if (!pok) { _error = perr; return; }
         }
         Snackbar.Add(isNew ? "User created." : "User updated.", Severity.Success);

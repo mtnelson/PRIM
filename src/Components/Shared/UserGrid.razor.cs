@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 public partial class UserGrid : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
 
     private ObjectGrid<AppUser>? _grid;
 
@@ -42,8 +42,8 @@ public partial class UserGrid : ComponentBase
     protected override async Task OnParametersSetAsync()
     {
         if (ItemsProvider != null) return; // provider mode enriches per chunk
-        _withChildren = await Prim.GetHasChildrenAsync("User", Items.Select(u => u.Id));
-        _labelPairs = await Prim.GetObjectLabelPairsAsync("User", Items.Select(u => u.Id));
+        _withChildren = await Rim.GetHasChildrenAsync("User", Items.Select(u => u.Id));
+        _labelPairs = await Rim.GetObjectLabelPairsAsync("User", Items.Select(u => u.Id));
     }
 
     private Dictionary<string, string> RowWithLabels(AppUser u)
@@ -58,7 +58,7 @@ public partial class UserGrid : ComponentBase
 
     private bool HasKids(AppUser u) => _withChildren.Contains(u.Id);
 
-    private Task<List<ChildItem>> GetKids(AppUser u) => Prim.GetChildItemsAsync("User", u.Id);
+    private Task<List<ChildItem>> GetKids(AppUser u) => Rim.GetChildItemsAsync("User", u.Id);
 
     private Func<GridPageRequest, Task<GridPageResult<AppUser>>>? _provider
         => ItemsProvider == null ? null : ProvideAsync;
@@ -74,8 +74,8 @@ public partial class UserGrid : ComponentBase
     {
         var ids = rows.Select(r => r.Id).ToList();
         if (ids.Count == 0) return;
-        foreach (var kv in await Prim.GetObjectLabelPairsAsync("User", ids)) _labelPairs[kv.Key] = kv.Value;
-        foreach (var id in await Prim.GetHasChildrenAsync("User", ids)) _withChildren.Add(id);
+        foreach (var kv in await Rim.GetObjectLabelPairsAsync("User", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var id in await Rim.GetHasChildrenAsync("User", ids)) _withChildren.Add(id);
     }
 
     private void ResetSupplemental()

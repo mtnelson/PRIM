@@ -1,5 +1,5 @@
 @page "/users"
-<PageTitle>PRIM — Users</PageTitle>
+<PageTitle>RIM — Users</PageTitle>
 
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Users</MudText>
@@ -17,7 +17,7 @@
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <UserGrid @ref="_grid" ItemsProvider="ProvideUsers" GridId="users" Scope="users"
-          CountProvider="() => Prim.CountUsersAsync(_showInactive)" AllIdsProvider="() => Prim.GetAllUserIdsAsync(_showInactive)"
+          CountProvider="() => Rim.CountUsersAsync(_showInactive)" AllIdsProvider="() => Rim.GetAllUserIdsAsync(_showInactive)"
           EditItem="EditUser" OnChanged="OnGridChanged" CanMove="false" TabState="_tabState" TabStateChanged="OnTabStateChanged" />
 
 

@@ -1,15 +1,15 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class BarcodeScan : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
@@ -94,12 +94,12 @@ public partial class BarcodeScan : ComponentBase
         _running = true;
         try
         {
-            PrimService.BarcodeActionResult result = _action switch
+            RimService.BarcodeActionResult result = _action switch
             {
-                ActWorkspace => await Prim.BarcodeAddToSlotAsync(App.CurrentUserId, _slot, codes),
-                ActHome => await Prim.BarcodeSetHomeAsync(codes, _dest, App.CurrentUserId),
-                ActAssignee => await Prim.BarcodeSetAssigneeAsync(codes, _assigneeBarcode, App.CurrentUserId),
-                _ => await Prim.BarcodeSetHomeAndAssigneeAsync(codes, _homeBarcode, _assigneeBarcode, App.CurrentUserId),
+                ActWorkspace => await Rim.BarcodeAddToSlotAsync(App.CurrentUserId, _slot, codes),
+                ActHome => await Rim.BarcodeSetHomeAsync(codes, _dest, App.CurrentUserId),
+                ActAssignee => await Rim.BarcodeSetAssigneeAsync(codes, _assigneeBarcode, App.CurrentUserId),
+                _ => await Rim.BarcodeSetHomeAndAssigneeAsync(codes, _homeBarcode, _assigneeBarcode, App.CurrentUserId),
             };
 
             // Failed barcodes stay in the scan field for correction/retry;

@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 public partial class LocationGrid : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
 
     private ObjectGrid<Location>? _grid;
 
@@ -44,9 +44,9 @@ public partial class LocationGrid : ComponentBase
     {
         if (ItemsProvider != null) return; // provider mode enriches per chunk
         var ids = Items.Select(l => l.Id).ToList();
-        _labelPairs = await Prim.GetObjectLabelPairsAsync("Location", ids);
-        _paths = await Prim.GetAncestorPathsAsync("Location", ids);
-        _withChildren = await Prim.GetHasChildrenAsync("Location", ids);
+        _labelPairs = await Rim.GetObjectLabelPairsAsync("Location", ids);
+        _paths = await Rim.GetAncestorPathsAsync("Location", ids);
+        _withChildren = await Rim.GetHasChildrenAsync("Location", ids);
     }
 
     private Dictionary<string, string> RowWithPath(Location l)
@@ -62,7 +62,7 @@ public partial class LocationGrid : ComponentBase
 
     private bool HasKids(Location l) => _withChildren.Contains(l.Id);
 
-    private Task<List<ChildItem>> GetKids(Location l) => Prim.GetChildItemsAsync("Location", l.Id);
+    private Task<List<ChildItem>> GetKids(Location l) => Rim.GetChildItemsAsync("Location", l.Id);
 
     private List<(int Id, string Name)> GetChips(Location l) =>
         _labelPairs.TryGetValue(l.Id, out var lp2) ? lp2 : new();
@@ -81,9 +81,9 @@ public partial class LocationGrid : ComponentBase
     {
         var ids = rows.Select(r => r.Id).ToList();
         if (ids.Count == 0) return;
-        foreach (var kv in await Prim.GetObjectLabelPairsAsync("Location", ids)) _labelPairs[kv.Key] = kv.Value;
-        foreach (var id in await Prim.GetHasChildrenAsync("Location", ids)) _withChildren.Add(id);
-        foreach (var kv in await Prim.GetAncestorPathsAsync("Location", ids)) _paths[kv.Key] = kv.Value;
+        foreach (var kv in await Rim.GetObjectLabelPairsAsync("Location", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var id in await Rim.GetHasChildrenAsync("Location", ids)) _withChildren.Add(id);
+        foreach (var kv in await Rim.GetAncestorPathsAsync("Location", ids)) _paths[kv.Key] = kv.Value;
     }
 
     private void ResetSupplemental()

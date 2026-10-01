@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class AdvancedSearch : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
@@ -94,11 +94,11 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
 
     protected override async Task OnInitializedAsync()
     {
-        _tabs = await Prim.GetOpenSessionsAsync(App.CurrentUserId, "advanced");
-        _activity = await Prim.GetSearchActivityAsync(App.CurrentUserId);
+        _tabs = await Rim.GetOpenSessionsAsync(App.CurrentUserId, "advanced");
+        _activity = await Rim.GetSearchActivityAsync(App.CurrentUserId);
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = "advanced",
                 Title = "Advanced search", CriteriaJson = "",
@@ -150,7 +150,7 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
     private async Task NewTab()
     {
         await SaveActiveTabAsync();
-        var (ok, err, s) = await Prim.CreateSessionAsync(new SearchSession
+        var (ok, err, s) = await Rim.CreateSessionAsync(new SearchSession
         {
             OwnerUserId = App.CurrentUserId, PageKind = "advanced",
             Title = $"Advanced {_tabs.Count + 1}", CriteriaJson = "",
@@ -168,12 +168,12 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
 
     private async Task CloseTab(SearchSession tab)
     {
-        await Prim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
+        await Rim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
         _tabs.RemoveAll(t => t.Id == tab.Id);
         if (_activeTab?.Id != tab.Id) return;
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = "advanced",
                 Title = "Advanced search", CriteriaJson = "",
@@ -217,7 +217,7 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
         _activeTab.CriteriaJson = SerializeCriteria();
         _activeTab.Title = DeriveTitle();
         _activeTab.ApplyTabState(_tabState);
-        await Prim.SaveSessionAsync(_activeTab);
+        await Rim.SaveSessionAsync(_activeTab);
     }
 
     // Full search logic, including the object type — stored untruncated; the
@@ -293,28 +293,28 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
     private string TagFor(string role) => $"AdvancedSearch:{_kind}:{_runId:N}:{role}";
 
     private Task<GridPageResult<RecordItem>> ProvideRecordResults(GridPageRequest req) =>
-        Prim.AdvancedSearchRecordsPageAsync(_criteria, _logic, req, TagFor("page"));
+        Rim.AdvancedSearchRecordsPageAsync(_criteria, _logic, req, TagFor("page"));
     private Task<GridPageResult<Container>> ProvideContainerResults(GridPageRequest req) =>
-        Prim.AdvancedSearchContainersPageAsync(_criteria, _logic, req, TagFor("page"));
+        Rim.AdvancedSearchContainersPageAsync(_criteria, _logic, req, TagFor("page"));
     private Task<GridPageResult<Location>> ProvideLocationResults(GridPageRequest req) =>
-        Prim.AdvancedSearchLocationsPageAsync(_criteria, _logic, req, TagFor("page"));
+        Rim.AdvancedSearchLocationsPageAsync(_criteria, _logic, req, TagFor("page"));
     private Task<GridPageResult<AppUser>> ProvideUserResults(GridPageRequest req) =>
-        Prim.AdvancedSearchUsersPageAsync(_criteria, _logic, req, TagFor("page"));
+        Rim.AdvancedSearchUsersPageAsync(_criteria, _logic, req, TagFor("page"));
 
     private Task<int> CountResults() => _kind switch
     {
-        "Container" => Prim.AdvancedSearchContainersCountAsync(_criteria, _logic, TagFor("count")),
-        "Location" => Prim.AdvancedSearchLocationsCountAsync(_criteria, _logic, TagFor("count")),
-        "User" => Prim.AdvancedSearchUsersCountAsync(_criteria, _logic, TagFor("count")),
-        _ => Prim.AdvancedSearchRecordsCountAsync(_criteria, _logic, TagFor("count")),
+        "Container" => Rim.AdvancedSearchContainersCountAsync(_criteria, _logic, TagFor("count")),
+        "Location" => Rim.AdvancedSearchLocationsCountAsync(_criteria, _logic, TagFor("count")),
+        "User" => Rim.AdvancedSearchUsersCountAsync(_criteria, _logic, TagFor("count")),
+        _ => Rim.AdvancedSearchRecordsCountAsync(_criteria, _logic, TagFor("count")),
     };
 
     private Task<List<int>> AllResultIds() => _kind switch
     {
-        "Container" => Prim.AdvancedSearchContainerIdsAsync(_criteria, _logic, TagFor("ids")),
-        "Location" => Prim.AdvancedSearchLocationIdsAsync(_criteria, _logic, TagFor("ids")),
-        "User" => Prim.AdvancedSearchUserIdsAsync(_criteria, _logic, TagFor("ids")),
-        _ => Prim.AdvancedSearchRecordIdsAsync(_criteria, _logic, TagFor("ids")),
+        "Container" => Rim.AdvancedSearchContainerIdsAsync(_criteria, _logic, TagFor("ids")),
+        "Location" => Rim.AdvancedSearchLocationIdsAsync(_criteria, _logic, TagFor("ids")),
+        "User" => Rim.AdvancedSearchUserIdsAsync(_criteria, _logic, TagFor("ids")),
+        _ => Rim.AdvancedSearchRecordIdsAsync(_criteria, _logic, TagFor("ids")),
     };
 
     private Task ResetActiveGridAsync() => _kind switch
@@ -360,7 +360,7 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
             _resultTab = 0; // back to Results on every new search
             if (!restore) await ResetActiveGridAsync();
             await SaveActiveTabAsync();
-            await Prim.LogSearchActivityAsync(new SearchActivity
+            await Rim.LogSearchActivityAsync(new SearchActivity
             {
                 UserId = App.CurrentUserId,
                 TimestampUtc = DateTime.UtcNow,
@@ -370,7 +370,7 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
                 ResultCount = count,
                 DurationMs = sw.Elapsed.TotalMilliseconds,
             });
-            _activity = await Prim.GetSearchActivityAsync(App.CurrentUserId);
+            _activity = await Rim.GetSearchActivityAsync(App.CurrentUserId);
         }
         finally { _searching = false; }
     }
@@ -380,7 +380,7 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
 
     private async Task CopySql(string sql)
     {
-        var ok = await PrimJs.TryInvokeAsync<bool>(JS, "prim.copyText", sql);
+        var ok = await RimJs.TryInvokeAsync<bool>(JS, "rim.copyText", sql);
         Snackbar.Add(ok ? "SQL copied to clipboard." : "Could not copy SQL.",
             ok ? Severity.Success : Severity.Warning);
     }
@@ -417,10 +417,10 @@ public partial class AdvancedSearch : ComponentBase, IDisposable
         await using var busy = BusyToast.Show(Snackbar, $"Deleting {ids.Count:N0} container(s)…");
         try
         {
-            var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
+            var n = await Rim.DeleteContainersAsync(ids, App.CurrentUserId);
             busy.Complete($"Deleted {n:N0} container(s).");
             var names = new List<string>();
-            foreach (var id in ids) names.Add(await Prim.GetObjectLabelAsync("Container", id));
+            foreach (var id in ids) names.Add(await Rim.GetObjectLabelAsync("Container", id));
             App.LogItems("Deleted containers", names);
             return true;
         }

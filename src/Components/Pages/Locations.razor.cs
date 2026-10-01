@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Locations : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
@@ -29,7 +29,7 @@ public partial class Locations : ComponentBase, IDisposable
 
 
     private Task<GridPageResult<Location>> ProvideLocations(GridPageRequest req)
-        => Prim.GetLocationsPageAsync(req);
+        => Rim.GetLocationsPageAsync(req);
 
     protected override void OnInitialized()
     {
@@ -39,10 +39,10 @@ public partial class Locations : ComponentBase, IDisposable
 
     protected override async Task OnInitializedAsync()
     {
-        _tabs = await Prim.GetOpenSessionsAsync(App.CurrentUserId, "locations");
+        _tabs = await Rim.GetOpenSessionsAsync(App.CurrentUserId, "locations");
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = "locations",
                 Title = "All locations", Filter = "",
@@ -78,7 +78,7 @@ public partial class Locations : ComponentBase, IDisposable
     private async Task NewTab()
     {
         await SaveActiveTabAsync();
-        var (ok, err, s) = await Prim.CreateSessionAsync(new SearchSession
+        var (ok, err, s) = await Rim.CreateSessionAsync(new SearchSession
         {
             OwnerUserId = App.CurrentUserId, PageKind = "locations",
             Title = $"Locations {_tabs.Count + 1}", Filter = "",
@@ -92,7 +92,7 @@ public partial class Locations : ComponentBase, IDisposable
 
     private async Task CloseTab(SearchSession tab)
     {
-        await Prim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
+        await Rim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
         _tabs.RemoveAll(t => t.Id == tab.Id);
         if (_activeTab?.Id == tab.Id)
             await ActivateMostRecentAsync();
@@ -102,7 +102,7 @@ public partial class Locations : ComponentBase, IDisposable
     {
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = "locations",
                 Title = "All locations", Filter = "",
@@ -124,7 +124,7 @@ public partial class Locations : ComponentBase, IDisposable
         if (_activeTab == null || _tabState == null) return;
 
         _activeTab.ApplyTabState(_tabState);
-        await Prim.SaveSessionAsync(_activeTab);
+        await Rim.SaveSessionAsync(_activeTab);
     }
 
     private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Locations refreshed.", Severity.Info); }

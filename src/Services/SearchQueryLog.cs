@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Prim.Services;
+namespace Rim.Services;
 
 // One executed SQL statement captured from a tagged advanced-search query.
 public sealed record SearchQueryEntry(
@@ -13,7 +13,7 @@ public sealed record SearchQueryEntry(
 
 // App-wide ring buffer of recently executed advanced-search SQL.
 // Queries opt in via .TagWith("AdvancedSearch:<Kind>:<runId>:<role>");
-// PrimService captures the SQL with ToQueryString() and records the measured
+// RimService captures the SQL with ToQueryString() and records the measured
 // duration. Provider-agnostic: ToQueryString renders SQL for whatever
 // provider is configured (SQLite now, SQL Server later). Untagged queries
 // cost nothing — recording only happens when a tag is supplied.

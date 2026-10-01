@@ -1,4 +1,4 @@
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>
 /// Child-item / homing rules (user requirements 2026-09-29, extended 2026-10-01):
@@ -9,8 +9,8 @@ namespace Prim.Services;
 /// - Users can have membership in a location.
 /// - v0.12.0: a record filed under a compressed parent (ParentRecordId set)
 ///   has the parent record itself as its Home and Assignee — kind "Record".
-///   PrimService sets this directly and skips ValidateHome for such rows.
-/// Enforced in the pickers (UI) and in PrimService validation (service level).
+///   RimService sets this directly and skips ValidateHome for such rows.
+/// Enforced in the pickers (UI) and in RimService validation (service level).
 /// </summary>
 public static class HomeRules
 {
@@ -20,7 +20,7 @@ public static class HomeRules
     /// <summary>
     /// Returns an error message when the home assignment is invalid, else null.
     /// itemKind is "Record" or "Container". Kind "Record" (a compressed
-    /// parent) is handled by PrimService, not here — see the class comment.
+    /// parent) is handled by RimService, not here — see the class comment.
     /// </summary>
     public static string? ValidateHome(string itemKind, string? homeKind, string fieldName = "home")
     {

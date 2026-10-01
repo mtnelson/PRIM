@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Dialogs;
+namespace Rim.Components.Dialogs;
 
 public partial class ContainerDialog : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
@@ -30,7 +30,7 @@ public partial class ContainerDialog : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        if (Model.Id != 0) _labels = await Prim.GetObjectLabelNamesAsync("Container", Model.Id);
+        if (Model.Id != 0) _labels = await Rim.GetObjectLabelNamesAsync("Container", Model.Id);
         _model = Model.Id == 0
             ? new Container { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : new Container
@@ -49,7 +49,7 @@ public partial class ContainerDialog : ComponentBase
     {
         if (string.IsNullOrWhiteSpace(_model.FormattedNumber))
             _model.FormattedNumber = "00001";
-        _model.ContainerName = await Prim.PreviewContainerNameAsync(_model.ContainerType, _model.FieldOffice, _model.ContainerCode);
+        _model.ContainerName = await Rim.PreviewContainerNameAsync(_model.ContainerType, _model.FieldOffice, _model.ContainerCode);
         // For Box/Tub/Crate/Crate/NARA/Virtual the formatted number is embedded directly.
         if (_model.ContainerType is "Box" or "Tub" or "Crate" or "NARA Box" or "Virtual Container")
             _model.ContainerName = $"{_model.FieldOffice}-{_model.ContainerCode}-{_model.FormattedNumber}".ToUpperInvariant();
@@ -85,9 +85,9 @@ public partial class ContainerDialog : ComponentBase
         await _form.Validate();
         if (!_form.IsValid) return;
         var isNew = _model.Id == 0;
-        var (ok, err) = await Prim.SaveContainerAsync(_model, App.CurrentUserId);
+        var (ok, err) = await Rim.SaveContainerAsync(_model, App.CurrentUserId);
         if (!ok) { _error = err; return; }
-        await Prim.SetObjectLabelsAsync("Container", _model.Id, _labels, App.CurrentUserId);
+        await Rim.SetObjectLabelsAsync("Container", _model.Id, _labels, App.CurrentUserId);
         Snackbar.Add(isNew ? "Container created." : "Container updated.", Severity.Success);
         App.Log(isNew ? "Created container" : "Updated container", _model.ContainerName);
         MudDialog.Close(DialogResult.Ok(true));

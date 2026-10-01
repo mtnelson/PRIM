@@ -1,17 +1,17 @@
 using Microsoft.AspNetCore.Components;
 using MudBlazor;
-using Prim.Services;
+using Rim.Services;
 
-namespace Prim.Components.Dialogs;
+namespace Rim.Components.Dialogs;
 
 public partial class BarcodeResultDialog : ComponentBase
 {
     [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
     [Parameter] public string Title { get; set; } = "Barcode results";
-    [Parameter] public PrimService.BarcodeActionResult Result { get; set; } = new(new());
+    [Parameter] public RimService.BarcodeActionResult Result { get; set; } = new(new());
 
-    private List<PrimService.BarcodeOutcome> _failures = new();
-    private List<PrimService.BarcodeOutcome> _successes = new();
+    private List<RimService.BarcodeOutcome> _failures = new();
+    private List<RimService.BarcodeOutcome> _successes = new();
 
     protected override void OnParametersSet()
     {

@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 public partial class RecordGrid : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
 
     private ObjectGrid<RecordItem>? _grid;
 
@@ -47,9 +47,9 @@ public partial class RecordGrid : ComponentBase
     {
         if (ItemsProvider != null) return; // provider mode enriches per chunk
         var ids = Items.Select(r => r.Id).ToList();
-        _labelPairs = await Prim.GetObjectLabelPairsAsync("Record", ids);
-        _paths = await Prim.GetAncestorPathsAsync("Record", ids);
-        _withChildren = await Prim.GetHasChildrenAsync("Record", ids);
+        _labelPairs = await Rim.GetObjectLabelPairsAsync("Record", ids);
+        _paths = await Rim.GetAncestorPathsAsync("Record", ids);
+        _withChildren = await Rim.GetHasChildrenAsync("Record", ids);
     }
 
     private Func<GridPageRequest, Task<GridPageResult<RecordItem>>>? _provider
@@ -68,9 +68,9 @@ public partial class RecordGrid : ComponentBase
     {
         var ids = rows.Select(r => r.Id).ToList();
         if (ids.Count == 0) return;
-        foreach (var kv in await Prim.GetObjectLabelPairsAsync("Record", ids)) _labelPairs[kv.Key] = kv.Value;
-        foreach (var kv in await Prim.GetAncestorPathsAsync("Record", ids)) _paths[kv.Key] = kv.Value;
-        foreach (var id in await Prim.GetHasChildrenAsync("Record", ids)) _withChildren.Add(id);
+        foreach (var kv in await Rim.GetObjectLabelPairsAsync("Record", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var kv in await Rim.GetAncestorPathsAsync("Record", ids)) _paths[kv.Key] = kv.Value;
+        foreach (var id in await Rim.GetHasChildrenAsync("Record", ids)) _withChildren.Add(id);
     }
 
     private void ResetSupplemental()
@@ -97,7 +97,7 @@ public partial class RecordGrid : ComponentBase
 
     private bool HasKids(RecordItem r) => _withChildren.Contains(r.Id);
 
-    private Task<List<ChildItem>> GetKids(RecordItem r) => Prim.GetChildItemsAsync("Record", r.Id);
+    private Task<List<ChildItem>> GetKids(RecordItem r) => Rim.GetChildItemsAsync("Record", r.Id);
 
     private List<(int Id, string Name)> GetChips(RecordItem r) =>
         _labelPairs.TryGetValue(r.Id, out var lp2) ? lp2 : new();

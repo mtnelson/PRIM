@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 public partial class LabelPicker : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
 
     [Parameter] public List<string> Selected { get; set; } = new();
@@ -28,7 +28,7 @@ public partial class LabelPicker : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        _all = await Prim.GetLabelsAsync();
+        _all = await Rim.GetLabelsAsync();
         _selected = Selected.ToList();
     }
 
@@ -52,7 +52,7 @@ public partial class LabelPicker : ComponentBase
         if (name.Length == 0) return;
         try
         {
-            var label = await Prim.GetOrCreateLabelAsync(name, string.IsNullOrEmpty(Actor) ? "unknown" : Actor);
+            var label = await Rim.GetOrCreateLabelAsync(name, string.IsNullOrEmpty(Actor) ? "unknown" : Actor);
             if (!_all.Any(l => l.Id == label.Id)) _all.Add(label);
             _all = _all.OrderBy(l => l.Name).ToList();
             var cur = _selected.ToList();

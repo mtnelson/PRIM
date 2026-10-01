@@ -1,5 +1,5 @@
 @page "/admin"
-<PageTitle>PRIM — Admin</PageTitle>
+<PageTitle>RIM — Admin</PageTitle>
 
 <MudText Typo="Typo.h5" Class="mb-3">Administration</MudText>
 
@@ -10,7 +10,7 @@
             <MudSpacer />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Load">Refresh</MudButton>
         </div>
-        <MudDataGrid Items="_deletedRows" Dense="true" Hover="true" HorizontalScrollbar="true" Class="prim-grid">
+        <MudDataGrid Items="_deletedRows" Dense="true" Hover="true" HorizontalScrollbar="true" Class="rim-grid">
             <Columns>
                 @foreach (var col in _deletedCols)
                 {

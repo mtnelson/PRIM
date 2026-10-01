@@ -1,4 +1,4 @@
-@* PRIM login screen (development). Production will determine identity via
+@* RIM login screen (development). Production will determine identity via
    OAuth/SSO — always authenticate through IAuthProvider, never hard-wire. *@
 <MudThemeProvider />
 <MudSnackbarProvider />
@@ -6,7 +6,7 @@
 <div class="login-wrap">
     <MudPaper Elevation="3" Class="pa-6 login-card">
         <div class="mb-3" style="text-align:center">
-            <img src="img/prim-logo.jpg" alt="PRIM" style="max-width:230px;width:80%;border-radius:6px" />
+            <img src="img/rim-logo.jpg" alt="RIM" style="max-width:230px;width:80%;border-radius:6px" />
         </div>
         <MudText Typo="Typo.caption" Class="mb-4" Style="opacity:0.7">Physical Records Inventory Manager — sign in</MudText>
         <form @onsubmit="Login" @onsubmit:preventDefault="true">

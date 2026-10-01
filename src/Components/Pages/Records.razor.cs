@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Records : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
@@ -33,7 +33,7 @@ public partial class Records : ComponentBase, IDisposable
     private SearchTabState? _tabState;
 
     private Task<GridPageResult<RecordItem>> ProvideRecords(GridPageRequest req)
-        => Prim.GetRecordsPageAsync(req with { Filter = _filter });
+        => Rim.GetRecordsPageAsync(req with { Filter = _filter });
 
     private async Task OnFilterChanged(string v)
     {
@@ -46,15 +46,15 @@ public partial class Records : ComponentBase, IDisposable
     {
         Hotkeys.PushScope("records");
         Hotkeys.Register("records", "F9", Refresh);
-        Hotkeys.Register("records", "Ctrl+F", async () => await PrimJs.TryInvokeVoidAsync(JS, "prim.focus", "#records-filter input"));
+        Hotkeys.Register("records", "Ctrl+F", async () => await RimJs.TryInvokeVoidAsync(JS, "rim.focus", "#records-filter input"));
     }
 
     protected override async Task OnInitializedAsync()
     {
-        _tabs = await Prim.GetOpenSessionsAsync(App.CurrentUserId, "records");
+        _tabs = await Rim.GetOpenSessionsAsync(App.CurrentUserId, "records");
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = "records",
                 Title = "All records", Filter = "",
@@ -89,7 +89,7 @@ public partial class Records : ComponentBase, IDisposable
     private async Task NewTab()
     {
         await SaveActiveTabAsync();
-        var (ok, err, s) = await Prim.CreateSessionAsync(new SearchSession
+        var (ok, err, s) = await Rim.CreateSessionAsync(new SearchSession
         {
             OwnerUserId = App.CurrentUserId, PageKind = "records",
             Title = $"Search {_tabs.Count + 1}", Filter = "",
@@ -103,7 +103,7 @@ public partial class Records : ComponentBase, IDisposable
 
     private async Task CloseTab(SearchSession tab)
     {
-        await Prim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
+        await Rim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
         _tabs.RemoveAll(t => t.Id == tab.Id);
         if (_activeTab?.Id == tab.Id)
             await ActivateMostRecentAsync("records", "All records", "");
@@ -115,7 +115,7 @@ public partial class Records : ComponentBase, IDisposable
     {
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = pageKind,
                 Title = defaultTitle, Filter = defaultFilter,
@@ -140,7 +140,7 @@ public partial class Records : ComponentBase, IDisposable
         // the tab strip (CSS ellipsis) and reveal fully on hover.
         _activeTab.Title = string.IsNullOrWhiteSpace(_filter) ? "All records" : _filter;
         _activeTab.ApplyTabState(_tabState);
-        await Prim.SaveSessionAsync(_activeTab);
+        await Rim.SaveSessionAsync(_activeTab);
     }
 
     private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Records refreshed.", Severity.Info); }

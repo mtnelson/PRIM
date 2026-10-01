@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 public partial class ObjectGrid<T> : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
@@ -234,7 +234,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
     {
         List<string>? keys = TabState?.ColumnKeys is { Count: > 0 } tabKeys ? tabKeys : null;
         if (keys == null && !string.IsNullOrEmpty(GridId) && !string.IsNullOrEmpty(App.CurrentUserId))
-            keys = await Prim.GetGridLayoutAsync(App.CurrentUserId, GridId);
+            keys = await Rim.GetGridLayoutAsync(App.CurrentUserId, GridId);
         ApplyLayout(keys ?? new());
     }
 
@@ -261,7 +261,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
                 // Not in this grid's loaded chunks (or filtered out): select it
                 // when its chunk scrolls into view, and still show details.
                 if (ItemsProvider != null) _restoreSelectIds.Add(f.Id);
-                App.SetViewPane(f.Kind, f.Id, await Prim.GetObjectLabelAsync(f.Kind, f.Id));
+                App.SetViewPane(f.Kind, f.Id, await Rim.GetObjectLabelAsync(f.Kind, f.Id));
             }
             else
             {
@@ -333,7 +333,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
         var res = await d.Result;
         if (res is { Canceled: false, Data: List<string> keys } && !string.IsNullOrEmpty(GridId))
         {
-            await Prim.SaveGridLayoutAsync(App.CurrentUserId, GridId, keys);
+            await Rim.SaveGridLayoutAsync(App.CurrentUserId, GridId, keys);
             ApplyLayout(keys);
             if (TabState != null)
             {
@@ -542,11 +542,11 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
 
     private string RowClass(T item, int index)
     {
-        var cls = _selected.Contains(item) ? "prim-row-selected" : "";
+        var cls = _selected.Contains(item) ? "rim-row-selected" : "";
         // Rows without children get no caret (the disabled hierarchy button is
         // hidden by CSS); keep the selected highlight independent of that.
         if (Expandable && !(HasChildren?.Invoke(item) ?? false))
-            cls += (cls.Length > 0 ? " " : "") + "prim-row-nochildren";
+            cls += (cls.Length > 0 ? " " : "") + "rim-row-nochildren";
         return cls;
     }
 
@@ -723,7 +723,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
         foreach (var x in t)
         {
             var (kind, id, label) = GetInfo(x);
-            if (await Prim.AddToWorkspaceAsync(App.CurrentUserId, slot, kind, id, label)) n++;
+            if (await Rim.AddToWorkspaceAsync(App.CurrentUserId, slot, kind, id, label)) n++;
             labels.Add(label);
             if (++i % 500 == 0)
             {
@@ -779,7 +779,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
                         await BusyToast.YieldForPaintAsync();
                     }
                 }
-                await PrimJs.TryInvokeVoidAsync(JS, "prim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
+                await RimJs.TryInvokeVoidAsync(JS, "rim.download", $"{Kind.ToLower()}s.csv", sb.ToString(), "text/csv");
                 busy.Complete($"Exported {rows.Count:N0} row(s).");
                 App.LogItems("Exported CSV", t.Select(x => GetInfo(x).Label));
             })
@@ -817,7 +817,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
                 await BusyToast.YieldForPaintAsync();
             }
         }
-        var ok = await PrimJs.TryInvokeAsync<bool>(JS, "prim.copyText", sb.ToString());
+        var ok = await RimJs.TryInvokeAsync<bool>(JS, "rim.copyText", sb.ToString());
         busy.Complete(ok ? $"Copied {t.Count:N0} row(s) with headers." : "Clipboard unavailable.",
             ok ? Severity.Success : Severity.Warning);
     }

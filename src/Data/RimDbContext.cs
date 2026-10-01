@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 
-namespace Prim.Data;
+namespace Rim.Data;
 
-public class PrimDbContext : DbContext
+public class RimDbContext : DbContext
 {
-    public PrimDbContext(DbContextOptions<PrimDbContext> options) : base(options) { }
+    public RimDbContext(DbContextOptions<RimDbContext> options) : base(options) { }
 
     public DbSet<RecordItem> Records => Set<RecordItem>();
     public DbSet<Container> Containers => Set<Container>();

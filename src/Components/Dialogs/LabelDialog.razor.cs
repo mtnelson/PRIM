@@ -5,13 +5,13 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Dialogs;
+namespace Rim.Components.Dialogs;
 
 public partial class LabelDialog : ComponentBase
 {
@@ -31,6 +31,6 @@ public partial class LabelDialog : ComponentBase
     private async Task Print()
     {
         App.LogItems("Printed label(s)", Items.Select(i => i.Title));
-        await PrimJs.TryInvokeVoidAsync(JS, "prim.print");
+        await RimJs.TryInvokeVoidAsync(JS, "rim.print");
     }
 }

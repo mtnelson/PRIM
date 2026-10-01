@@ -1,5 +1,5 @@
 @page "/containers"
-<PageTitle>PRIM — Containers</PageTitle>
+<PageTitle>RIM — Containers</PageTitle>
 
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Containers</MudText>
@@ -16,7 +16,7 @@
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <ContainerGrid @ref="_grid" ItemsProvider="ProvideContainers" GridId="containers" Scope="containers"
-            CountProvider="() => Prim.CountContainersAsync(_filter)" AllIdsProvider="() => Prim.GetAllContainerIdsAsync(_filter)"
+            CountProvider="() => Rim.CountContainersAsync(_filter)" AllIdsProvider="() => Rim.GetAllContainerIdsAsync(_filter)"
                EditItem="EditContainer" DeleteItems="DeleteContainers"
                OnChanged="OnGridChanged" TabState="_tabState" TabStateChanged="OnTabStateChanged">
 </ContainerGrid>

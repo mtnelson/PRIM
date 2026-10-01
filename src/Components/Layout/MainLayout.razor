@@ -13,7 +13,7 @@ else
 <MudLayout>
     <MudAppBar Elevation="1" Dense="true">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleLeft" />
-        <img src="img/prim-logo.jpg" alt="PRIM" class="ml-2" style="height:30px;border-radius:4px;background:#fff;padding:2px" />
+        <img src="img/rim-logo.jpg" alt="RIM" class="ml-2" style="height:30px;border-radius:4px;background:#fff;padding:2px" />
         <MudText Typo="Typo.caption" Class="ml-2" Style="opacity:0.7">Physical Records Inventory Manager</MudText>
         <MudSpacer />
         <MudMenu @ref="_newMenu" Dense="true">
@@ -34,7 +34,7 @@ else
             <MudIconButton Icon="@(_darkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
                            Color="Color.Inherit" OnClick="ToggleTheme" />
         </MudTooltip>
-        <MudTooltip Text="Help — shortcuts and how PRIM works (F1)">
+        <MudTooltip Text="Help — shortcuts and how RIM works (F1)">
             <MudIconButton Icon="@Icons.Material.Filled.HelpOutline" Color="Color.Inherit" OnClick="ShowHelp" />
         </MudTooltip>
         <MudText Typo="Typo.body2" Class="mr-2">@App.CurrentDisplayName (@App.CurrentRole)</MudText>

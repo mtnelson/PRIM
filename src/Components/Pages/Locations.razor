@@ -1,5 +1,5 @@
 @page "/locations"
-<PageTitle>PRIM — Locations</PageTitle>
+<PageTitle>RIM — Locations</PageTitle>
 
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Locations</MudText>
@@ -11,7 +11,7 @@
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <LocationGrid @ref="_grid" ItemsProvider="ProvideLocations" GridId="locations" Scope="locations"
-              CountProvider="() => Prim.CountLocationsAsync(null)" AllIdsProvider="() => Prim.GetAllLocationIdsAsync(null)"
+              CountProvider="() => Rim.CountLocationsAsync(null)" AllIdsProvider="() => Rim.GetAllLocationIdsAsync(null)"
               EditItem="EditLocation"
               CanMove="false" CanDelete="false"
               OnChanged="OnGridChanged" TabState="_tabState" TabStateChanged="OnTabStateChanged">

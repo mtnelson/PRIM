@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
-using Prim.Data;
+using Rim.Data;
 
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>Authentication result.</summary>
 public sealed record AuthResult(bool Ok, string UserId, string DisplayName, string Role, string? Error)
@@ -58,8 +58,8 @@ public static class PasswordHasher
 /// </summary>
 public class DevPasswordAuthProvider : IAuthProvider
 {
-    private readonly IDbContextFactory<PrimDbContext> _factory;
-    public DevPasswordAuthProvider(IDbContextFactory<PrimDbContext> factory) => _factory = factory;
+    private readonly IDbContextFactory<RimDbContext> _factory;
+    public DevPasswordAuthProvider(IDbContextFactory<RimDbContext> factory) => _factory = factory;
     public string Name => "Development password provider";
 
     public async Task<AuthResult> AuthenticateAsync(string userId, string password)

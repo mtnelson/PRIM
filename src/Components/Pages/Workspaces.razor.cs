@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Workspaces : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
@@ -57,12 +57,12 @@ public partial class Workspaces : ComponentBase, IDisposable
             var next = new Dictionary<string, SlotGroups>();
             foreach (var s in Slots)
             {
-                var items = await Prim.GetSlotAsync(App.CurrentUserId, s);
+                var items = await Rim.GetSlotAsync(App.CurrentUserId, s);
                 next[s] = new SlotGroups(
-                    await Prim.GetRecordsByIdsAsync(items.Where(w => w.ObjectKind == "Record").Select(w => w.ObjectId)),
-                    await Prim.GetContainersByIdsAsync(items.Where(w => w.ObjectKind == "Container").Select(w => w.ObjectId)),
-                    await Prim.GetLocationsByIdsAsync(items.Where(w => w.ObjectKind == "Location").Select(w => w.ObjectId)),
-                    await Prim.GetUsersByIdsAsync(items.Where(w => w.ObjectKind == "User").Select(w => w.ObjectId)));
+                    await Rim.GetRecordsByIdsAsync(items.Where(w => w.ObjectKind == "Record").Select(w => w.ObjectId)),
+                    await Rim.GetContainersByIdsAsync(items.Where(w => w.ObjectKind == "Container").Select(w => w.ObjectId)),
+                    await Rim.GetLocationsByIdsAsync(items.Where(w => w.ObjectKind == "Location").Select(w => w.ObjectId)),
+                    await Rim.GetUsersByIdsAsync(items.Where(w => w.ObjectKind == "User").Select(w => w.ObjectId)));
             }
             _groups = next;
         }
@@ -79,8 +79,8 @@ public partial class Workspaces : ComponentBase, IDisposable
         int i = 0;
         foreach (var id in ids)
         {
-            labels.Add(await Prim.GetObjectLabelAsync(kind, id));
-            await Prim.RemoveFromSlotAsync(App.CurrentUserId, slot, kind, id);
+            labels.Add(await Rim.GetObjectLabelAsync(kind, id));
+            await Rim.RemoveFromSlotAsync(App.CurrentUserId, slot, kind, id);
             if (++i % 500 == 0)
             {
                 busy.Update($"Removing {i:N0} of {ids.Count:N0} item(s) from {slot}…");

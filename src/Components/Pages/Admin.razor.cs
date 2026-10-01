@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Admin : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
@@ -45,7 +45,7 @@ public partial class Admin : ComponentBase, IDisposable
 
     private async Task Load()
     {
-        _deleted = await Prim.GetRecordsAsync(includeDeleted: true);
+        _deleted = await Rim.GetRecordsAsync(includeDeleted: true);
         _deleted = _deleted.Where(r => r.Deleted).ToList();
         _deletedCols = GridColumns.RecordColumns();
         _deletedCols.Add(("DeleteReason", "Reason"));
@@ -59,15 +59,15 @@ public partial class Admin : ComponentBase, IDisposable
             cells["LastUpdatedBy"] = r.LastUpdatedBy ?? "";
             return new DeletedRow(r, cells);
         }).ToList();
-        _announcement = await Prim.GetAnnouncementAsync() ?? "";
-        _searches = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+        _announcement = await Rim.GetAnnouncementAsync() ?? "";
+        _searches = await Rim.GetSavedSearchesAsync(App.CurrentUserId);
         await LoadRetention();
         StateHasChanged();
     }
 
     private async Task Restore(RecordItem r)
     {
-        await Prim.RestoreRecordsAsync(new[] { r.Id }, App.CurrentUserId);
+        await Rim.RestoreRecordsAsync(new[] { r.Id }, App.CurrentUserId);
         Snackbar.Add($"Restored {r.RecordNumber}.", Severity.Success);
         App.Log("Restored record", r.RecordNumber);
         await Load();
@@ -75,7 +75,7 @@ public partial class Admin : ComponentBase, IDisposable
 
     private async Task SaveAnnouncement()
     {
-        await Prim.SetAnnouncementAsync(_announcement, !string.IsNullOrWhiteSpace(_announcement), App.CurrentUserId);
+        await Rim.SetAnnouncementAsync(_announcement, !string.IsNullOrWhiteSpace(_announcement), App.CurrentUserId);
         App.ActiveAnnouncement = string.IsNullOrWhiteSpace(_announcement) ? null : _announcement;
         Snackbar.Add("Announcement updated.", Severity.Success);
         App.Log("Updated announcement", "");
@@ -89,7 +89,7 @@ public partial class Admin : ComponentBase, IDisposable
 
     private async Task DeleteSearch(SavedSearch s)
     {
-        await Prim.DeleteSavedSearchAsync(s.Id);
+        await Rim.DeleteSavedSearchAsync(s.Id);
         await Load();
     }
 
@@ -104,7 +104,7 @@ public partial class Admin : ComponentBase, IDisposable
         _seeding = true;
         try
         {
-            var numbers = await Prim.SeedTestRecordsAsync(1500, App.CurrentUserId);
+            var numbers = await Rim.SeedTestRecordsAsync(1500, App.CurrentUserId);
             Snackbar.Add($"Generated {numbers.Count} test records.", Severity.Success);
             App.LogItems("Generated test records", numbers);
         }
@@ -119,15 +119,15 @@ public partial class Admin : ComponentBase, IDisposable
     }
 
     // ---------------- audit retention ----------------
-    private PrimService.AuditStats _auditStats = new(0, 0, 0, 0, 0, "");
-    private List<PrimService.AuditExportInfo> _exportFiles = new();
+    private RimService.AuditStats _auditStats = new(0, 0, 0, 0, 0, "");
+    private List<RimService.AuditExportInfo> _exportFiles = new();
     private string? _retentionOp; // "archive" | "export" | null
     private bool RetentionBusy => _retentionOp != null;
 
     private async Task LoadRetention()
     {
-        _auditStats = await Prim.GetAuditStatsAsync();
-        _exportFiles = await Prim.GetAuditExportFilesAsync();
+        _auditStats = await Rim.GetAuditStatsAsync();
+        _exportFiles = await Rim.GetAuditExportFilesAsync();
     }
 
     private async Task ArchiveNow()
@@ -135,7 +135,7 @@ public partial class Admin : ComponentBase, IDisposable
         _retentionOp = "archive";
         try
         {
-            var moved = await Prim.ArchiveAuditIfNeededAsync();
+            var moved = await Rim.ArchiveAuditIfNeededAsync();
             Snackbar.Add(moved == 0
                 ? "Hot audit table is under its row cap — nothing archived."
                 : $"Archived {moved:N0} audit rows.", Severity.Success);
@@ -150,7 +150,7 @@ public partial class Admin : ComponentBase, IDisposable
         _retentionOp = "export";
         try
         {
-            var path = await Prim.ExportAuditArchiveIfNeededAsync();
+            var path = await Rim.ExportAuditArchiveIfNeededAsync();
             Snackbar.Add(path == null
                 ? "Archive table is under its row cap — nothing exported."
                 : $"Exported archive to {Path.GetFileName(path)}.", Severity.Success);
@@ -160,7 +160,7 @@ public partial class Admin : ComponentBase, IDisposable
         finally { _retentionOp = null; }
     }
 
-    private async Task ViewExport(PrimService.AuditExportInfo f)
+    private async Task ViewExport(RimService.AuditExportInfo f)
     {
         var parms = new DialogParameters { ["FileName"] = f.FileName };
         await DialogService.ShowAsync<ArchiveFileDialog>("Audit archive file", parms);

@@ -1,5 +1,5 @@
 @page "/records"
-<PageTitle>PRIM — Records</PageTitle>
+<PageTitle>RIM — Records</PageTitle>
 
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Records</MudText>
@@ -16,7 +16,7 @@
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <RecordGrid @ref="_grid" ItemsProvider="ProvideRecords" GridId="records" Scope="records"
-            CountProvider="() => Prim.CountRecordsAsync(_filter)" AllIdsProvider="() => Prim.GetAllRecordIdsAsync(_filter)"
+            CountProvider="() => Rim.CountRecordsAsync(_filter)" AllIdsProvider="() => Rim.GetAllRecordIdsAsync(_filter)"
             EditItem="EditRecord" DeleteItems="DeleteRecords"
             OnChanged="OnGridChanged" TabState="_tabState" TabStateChanged="OnTabStateChanged">
 </RecordGrid>

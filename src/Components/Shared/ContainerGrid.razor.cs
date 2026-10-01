@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 public partial class ContainerGrid : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
 
     private ObjectGrid<Container>? _grid;
 
@@ -44,9 +44,9 @@ public partial class ContainerGrid : ComponentBase
     {
         if (ItemsProvider != null) return; // provider mode enriches per chunk
         var ids = Items.Select(c => c.Id).ToList();
-        _labelPairs = await Prim.GetObjectLabelPairsAsync("Container", ids);
-        _paths = await Prim.GetAncestorPathsAsync("Container", ids);
-        _withChildren = await Prim.GetHasChildrenAsync("Container", ids);
+        _labelPairs = await Rim.GetObjectLabelPairsAsync("Container", ids);
+        _paths = await Rim.GetAncestorPathsAsync("Container", ids);
+        _withChildren = await Rim.GetHasChildrenAsync("Container", ids);
     }
 
     private Dictionary<string, string> RowWithPath(Container c)
@@ -68,7 +68,7 @@ public partial class ContainerGrid : ComponentBase
 
     private bool HasKids(Container c) => _withChildren.Contains(c.Id);
 
-    private Task<List<ChildItem>> GetKids(Container c) => Prim.GetChildItemsAsync("Container", c.Id);
+    private Task<List<ChildItem>> GetKids(Container c) => Rim.GetChildItemsAsync("Container", c.Id);
 
     private List<(int Id, string Name)> GetChips(Container c) =>
         _labelPairs.TryGetValue(c.Id, out var lp2) ? lp2 : new();
@@ -87,9 +87,9 @@ public partial class ContainerGrid : ComponentBase
     {
         var ids = rows.Select(r => r.Id).ToList();
         if (ids.Count == 0) return;
-        foreach (var kv in await Prim.GetObjectLabelPairsAsync("Container", ids)) _labelPairs[kv.Key] = kv.Value;
-        foreach (var id in await Prim.GetHasChildrenAsync("Container", ids)) _withChildren.Add(id);
-        foreach (var kv in await Prim.GetAncestorPathsAsync("Container", ids)) _paths[kv.Key] = kv.Value;
+        foreach (var kv in await Rim.GetObjectLabelPairsAsync("Container", ids)) _labelPairs[kv.Key] = kv.Value;
+        foreach (var id in await Rim.GetHasChildrenAsync("Container", ids)) _withChildren.Add(id);
+        foreach (var kv in await Rim.GetAncestorPathsAsync("Container", ids)) _paths[kv.Key] = kv.Value;
     }
 
     private void ResetSupplemental()

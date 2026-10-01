@@ -1,4 +1,4 @@
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>A single 500-row chunk request from a virtualized data grid.</summary>
 public sealed record GridPageRequest

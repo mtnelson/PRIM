@@ -1,4 +1,4 @@
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>Live per-tab grid state shared between a page and its ObjectGrid.
 /// The page owns one instance per open search tab; the grid reads it when a

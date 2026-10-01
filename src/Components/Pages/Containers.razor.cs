@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Containers : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
@@ -31,7 +31,7 @@ public partial class Containers : ComponentBase, IDisposable
 
 
     private Task<GridPageResult<Container>> ProvideContainers(GridPageRequest req)
-        => Prim.GetContainersPageAsync(req with { Filter = _filter });
+        => Rim.GetContainersPageAsync(req with { Filter = _filter });
 
     private async Task OnFilterChanged(string v)
     {
@@ -44,15 +44,15 @@ public partial class Containers : ComponentBase, IDisposable
     {
         Hotkeys.PushScope("containers");
         Hotkeys.Register("containers", "F9", Refresh);
-        Hotkeys.Register("containers", "Ctrl+F", async () => await PrimJs.TryInvokeVoidAsync(JS, "prim.focus", "#containers-filter input"));
+        Hotkeys.Register("containers", "Ctrl+F", async () => await RimJs.TryInvokeVoidAsync(JS, "rim.focus", "#containers-filter input"));
     }
 
     protected override async Task OnInitializedAsync()
     {
-        _tabs = await Prim.GetOpenSessionsAsync(App.CurrentUserId, "containers");
+        _tabs = await Rim.GetOpenSessionsAsync(App.CurrentUserId, "containers");
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = "containers",
                 Title = "All containers", Filter = "",
@@ -88,7 +88,7 @@ public partial class Containers : ComponentBase, IDisposable
     private async Task NewTab()
     {
         await SaveActiveTabAsync();
-        var (ok, err, s) = await Prim.CreateSessionAsync(new SearchSession
+        var (ok, err, s) = await Rim.CreateSessionAsync(new SearchSession
         {
             OwnerUserId = App.CurrentUserId, PageKind = "containers",
             Title = $"Search {_tabs.Count + 1}", Filter = "",
@@ -102,7 +102,7 @@ public partial class Containers : ComponentBase, IDisposable
 
     private async Task CloseTab(SearchSession tab)
     {
-        await Prim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
+        await Rim.DeleteSessionAsync(tab.Id, App.CurrentUserId);
         _tabs.RemoveAll(t => t.Id == tab.Id);
         if (_activeTab?.Id == tab.Id)
             await ActivateMostRecentAsync();
@@ -112,7 +112,7 @@ public partial class Containers : ComponentBase, IDisposable
     {
         if (_tabs.Count == 0)
         {
-            var (ok, _, s) = await Prim.CreateSessionAsync(new SearchSession
+            var (ok, _, s) = await Rim.CreateSessionAsync(new SearchSession
             {
                 OwnerUserId = App.CurrentUserId, PageKind = "containers",
                 Title = "All containers", Filter = "",
@@ -137,7 +137,7 @@ public partial class Containers : ComponentBase, IDisposable
         // the tab strip (CSS ellipsis) and reveal fully on hover.
         _activeTab.Title = string.IsNullOrWhiteSpace(_filter) ? "All containers" : _filter;
         _activeTab.ApplyTabState(_tabState);
-        await Prim.SaveSessionAsync(_activeTab);
+        await Rim.SaveSessionAsync(_activeTab);
     }
 
     private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Containers refreshed.", Severity.Info); }
@@ -172,10 +172,10 @@ public partial class Containers : ComponentBase, IDisposable
         await using var busy = BusyToast.Show(Snackbar, $"Deleting {ids.Count:N0} container(s)…");
         try
         {
-            var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
+            var n = await Rim.DeleteContainersAsync(ids, App.CurrentUserId);
             busy.Complete($"Deleted {n:N0} container(s).");
             var names = new List<string>();
-            foreach (var id in ids) names.Add(await Prim.GetObjectLabelAsync("Container", id));
+            foreach (var id in ids) names.Add(await Rim.GetObjectLabelAsync("Container", id));
             App.LogItems("Deleted containers", names);
             return true;
         }

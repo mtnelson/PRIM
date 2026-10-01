@@ -1,6 +1,6 @@
 using MudBlazor;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 /// <summary>
 /// Persistent "working" toast for long-running operations. The toast only

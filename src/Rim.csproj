@@ -4,8 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>Prim</RootNamespace>
-    <Version>0.12.0</Version>
+    <RootNamespace>Rim</RootNamespace>
+    <Version>0.13.0</Version>
     <!-- Self-contained win-x64 publish: dotnet publish -c Release -r win-x64 (self-contained) -->
   </PropertyGroup>
 

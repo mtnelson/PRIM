@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
-using Prim.Data;
-using Prim.Services;
+using Rim.Data;
+using Rim.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,17 +15,20 @@ builder.Services.AddMudServices();
 // two lines below (TIS-2456/2457/2458 migration direction).
 var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
 Directory.CreateDirectory(dataDir);
+// PRESERVED NAMES (do not rename): the SQLite file stays "prim.db", the
+// connection-string key stays "Prim", and the config section stays "Prim:" —
+// existing user databases and appsettings.json files must keep working.
 var sqlitePath = Path.Combine(dataDir, "prim.db");
 // Ring buffer of recently executed advanced-search SQL, shown on the
-// Advanced Search page's SQL tab. PrimService records into it via
+// Advanced Search page's SQL tab. RimService records into it via
 // ToQueryString (provider-agnostic); untagged queries cost nothing.
 builder.Services.AddSingleton<SearchQueryLog>();
-builder.Services.AddDbContextFactory<PrimDbContext>(opt =>
+builder.Services.AddDbContextFactory<RimDbContext>(opt =>
     opt.UseSqlite($"Data Source={sqlitePath}"));
-// builder.Services.AddDbContextFactory<PrimDbContext>(opt =>
+// builder.Services.AddDbContextFactory<RimDbContext>(opt =>
 //     opt.UseSqlServer(builder.Configuration.GetConnectionString("Prim")));
 
-builder.Services.AddScoped<PrimService>();
+builder.Services.AddScoped<RimService>();
 builder.Services.AddScoped<AppState>();
 builder.Services.AddScoped<HotkeyManager>();
 // Authentication is always behind IAuthProvider: DevPasswordAuthProvider for the
@@ -48,7 +51,7 @@ var app = builder.Build();
 // (new dev fields are added in this revision) before seeding.
 using (var scope = app.Services.CreateScope())
 {
-    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<PrimDbContext>>();
+    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<RimDbContext>>();
     using var db = factory.CreateDbContext();
     db.Database.EnsureCreated();
     SeedData.UpgradeSchema(db);
@@ -58,6 +61,6 @@ using (var scope = app.Services.CreateScope())
 
 app.UseStaticFiles();
 app.UseAntiforgery();
-app.MapRazorComponents<Prim.Components.App>().AddInteractiveServerRenderMode();
+app.MapRazorComponents<Rim.Components.App>().AddInteractiveServerRenderMode();
 
 app.Run();

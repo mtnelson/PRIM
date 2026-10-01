@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Dialogs;
+namespace Rim.Components.Dialogs;
 
 public partial class MoveDialog : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
@@ -59,12 +59,12 @@ public partial class MoveDialog : ComponentBase
         _busy = true;
         try
         {
-            var n = await Prim.MoveItemsAsync(Kind, Ids,
+            var n = await Rim.MoveItemsAsync(Kind, Ids,
                 _changeHome ? _newHome : null, _newHomeKind, _newHomeRefId,
                 _changeAssignee ? _newAssignee : null, _newAssigneeKind, _newAssigneeRefId, _assigneeFollowsHome, App.CurrentUserId);
             Snackbar.Add($"Moved {n} item(s).", Severity.Success);
             var labels = new List<string>();
-            foreach (var id in Ids) labels.Add(await Prim.GetObjectLabelAsync(Kind, id));
+            foreach (var id in Ids) labels.Add(await Rim.GetObjectLabelAsync(Kind, id));
             App.LogItems("Moved items", labels);
             MudDialog.Close(DialogResult.Ok(true));
         }

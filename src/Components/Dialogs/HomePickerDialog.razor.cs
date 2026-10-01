@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Dialogs;
+namespace Rim.Components.Dialogs;
 
 public partial class HomePickerDialog : ComponentBase
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
 
     [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
     [Parameter] public string Title { get; set; } = "Select Home";
@@ -31,9 +31,9 @@ public partial class HomePickerDialog : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        _allLocs = await Prim.GetLocationsAsync();
-        _allCons = await Prim.GetContainersAsync();
-        _allUsers = await Prim.GetUsersAsync();
+        _allLocs = await Rim.GetLocationsAsync();
+        _allCons = await Rim.GetContainersAsync();
+        _allUsers = await Rim.GetUsersAsync();
         _locNames = _allLocs.ToDictionary(l => l.Id, l => l.LocationName);
         BuildTrees();
     }

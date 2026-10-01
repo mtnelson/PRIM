@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Pages;
+namespace Rim.Components.Pages;
 
 public partial class Dashboard : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
@@ -49,7 +49,7 @@ public partial class Dashboard : ComponentBase, IDisposable
     protected override async Task OnInitializedAsync()
     {
         SetFields();
-        _saved = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+        _saved = await Rim.GetSavedSearchesAsync(App.CurrentUserId);
     }
 
     private void SetFields()
@@ -102,17 +102,17 @@ public partial class Dashboard : ComponentBase, IDisposable
                                      .ToDictionary(k => k, k => _criteria[k]);
             if (_objectType == "Record")
             {
-                _records = await Prim.SearchRecordsAsync(crit);
+                _records = await Rim.SearchRecordsAsync(crit);
                 _resultsTitle = $"{_records.Count} record(s) found";
             }
             else if (_objectType == "Container")
             {
-                _containers = await Prim.SearchContainersAsync(crit);
+                _containers = await Rim.SearchContainersAsync(crit);
                 _resultsTitle = $"{_containers.Count} container(s) found";
             }
             else
             {
-                _locations = await Prim.SearchLocationsAsync(crit.GetValueOrDefault("LocationName"));
+                _locations = await Rim.SearchLocationsAsync(crit.GetValueOrDefault("LocationName"));
                 _resultsTitle = $"{_locations.Count} location(s) found";
             }
             _recordGrid?.ClearSelection(); _containerGrid?.ClearSelection(); _locationGrid?.ClearSelection();
@@ -131,13 +131,13 @@ public partial class Dashboard : ComponentBase, IDisposable
     {
         var crit = _selectedFields.Where(k => !string.IsNullOrWhiteSpace(_criteria[k]))
                                  .ToDictionary(k => k, k => _criteria[k]);
-        await Prim.SaveSearchAsync(new SavedSearch
+        await Rim.SaveSearchAsync(new SavedSearch
         {
             OwnerUserId = App.CurrentUserId, Name = _saveName, ObjectKind = _objectType,
             FieldsCsv = string.Join(",", crit.Keys),
             Criteria = System.Text.Json.JsonSerializer.Serialize(crit)
         });
-        _saved = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+        _saved = await Rim.GetSavedSearchesAsync(App.CurrentUserId);
         Snackbar.Add($"Saved search '{_saveName}'.", Severity.Success);
         _saveName = "";
     }
@@ -153,8 +153,8 @@ public partial class Dashboard : ComponentBase, IDisposable
 
     private async Task DeleteSaved(SavedSearch s)
     {
-        await Prim.DeleteSavedSearchAsync(s.Id);
-        _saved = await Prim.GetSavedSearchesAsync(App.CurrentUserId);
+        await Rim.DeleteSavedSearchAsync(s.Id);
+        _saved = await Rim.GetSavedSearchesAsync(App.CurrentUserId);
     }
 
     private async Task<bool> EditRecord(RecordItem r)
@@ -199,10 +199,10 @@ public partial class Dashboard : ComponentBase, IDisposable
             $"Delete {ids.Count} container(s)? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return false;
         await using var busy = BusyToast.Show(Snackbar, $"Deleting {ids.Count:N0} container(s)…");
-        var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
+        var n = await Rim.DeleteContainersAsync(ids, App.CurrentUserId);
         busy.Complete($"Deleted {n:N0} container(s).");
         var names = new List<string>();
-        foreach (var id in ids) names.Add(await Prim.GetObjectLabelAsync("Container", id));
+        foreach (var id in ids) names.Add(await Rim.GetObjectLabelAsync("Container", id));
         App.LogItems("Deleted containers", names);
         return true;
     }

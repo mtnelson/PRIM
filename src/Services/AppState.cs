@@ -1,9 +1,9 @@
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>Per-circuit UI state: current user, recent items, activity log (TIS-349).</summary>
 public class AppState
 {
-    /// <summary>Application version, from the assembly (set via &lt;Version&gt; in Prim.csproj).</summary>
+    /// <summary>Application version, from the assembly (set via &lt;Version&gt; in Rim.csproj).</summary>
     public static string AppVersion =>
         typeof(AppState).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 

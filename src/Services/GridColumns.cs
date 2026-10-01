@@ -1,7 +1,7 @@
 using Microsoft.JSInterop;
-using Prim.Data;
+using Rim.Data;
 
-namespace Prim.Services;
+namespace Rim.Services;
 
 public static class GridColumns
 {
@@ -104,5 +104,5 @@ public static class Csv
     public static string Escape(string s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
 
     public static async Task DownloadAsync(Microsoft.JSInterop.IJSRuntime js, string fileName, string content)
-        => await PrimJs.TryInvokeVoidAsync(js, "prim.download", fileName, content, "text/csv");
+        => await RimJs.TryInvokeVoidAsync(js, "rim.download", fileName, content, "text/csv");
 }

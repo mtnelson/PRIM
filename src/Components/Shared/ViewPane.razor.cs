@@ -5,17 +5,17 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
 using Microsoft.JSInterop;
 using MudBlazor;
-using Prim.Components.Dialogs;
-using Prim.Components.Layout;
-using Prim.Components.Shared;
-using Prim.Data;
-using Prim.Services;
+using Rim.Components.Dialogs;
+using Rim.Components.Layout;
+using Rim.Components.Shared;
+using Rim.Data;
+using Rim.Services;
 
-namespace Prim.Components.Shared;
+namespace Rim.Components.Shared;
 
 public partial class ViewPane : ComponentBase, IDisposable
 {
-    [Inject] public PrimService Prim { get; set; } = default!;
+    [Inject] public RimService Rim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public NavigationManager Nav { get; set; } = default!;
 
@@ -45,7 +45,7 @@ public partial class ViewPane : ComponentBase, IDisposable
         _props.Clear(); _notes = null; _audit = new(); _links.Clear();
         if (Kind == "Record")
         {
-            var r = await Prim.GetRecordAsync(Id);
+            var r = await Rim.GetRecordAsync(Id);
             if (r == null) return;
             _props = new()
             {
@@ -66,7 +66,7 @@ public partial class ViewPane : ComponentBase, IDisposable
         }
         else if (Kind == "Container")
         {
-            var c = await Prim.GetContainerAsync(Id);
+            var c = await Rim.GetContainerAsync(Id);
             if (c == null) return;
             _props = new()
             {
@@ -81,10 +81,10 @@ public partial class ViewPane : ComponentBase, IDisposable
         }
         else if (Kind == "Location")
         {
-            var l = await Prim.GetLocationAsync(Id);
+            var l = await Rim.GetLocationAsync(Id);
             if (l == null) return;
             string? parent = null;
-            if (l.ParentId is int pid) parent = (await Prim.GetLocationAsync(pid))?.LocationName;
+            if (l.ParentId is int pid) parent = (await Rim.GetLocationAsync(pid))?.LocationName;
             _props = new()
             {
                 ("Location Name", l.LocationName), ("Barcode", l.Barcode), ("Location Type", l.LocationType),
@@ -96,7 +96,7 @@ public partial class ViewPane : ComponentBase, IDisposable
         }
         else if (Kind == "User")
         {
-            var u = await Prim.GetUserAsync(Id);
+            var u = await Rim.GetUserAsync(Id);
             if (u == null) return;
             _props = new()
             {
@@ -104,7 +104,7 @@ public partial class ViewPane : ComponentBase, IDisposable
                 ("Email", u.Email ?? "—"), ("Active", u.Active ? "Yes" : "No"),
             };
         }
-        _audit = await Prim.GetAuditAsync(Kind, Id);
+        _audit = await Rim.GetAuditAsync(Kind, Id);
     }
 
     public void Dispose() { }

@@ -1,6 +1,6 @@
 using Microsoft.JSInterop;
 
-namespace Prim.Services;
+namespace Rim.Services;
 
 /// <summary>A single hotkey definition. HotkeyCatalog is the single source of
 /// truth: the Help dialog is generated from it, so docs cannot drift from
@@ -121,7 +121,7 @@ public class HotkeyManager
     }
 
     /// <summary>
-    /// Dispatches a key combo captured by prim.js. Returns true when a handler
+    /// Dispatches a key combo captured by rim.js. Returns true when a handler
     /// ran (JS then calls preventDefault). Checks the top scope, then "app".
     /// When several components registered the same combo, the most recent wins.
     /// </summary>

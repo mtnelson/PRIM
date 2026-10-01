@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace Prim.Data;
+namespace Rim.Data;
 
 // ---------------------------------------------------------------------------
 // RECORD — TIS-372 / TIS-1588 / TIS-1924 field order and naming rules.
@@ -61,7 +61,7 @@ public class RecordItem
 
 // ---------------------------------------------------------------------------
 // CONTAINER — TIS-576 / TIS-1278 naming / TIS-1747 Home+Assignee.
-// Containers have NO Record Number in PRIM (TIS-1743 AC3).
+// Containers have NO Record Number in RIM (TIS-1743 AC3).
 // ---------------------------------------------------------------------------
 public class Container
 {
@@ -217,7 +217,7 @@ public class SearchSession
     public DateTime LastUsedUtc { get; set; }
 
     /// <summary>Live per-tab state for the grid, built from this descriptor.</summary>
-    public Prim.Services.SearchTabState ToTabState() => new()
+    public Rim.Services.SearchTabState ToTabState() => new()
     {
         SortColumn = SortColumn,
         SortDescending = SortDescending,
@@ -228,7 +228,7 @@ public class SearchSession
     };
 
     /// <summary>Copies live grid state back into the descriptor for persistence.</summary>
-    public void ApplyTabState(Prim.Services.SearchTabState st)
+    public void ApplyTabState(Rim.Services.SearchTabState st)
     {
         SortColumn = st.SortColumn;
         SortDescending = st.SortDescending;
@@ -294,7 +294,7 @@ public class ObjectLabel
 // SEARCH ACTIVITY — persistent per-user log of every executed Advanced
 // Search: when it ran, what was searched, the criteria summary, how many
 // rows matched, and how long the count query took. Capped per user (see
-// PrimService.MaxSearchActivityPerUser); only capped overflow is pruned.
+// RimService.MaxSearchActivityPerUser); only capped overflow is pruned.
 // ---------------------------------------------------------------------------
 public class SearchActivity
 {

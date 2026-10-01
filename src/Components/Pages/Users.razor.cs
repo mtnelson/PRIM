@@ -42,7 +42,6 @@ public partial class Users : ComponentBase, IDisposable
     protected override void OnInitialized()
     {
         Hotkeys.PushScope("users");
-        Hotkeys.Register("users", "Ctrl+N", NewUser);
         Hotkeys.Register("users", "F9", Refresh);
     }
 

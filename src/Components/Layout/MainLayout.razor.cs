@@ -20,12 +20,15 @@ public partial class MainLayout : IDisposable
     [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public NavigationManager Nav { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
+    [Inject] public ISnackbar Snackbar { get; set; } = default!;
     [Inject] public IJSRuntime JS { get; set; } = default!;
 
     private bool _leftOpen = true;
     private bool _viewOpen = true;
     private bool _logOpen = false;
     private DotNetObjectReference<MainLayout>? _self;
+    private MudMenu? _newMenu;
+    private IDisposable? _globalNewRegistration;
 
     protected override async Task OnInitializedAsync()
     {
@@ -44,6 +47,10 @@ public partial class MainLayout : IDisposable
         Hotkeys.Register("shell", "Alt+7", () => Nav.NavigateTo("workspaces"));
         Hotkeys.Register("shell", "Alt+8", () => Nav.NavigateTo("reports"));
         Hotkeys.Register("shell", "F1", ShowHelp);
+        // Global New menu: one Ctrl+N handler for the whole app. Registered
+        // under the "app" fallback scope so it fires from any page scope, and
+        // inert on the login screen and inside dialogs (see OnGlobalNew).
+        _globalNewRegistration = Hotkeys.Register("app", "Ctrl+N", OnGlobalNew);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -73,12 +80,73 @@ public partial class MainLayout : IDisposable
 
     private void SignOut() => App.SignOut();
 
+    private async Task OnGlobalNew()
+    {
+        // Preserve the old per-page behavior: Ctrl+N did nothing on the login
+        // screen and while a dialog was open.
+        if (!App.IsAuthenticated || Hotkeys.CurrentScope == "dialog") return;
+        if (_newMenu != null) await _newMenu.OpenMenuAsync(EventArgs.Empty, false);
+    }
+
+    // Global creation menu. Same dialogs and parameters the object pages use;
+    // nothing to refresh here, so the result is awaited and dropped.
+    private async Task NewRecord()
+    {
+        var d = await DialogService.ShowAsync<RecordDialog>("New Record",
+            new DialogParameters { ["Model"] = new RecordItem() },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        await d.Result;
+    }
+
+    private async Task NewContainer()
+    {
+        var d = await DialogService.ShowAsync<ContainerDialog>("New Container",
+            new DialogParameters { ["Model"] = new Container() },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        await d.Result;
+    }
+
+    private async Task NewLocation()
+    {
+        var d = await DialogService.ShowAsync<LocationDialog>("New Location",
+            new DialogParameters { ["Model"] = new Location() },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        await d.Result;
+    }
+
+    private async Task NewUser()
+    {
+        var d = await DialogService.ShowAsync<UserDialog>("New User",
+            new DialogParameters { ["Model"] = new AppUser() },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        await d.Result;
+    }
+
+    private async Task NewLabel()
+    {
+        var d = await DialogService.ShowAsync<TextInputDialog>("New Label",
+            new DialogParameters { ["Title"] = "New Label", ["Label"] = "Label name", ["Value"] = "" },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var res = await d.Result;
+        if (res is { Canceled: false, Data: string name } && name.Trim().Length > 0)
+        {
+            try
+            {
+                var label = await Prim.GetOrCreateLabelAsync(name.Trim(), App.CurrentUserId);
+                App.Log("Created label", label.Name);
+                Snackbar.Add($"Label '{label.Name}' created.", Severity.Success);
+            }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        }
+    }
+
     private void OnAppChanged() => InvokeAsync(StateHasChanged);
 
     public void Dispose()
     {
         App.Changed -= OnAppChanged;
         Hotkeys.CombosChanged -= OnCombosChanged;
+        _globalNewRegistration?.Dispose();
         Hotkeys.UnregisterScope("shell");
         _self?.Dispose();
     }

@@ -11,7 +11,7 @@ public static class HotkeyCatalog
 {
     public static readonly IReadOnlyList<HotkeyDef> All = new List<HotkeyDef>
     {
-        new("Ctrl+N", "New", "Create a new item on the current screen.", "Items"),
+        new("Ctrl+N", "New", "Open the New menu.", "Items"),
         new("F2", "Edit", "Edit the selected row.", "Items"),
         new("Delete", "Delete", "Delete the selected row(s).", "Items"),
         new("Ctrl+P", "Print labels", "Print inventory labels for all selected rows.", "Items"),

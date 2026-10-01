@@ -34,7 +34,6 @@ public partial class Locations : ComponentBase, IDisposable
     protected override void OnInitialized()
     {
         Hotkeys.PushScope("locations");
-        Hotkeys.Register("locations", "Ctrl+N", NewLocation);
         Hotkeys.Register("locations", "F9", Refresh);
     }
 

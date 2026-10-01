@@ -56,8 +56,20 @@ window.prim = {
                     dotNet.invokeMethodAsync('OnHotkey', 'Escape');
                     return;
                 }
-                // Never fight text inputs: typing shortcuts belong to the browser.
-                if (editable) return;
+                // In text inputs, typing and text-editing shortcuts belong to
+                // the browser — except registered app combos with no
+                // text-editing role (e.g. Ctrl+N): those must be intercepted
+                // here too, or the browser's native action (new window,
+                // save-page dialog, ...) fires instead of the app handler.
+                if (editable) {
+                    const ec = window.prim.hotkeys.combo(e);
+                    if (ec && window.prim.hotkeys._combos[ec] &&
+                        !/^(Ctrl\+(C|X|V|Z|Y|A)|Delete|Backspace)$/.test(ec)) {
+                        e.preventDefault();
+                        dotNet.invokeMethodAsync('OnHotkey', ec);
+                    }
+                    return;
+                }
                 const combo = window.prim.hotkeys.combo(e);
                 if (!combo) return;
                 // If the user selected actual text, Ctrl+C / Ctrl+A belong to

@@ -16,6 +16,20 @@ else
         <img src="img/prim-logo.jpg" alt="PRIM" class="ml-2" style="height:30px;border-radius:4px;background:#fff;padding:2px" />
         <MudText Typo="Typo.caption" Class="ml-2" Style="opacity:0.7">Physical Records Inventory Manager</MudText>
         <MudSpacer />
+        <MudMenu @ref="_newMenu" Dense="true">
+            <ActivatorContent>
+                <MudTooltip Text="New (Ctrl+N)">
+                    <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Inherit" />
+                </MudTooltip>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem OnClick="NewRecord">Record</MudMenuItem>
+                <MudMenuItem OnClick="NewContainer">Container</MudMenuItem>
+                <MudMenuItem OnClick="NewLocation">Location</MudMenuItem>
+                <MudMenuItem OnClick="NewUser">User</MudMenuItem>
+                <MudMenuItem OnClick="NewLabel">Label</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
         <MudTooltip Text="Help — shortcuts and how PRIM works (F1)">
             <MudIconButton Icon="@Icons.Material.Filled.HelpOutline" Color="Color.Inherit" OnClick="ShowHelp" />
         </MudTooltip>

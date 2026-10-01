@@ -43,7 +43,6 @@ public partial class Containers : ComponentBase, IDisposable
     protected override void OnInitialized()
     {
         Hotkeys.PushScope("containers");
-        Hotkeys.Register("containers", "Ctrl+N", NewContainer);
         Hotkeys.Register("containers", "F9", Refresh);
         Hotkeys.Register("containers", "Ctrl+F", async () => await PrimJs.TryInvokeVoidAsync(JS, "prim.focus", "#containers-filter input"));
     }

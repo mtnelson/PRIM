@@ -45,7 +45,6 @@ public partial class Records : ComponentBase, IDisposable
     protected override void OnInitialized()
     {
         Hotkeys.PushScope("records");
-        Hotkeys.Register("records", "Ctrl+N", NewRecord);
         Hotkeys.Register("records", "F9", Refresh);
         Hotkeys.Register("records", "Ctrl+F", async () => await PrimJs.TryInvokeVoidAsync(JS, "prim.focus", "#records-filter input"));
     }

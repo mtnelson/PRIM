@@ -1,5 +1,9 @@
 # PRIM Changelog
 
+## v0.11.2 — 2026-10-01
+- New "+" menu in the app header: create a record, container, location, user, or label from any screen, using the same dialogs the object pages use. Ctrl+N now opens this menu globally (it no longer creates an item for the current page); the per-page "New" buttons still work as before.
+- Fixed Ctrl+N opening a browser window when focus was in a filter/search box: registered app shortcuts with no text-editing role (Ctrl+N, Ctrl+S, F9, …) are now intercepted even inside text inputs, while true editing shortcuts (Ctrl+C/X/V/Z/Y/A, Delete) still go to the browser.
+
 ## v0.11.1 — 2026-10-01
 - Advanced Search results now sit in tabs: Results, SQL, and Activity.
 - The SQL tab shows the exact SQL of the most recent search run — count, ID-list, and page queries (page queries appear as you scroll) — each with its timestamp, duration in milliseconds, and a copy button.

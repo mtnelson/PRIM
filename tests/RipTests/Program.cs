@@ -243,7 +243,7 @@ var badContainer = new Container { ContainerName = "BADHOME-BOX", ContainerType 
 Check(!(await svc.SaveContainerAsync(badContainer, "harness")).Ok, "save container with record home rejected");
 
 // ---- compressed record children ----
-var parent = new RecordItem { RecordType = "Compressed", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "PAR001", Volume = "1", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
+var parent = new RecordItem { RecordType = "Compressed", CompressedRole = "Parent", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "PAR001", Volume = "1", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
 Check((await svc.SaveRecordAsync(parent, "harness")).Ok, "compressed parent created");
 var child = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "CHD001", Volume = "1", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", ParentRecordId = parent.Id, State = "Active" };
 Check((await svc.SaveRecordAsync(child, "harness")).Ok, "child of compressed record ok");
@@ -1005,6 +1005,203 @@ try { Directory.Delete(tmpAudit2, true); } catch { }
     }
     try { File.Delete(dbPath2); } catch { }
 }
+
+// ---- v0.12.0: user barcodes ----
+var usersNow = await svc.GetUsersAsync();
+Check(usersNow.First(u => u.UserId == "admin01").Barcode == "USR000001" &&
+      usersNow.First(u => u.UserId == "recordsmgr01").Barcode == "USR000002" &&
+      usersNow.First(u => u.UserId == "mtnelson").Barcode == "USR000003",
+    "v0.12.0 seed users have sequential USR barcodes");
+var expectedUsr = "USR" + (usersNow.Count + 1).ToString("D6");
+var nusr = new AppUser { UserId = "scantest01", DisplayName = "Scan Test", Role = "Staff", Email = "scan@prim.local", PasswordHash = "x", PasswordSalt = "y" };
+var nusrRes = await svc.SaveUserAsync(nusr, "harness");
+Check(nusrRes.Ok && nusr.Barcode == expectedUsr, "v0.12.0 new user gets next USR barcode", $"{nusrRes.Error}/{nusr.Barcode}");
+nusr.DisplayName = "Scan Test 2";
+var nusrUpd = await svc.SaveUserAsync(nusr, "harness");
+Check(nusrUpd.Ok && (await svc.GetUsersAsync()).First(u => u.UserId == "scantest01").Barcode == expectedUsr,
+    "v0.12.0 user barcode survives update", nusrUpd.Error);
+
+// ---- v0.12.0: theme preference ----
+Check(await svc.GetThemePreferenceAsync("mtnelson") == null, "v0.12.0 theme pref null by default");
+bool themeThrew = false;
+try { await svc.SetThemePreferenceAsync("mtnelson", "Blue"); }
+catch (ArgumentException) { themeThrew = true; }
+Check(themeThrew && await svc.GetThemePreferenceAsync("mtnelson") == null, "v0.12.0 invalid theme rejected");
+await svc.SetThemePreferenceAsync("mtnelson", "Dark");
+Check(await svc.GetThemePreferenceAsync("mtnelson") == "Dark", "v0.12.0 theme round-trip Dark");
+await svc.SetThemePreferenceAsync("mtnelson", "Light");
+Check(await svc.GetThemePreferenceAsync("mtnelson") == "Light", "v0.12.0 theme round-trip Light");
+Check(await svc.GetThemePreferenceAsync("nosuchuser") == null, "v0.12.0 theme pref null for unknown user");
+
+// ---- v0.12.0: compressed records ----
+RecordItem NewRec(string type, string caseNo, string? role = null, int? parentId = null) => new()
+{
+    RecordType = type, CompressedRole = role, ParentRecordId = parentId,
+    CaseClassification = "149", FieldOffice = "HQ", CaseNumber = caseNo, Volume = "1",
+    Subject = "harness compressed", Home = "SHELF 1", HomeKind = "Location",
+    Assignee = "mtnelson", AssigneeKind = "User", State = "Active"
+};
+var seedParent = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000003");
+Check(seedParent.RecordType == "Compressed" && seedParent.CompressedRole == "Parent",
+    "v0.12.0 seed R-000003 is a Compressed Parent");
+
+var noRole = await svc.SaveRecordAsync(NewRec("Compressed", "CMP001"), "harness");
+Check(!noRole.Ok && noRole.Error != null && noRole.Error.Contains("Parent or a Child"),
+    "v0.12.0 Compressed requires a role", noRole.Error);
+
+var pRec = NewRec("Compressed", "CMP002", "Parent");
+var pRes = await svc.SaveRecordAsync(pRec, "harness");
+Check(pRes.Ok, "v0.12.0 Compressed Parent creates", pRes.Error);
+
+var childNoParent = await svc.SaveRecordAsync(NewRec("Compressed", "CMP003", "Child"), "harness");
+Check(!childNoParent.Ok && childNoParent.Error != null && childNoParent.Error.Contains("compressed parent"),
+    "v0.12.0 Compressed Child without parent rejected", childNoParent.Error);
+
+var nonParent = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000001");
+var childBadParent = await svc.SaveRecordAsync(NewRec("Compressed", "CMP004", "Child", nonParent.Id), "harness");
+Check(!childBadParent.Ok && childBadParent.Error != null && childBadParent.Error.Contains("compressed parent"),
+    "v0.12.0 Child under non-compressed record rejected", childBadParent.Error);
+
+var parentAsChild = await svc.SaveRecordAsync(NewRec("Compressed", "CMP005", "Parent", seedParent.Id), "harness");
+Check(!parentAsChild.Ok && parentAsChild.Error != null && parentAsChild.Error.Contains("cannot be placed inside"),
+    "v0.12.0 Parent cannot be filed under another (no nesting)", parentAsChild.Error);
+
+// Happy path: child filed under seed parent — Home/Assignee become the parent record itself.
+var cchild = NewRec("Compressed", "CMP006", "Child", seedParent.Id);
+var childRes = await svc.SaveRecordAsync(cchild, "harness");
+Check(childRes.Ok, "v0.12.0 Compressed Child files under parent", childRes.Error);
+Check(cchild.Home == "R-000003" && cchild.HomeKind == "Record" && cchild.HomeRefId == seedParent.Id,
+    "v0.12.0 child's Home is the parent record", $"{cchild.Home}/{cchild.HomeKind}/{cchild.HomeRefId}");
+Check(cchild.Assignee == "R-000003" && cchild.AssigneeKind == "Record" && cchild.AssigneeRefId == seedParent.Id,
+    "v0.12.0 child's Assignee is the parent record", $"{cchild.Assignee}/{cchild.AssigneeKind}/{cchild.AssigneeRefId}");
+
+// Any record type can be filed under a parent and keeps its type.
+var filedCase = NewRec("Case File", "CMP007", null, seedParent.Id);
+var filedRes = await svc.SaveRecordAsync(filedCase, "harness");
+Check(filedRes.Ok && filedCase.RecordType == "Case File" && filedCase.HomeKind == "Record",
+    "v0.12.0 non-compressed record filed keeps type, homes to parent", filedRes.Error);
+
+// Legacy (null-role) compressed record cannot accept children until edited.
+int legacyId;
+using (var db = factory.CreateDbContext())
+{
+    var legacy = NewRec("Compressed", "CMP008");
+    legacy.CompressedRole = null;
+    legacy.RecordNumber = "R-CMP008"; legacy.Barcode = "REC-CMP008";
+    db.Records.Add(legacy);
+    await db.SaveChangesAsync();
+    legacyId = legacy.Id;
+}
+var childLegacy = await svc.SaveRecordAsync(NewRec("Case File", "CMP009", null, legacyId), "harness");
+Check(!childLegacy.Ok && childLegacy.Error != null && childLegacy.Error.Contains("compressed parent"),
+    "v0.12.0 legacy null-role compressed cannot accept children", childLegacy.Error);
+
+// Parent with children cannot change type.
+var parentEdit = (await svc.GetRecordsAsync()).First(r => r.Id == seedParent.Id);
+parentEdit.RecordType = "Case File";
+var typeChg = await svc.SaveRecordAsync(parentEdit, "harness");
+Check(!typeChg.Ok && typeChg.Error != null && typeChg.Error.Contains("children"),
+    "v0.12.0 parent-with-children type change blocked", typeChg.Error);
+
+// A child cannot have children of its own.
+var grandChild = await svc.SaveRecordAsync(NewRec("Case File", "CMP010", null, cchild.Id), "harness");
+Check(!grandChild.Ok && grandChild.Error != null && grandChild.Error.Contains("compressed parent"),
+    "v0.12.0 child cannot accept children", grandChild.Error);
+
+// Bulk move refuses filed records.
+bool moveThrew = false;
+string? moveMsg = null;
+try
+{
+    await svc.MoveItemsAsync("Record", new[] { cchild.Id }, "BLDG CRC", "Location", 1, null, null, null, false, "harness");
+}
+catch (InvalidOperationException ex) { moveThrew = true; moveMsg = ex.Message; }
+Check(moveThrew && moveMsg != null && moveMsg.Contains(cchild.RecordNumber),
+    "v0.12.0 MoveItemsAsync refuses filed records", moveMsg);
+
+// UpgradeSchema backfills roles for legacy rows: a null-role compressed
+// record with children becomes a Parent, and legacy filed children are
+// re-homed to the parent record itself.
+int backfillLegacyId, backfillChildId;
+using (var db = factory.CreateDbContext())
+{
+    var leg = NewRec("Compressed", "CMP011");
+    leg.CompressedRole = null;
+    leg.RecordNumber = "R-CMP011"; leg.Barcode = "REC-CMP011";
+    db.Records.Add(leg);
+    await db.SaveChangesAsync();
+    backfillLegacyId = leg.Id;
+    var legChild = NewRec("Case File", "CMP012", null, leg.Id);
+    legChild.RecordNumber = "R-CMP012"; legChild.Barcode = "REC-CMP012";
+    db.Records.Add(legChild);
+    await db.SaveChangesAsync();
+    backfillChildId = legChild.Id;
+    SeedData.UpgradeSchema(db);
+    // Raw-SQL backfills bypass the change tracker — re-read untracked.
+    var legAfter = await db.Records.AsNoTracking().FirstAsync(r => r.Id == backfillLegacyId);
+    var childAfter = await db.Records.AsNoTracking().FirstAsync(r => r.Id == backfillChildId);
+    Check(legAfter.CompressedRole == "Parent",
+        "v0.12.0 UpgradeSchema backfills Parent role for compressed-with-children", legAfter.CompressedRole);
+    Check(childAfter.HomeKind == "Record" && childAfter.HomeRefId == backfillLegacyId &&
+          childAfter.AssigneeKind == "Record" && childAfter.AssigneeRefId == backfillLegacyId,
+        "v0.12.0 UpgradeSchema re-homes legacy filed child to parent record",
+        $"{childAfter.HomeKind}/{childAfter.AssigneeKind}");
+    var lone = await db.Records.AsNoTracking().FirstAsync(r => r.Id == legacyId);
+    Check(lone.CompressedRole == null,
+        "v0.12.0 legacy compressed without children stays null until next edit", lone.CompressedRole);
+}
+
+// ---- v0.12.0: barcode service ----
+var hitRec = await svc.ResolveBarcodeAsync("REC000001");
+Check(hitRec != null && hitRec.Kind == "Record" && hitRec.Name == "R-000001", "v0.12.0 resolve REC000001");
+var hitCon = await svc.ResolveBarcodeAsync("CON000001");
+Check(hitCon != null && hitCon.Kind == "Container" && hitCon.Name == "HQ-SHIP-LD263S", "v0.12.0 resolve CON000001");
+var hitLoc = await svc.ResolveBarcodeAsync("LOC000001");
+Check(hitLoc != null && hitLoc.Kind == "Location" && hitLoc.Name == "BLDG CRC", "v0.12.0 resolve LOC000001");
+var hitUsr = await svc.ResolveBarcodeAsync("USR000001");
+Check(hitUsr != null && hitUsr.Kind == "User" && hitUsr.Name == "PRIM Administrator", "v0.12.0 resolve USR000001");
+Check(await svc.ResolveBarcodeAsync("ZZZ999999") == null, "v0.12.0 resolve unknown -> null");
+Check(await svc.ResolveBarcodeAsync("") == null, "v0.12.0 resolve empty -> null");
+
+var slotRes = await svc.BarcodeAddToSlotAsync("mtnelson", "Workspace 3", new[] { "REC000001", "NOPE000000" });
+Check(slotRes.SuccessCount == 1 && slotRes.FailCount == 1, "v0.12.0 add-to-slot mixed result");
+var ws = await svc.GetSlotAsync("mtnelson", "Workspace 3");
+Check(ws.Any(w => w.ObjectKind == "Record" && w.Label == "R-000001 · REC000001"), "v0.12.0 slot actually gained the record");
+var slotDup = await svc.BarcodeAddToSlotAsync("mtnelson", "Workspace 3", new[] { "REC000001" });
+Check(slotDup.SuccessCount == 1 && slotDup.FailCount == 0 && slotDup.Outcomes[0].Message.Contains("Already"),
+    "v0.12.0 add-to-slot duplicate is idempotent", slotDup.Outcomes[0].Message);
+
+var homeRes = await svc.BarcodeSetHomeAsync(new[] { "REC000001" }, "LOC000001", "harness");
+Check(homeRes.SuccessCount == 1, "v0.12.0 barcode set-home ok", string.Join("; ", homeRes.Outcomes.Select(o => o.Message)));
+var movedRec = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000001");
+Check(movedRec.Home == "BLDG CRC" && movedRec.HomeKind == "Location", "v0.12.0 set-home changed Home", $"{movedRec.Home}/{movedRec.HomeKind}");
+
+var badDest = await svc.BarcodeSetHomeAsync(new[] { "REC000001" }, "REC000002", "harness");
+Check(badDest.FailCount == 1 && badDest.Outcomes[0].Message.Contains("home must be a location, container, or user"),
+    "v0.12.0 set-home rejects record destination", badDest.Outcomes[0].Message);
+
+var badObj = await svc.BarcodeSetHomeAsync(new[] { "LOC000002" }, "LOC000001", "harness");
+Check(badObj.FailCount == 1 && badObj.Outcomes[0].Message.Contains("only records and containers can be moved"),
+    "v0.12.0 set-home rejects location object", badObj.Outcomes[0].Message);
+
+var badAssign = await svc.BarcodeSetAssigneeAsync(new[] { "REC000001" }, "REC000002", "harness");
+Check(badAssign.FailCount == 1 && badAssign.Outcomes[0].Message.Contains("must be a user"),
+    "v0.12.0 set-assignee rejects non-user", badAssign.Outcomes[0].Message);
+
+var okAssign = await svc.BarcodeSetAssigneeAsync(new[] { "REC000001" }, "USR000003", "harness");
+Check(okAssign.SuccessCount == 1, "v0.12.0 set-assignee ok", string.Join("; ", okAssign.Outcomes.Select(o => o.Message)));
+
+var filedChildBarcode = cchild.Barcode;
+var refused = await svc.BarcodeSetHomeAsync(new[] { filedChildBarcode }, "LOC000001", "harness");
+Check(refused.FailCount == 1 && refused.Outcomes[0].Message.Contains("compressed parent"),
+    "v0.12.0 barcode move refuses filed record", refused.Outcomes[0].Message);
+
+var unknownObj = await svc.BarcodeSetHomeAsync(new[] { "ZZZ999999" }, "LOC000001", "harness");
+Check(unknownObj.FailCount == 1 && unknownObj.Outcomes[0].Message.Contains("not found"),
+    "v0.12.0 barcode move reports unknown object", unknownObj.Outcomes[0].Message);
+
+var haRes = await svc.BarcodeSetHomeAndAssigneeAsync(new[] { "REC000002" }, "LOC000001", "USR000003", "harness");
+Check(haRes.SuccessCount == 1, "v0.12.0 set-home-and-assignee ok", string.Join("; ", haRes.Outcomes.Select(o => o.Message)));
 
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }

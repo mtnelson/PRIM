@@ -1,5 +1,12 @@
 # PRIM Changelog
 
+## v0.12.0 — 2026-10-01
+- Dark / light mode: new toggle in the app header (next to the + button). Your choice is remembered per user; with no stored choice the app follows your OS setting.
+- Barcode Scanning: new Tools section in the left navigation. Pick an action first — Add to Workspace 1–5 / Favorites, Add to Home or Container, Add to Assignee, or Add to Home & Assignee — then scan barcodes (Enter advances to the next field). Failed barcodes stay in the scan field for retry while successful ones clear, and a popup reports per-barcode results.
+- Users now get a system-assigned barcode (USRnnnnnn), shown read-only in the user dialog and as a grid column, so assignees can be scanned.
+- Compressed records: selecting the Compressed type now requires choosing Parent or Child. A Child must select a Compressed Parent — the parent record itself becomes the child's Home and Assignee, so the child moves with the parent automatically (no copy, no cascade). Any record type can be filed under a Compressed Parent and keeps its type. Rules enforced in the service: only a Compressed Parent can accept children (no nesting), a Child cannot have children of its own, and a parent with children cannot change to another type until the children are moved out.
+- Upgrade note: existing Compressed records that already have children (or are already filed) are backfilled to Parent/Child automatically; other Compressed records will ask you to choose Parent or Child the next time they are edited.
+
 ## v0.11.2 — 2026-10-01
 - New "+" menu in the app header: create a record, container, location, user, or label from any screen, using the same dialogs the object pages use. Ctrl+N now opens this menu globally (it no longer creates an item for the current page); the per-page "New" buttons still work as before.
 - Fixed Ctrl+N opening a browser window when focus was in a filter/search box: registered app shortcuts with no text-editing role (Ctrl+N, Ctrl+S, F9, …) are now intercepted even inside text inputs, while true editing shortcuts (Ctrl+C/X/V/Z/Y/A, Delete) still go to the browser.

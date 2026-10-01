@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Prim</RootNamespace>
-    <Version>0.11.2</Version>
+    <Version>0.12.0</Version>
     <!-- Self-contained win-x64 publish: dotnet publish -c Release -r win-x64 (self-contained) -->
   </PropertyGroup>
 

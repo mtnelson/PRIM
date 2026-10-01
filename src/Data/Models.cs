@@ -42,6 +42,11 @@ public class RecordItem
 
     public int? ParentRecordId { get; set; }            // child of a Compressed record (expandable tree)
 
+    // Compressed Parent vs Child (v0.12.0): required when RecordType is
+    // "Compressed". "Parent" accepts filed children; "Child" must file under
+    // a Parent via ParentRecordId. Null = unset (legacy rows choose on edit).
+    public string? CompressedRole { get; set; }           // Parent | Child
+
     [Required] public string State { get; set; } = "Active"; // TIS-2294 spike values
     public bool Deleted { get; set; }
     public string? DeleteReason { get; set; }
@@ -113,6 +118,8 @@ public class AppUser
     public string? Email { get; set; }
     public bool Active { get; set; } = true;
     public int? LocationId { get; set; }                 // membership in a location
+    [Required] public string Barcode { get; set; } = "";  // system-assigned USR000001 (v0.12.0, for barcode scanning)
+    public string? ThemePreference { get; set; }        // Light | Dark | null (null = follow OS setting)
     public string? PasswordHash { get; set; }           // dev password auth (PBKDF2); production uses OAuth/SSO via IAuthProvider
     public string? PasswordSalt { get; set; }
     public DateTime CreatedUtc { get; set; }

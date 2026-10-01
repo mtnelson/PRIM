@@ -57,14 +57,14 @@ public static class GridColumns
     public static List<(string Key, string Label)> UserColumns() => new()
     {
         ("UserId","User ID"), ("DisplayName","Display Name"), ("Role","Role"),
-        ("Email","Email"), ("LocationId","Location ID"), ("Active","Active"),
+        ("Email","Email"), ("Barcode","Barcode"), ("LocationId","Location ID"), ("Active","Active"),
         ("Labels","Labels"),
     };
 
     public static Dictionary<string,string> UserRow(AppUser u) => new()
     {
         ["UserId"] = u.UserId, ["DisplayName"] = u.DisplayName, ["Role"] = u.Role,
-        ["Email"] = u.Email ?? "", ["LocationId"] = u.LocationId?.ToString() ?? "",
+        ["Email"] = u.Email ?? "", ["Barcode"] = u.Barcode, ["LocationId"] = u.LocationId?.ToString() ?? "",
         ["Active"] = u.Active ? "Yes" : "No", ["Labels"] = "",
     };
 

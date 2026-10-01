@@ -127,7 +127,7 @@ public class PrimService
     private static readonly HashSet<string> LocationSortProps = new()
         { "LocationName","LocationType","Description","Barcode" };
     private static readonly HashSet<string> UserSortProps = new()
-        { "UserId","DisplayName","Role","Email","LocationId","Active" };
+        { "UserId","DisplayName","Role","Email","Barcode","LocationId","Active" };
 
     public async Task<GridPageResult<RecordItem>> GetRecordsPageAsync(GridPageRequest req)
     {
@@ -360,9 +360,17 @@ public class PrimService
         // child rows have something to show during testing.
         var parentCount = Math.Min(20, list.Count / 10);
         var parents = list.Take(parentCount).ToList();
-        foreach (var p in parents) p.RecordType = "Compressed";
+        foreach (var p in parents) { p.RecordType = "Compressed"; p.CompressedRole = "Parent"; }
         var kids = list.Skip(parentCount).OrderBy(_ => rnd.Next()).Take(Math.Min(200, list.Count - parentCount)).ToList();
-        foreach (var k in kids) k.ParentRecordId = parents[rnd.Next(parents.Count)].Id;
+        foreach (var k in kids)
+        {
+            var p = parents[rnd.Next(parents.Count)];
+            k.ParentRecordId = p.Id;
+            // Filed records have the parent record itself as Home and
+            // Assignee (v0.12.0) — a reference, so they move with the parent.
+            k.Home = p.RecordNumber; k.HomeKind = "Record"; k.HomeRefId = p.Id;
+            k.Assignee = p.RecordNumber; k.AssigneeKind = "Record"; k.AssigneeRefId = p.Id;
+        }
         await db.SaveChangesAsync();
         await ArchiveAuditIfNeededAsync();
         return list.Select(r => r.RecordNumber).ToList();
@@ -427,7 +435,7 @@ public class PrimService
     private static readonly HashSet<string> AdvSearchLocationFields = new()
         { "LocationName","LocationType","Description","Barcode" };
     private static readonly HashSet<string> AdvSearchUserFields = new()
-        { "UserId","DisplayName","Role","Email" };
+        { "UserId","DisplayName","Role","Email","Barcode" };
 
     private static IQueryable<RecordItem> AdvancedSearchQuery(PrimDbContext db,
         List<(string Field, string Op, string Value)> rows, string logic)
@@ -815,17 +823,38 @@ public class PrimService
         input.SerialStart = input.SerialStart?.ToUpperInvariant();
         input.SerialEnd = input.SerialEnd?.ToUpperInvariant();
 
-        // Homing rules (service-level): records home only to containers, locations, users.
-        var homeErr = HomeRules.ValidateHome("Record", input.HomeKind);
-        if (homeErr != null) return (false, homeErr);
-        var assigneeErr = HomeRules.ValidateHome("Record", input.AssigneeKind, "Assignee");
-        if (assigneeErr != null) return (false, assigneeErr);
-        input.AssigneeRefId ??= await ResolveAssigneeRefAsync(db, input.AssigneeKind, input.Assignee);
-        input.HomeRefId ??= await ResolveAssigneeRefAsync(db, input.HomeKind, input.Home);
-
-        // Compressed-record children: only Compressed records may have child records.
+        // Compressed-record children: only Compressed Parents may have child
+        // records (tightened v0.12.0 — the role is part of the rule).
         var childErr = await ValidateRecordParentAsync(db, input);
         if (childErr != null) return (false, childErr);
+
+        // v0.12.0 compressed Parent/Child role rules (service-level, not just
+        // the dialog): role required for the Compressed type, no nesting, a
+        // Child must file under a parent, and a parent with children cannot
+        // change to a non-Compressed type.
+        var roleErr = await ValidateCompressedRoleAsync(db, input);
+        if (roleErr != null) return (false, roleErr);
+
+        if (input.ParentRecordId != null)
+        {
+            // A record filed under a compressed parent has the parent record
+            // itself as its Home and Assignee — a reference, not a copy, so
+            // the child moves with the parent automatically (no cascade).
+            // (ValidateRecordParentAsync above guarantees the parent exists.)
+            var parent = await db.Records.FindAsync(input.ParentRecordId.Value);
+            input.Home = parent!.RecordNumber; input.HomeKind = "Record"; input.HomeRefId = parent.Id;
+            input.Assignee = parent.RecordNumber; input.AssigneeKind = "Record"; input.AssigneeRefId = parent.Id;
+        }
+        else
+        {
+            // Homing rules (service-level): records home only to containers, locations, users.
+            var homeErr = HomeRules.ValidateHome("Record", input.HomeKind);
+            if (homeErr != null) return (false, homeErr);
+            var assigneeErr = HomeRules.ValidateHome("Record", input.AssigneeKind, "Assignee");
+            if (assigneeErr != null) return (false, assigneeErr);
+            input.AssigneeRefId ??= await ResolveAssigneeRefAsync(db, input.AssigneeKind, input.Assignee);
+            input.HomeRefId ??= await ResolveAssigneeRefAsync(db, input.HomeKind, input.Home);
+        }
 
         if (input.Id == 0)
         {
@@ -856,6 +885,8 @@ public class PrimService
         Chg("Labels", cur.Labels, input.Labels); Chg("SecurityClassification", cur.SecurityClassification, input.SecurityClassification);
         Chg("Subject", cur.Subject, input.Subject); Chg("Notes", cur.Notes, input.Notes);
         Chg("State", cur.State, input.State);
+        Chg("CompressedRole", cur.CompressedRole, input.CompressedRole);
+        Chg("ParentRecordId", cur.ParentRecordId?.ToString(), input.ParentRecordId?.ToString());
         if (cur.Home != input.Home || cur.Assignee != input.Assignee)
             tracked.Add(("Movement", $"Home={cur.Home}, Assignee={cur.Assignee}", $"Home={input.Home}, Assignee={input.Assignee}"));
 
@@ -945,6 +976,7 @@ public class PrimService
         if (dup) return (false, "User ID already exists.");
         if (input.Id == 0)
         {
+            input.Barcode = NextNumber(db.Users.Select(u => u.Barcode), "USR", 6); // v0.12.0: system-assigned
             input.CreatedUtc = DateTime.UtcNow;
             db.Users.Add(input);
             await db.SaveChangesAsync();
@@ -986,6 +1018,15 @@ public class PrimService
         if (kind == "Record")
         {
             var items = await db.Records.Where(r => ids.Contains(r.Id)).ToListAsync();
+            // v0.12.0: records filed under a compressed parent have the
+            // parent as their Home and Assignee — moving them here would
+            // silently break that invariant, so refuse with a clear message.
+            var parented = items.Where(r => r.ParentRecordId != null).ToList();
+            if (parented.Count > 0)
+                throw new InvalidOperationException(
+                    "Records filed under a compressed parent cannot be moved in bulk: " +
+                    string.Join(", ", parented.Select(r => r.RecordNumber)) +
+                    ". Edit the record to change its parent.");
             foreach (var r in items)
             {
                 var o = $"Home={r.Home}, Assignee={r.Assignee}";
@@ -1090,8 +1131,9 @@ public class PrimService
     // ---------------- homing rules / compressed children / grid layouts / passwords ----------------
 
     /// <summary>
-    /// A record may only be a child of a Compressed record; rejects missing
-    /// parents, non-compressed parents, self-parenting, and cycles.
+    /// A record may only be filed under a Compressed Parent (v0.12.0: the
+    /// role is part of the rule, not just the type); rejects missing
+    /// parents, non-parent targets, self-parenting, and cycles.
     /// </summary>
     private static async Task<string?> ValidateRecordParentAsync(PrimDbContext db, RecordItem input)
     {
@@ -1100,8 +1142,8 @@ public class PrimService
         if (input.Id != 0 && pid == input.Id) return "A record cannot be its own parent.";
         var parent = await db.Records.FindAsync(pid);
         if (parent == null) return "The parent record does not exist.";
-        if (parent.RecordType != "Compressed")
-            return "Only compressed records can have child records.";
+        if (parent.RecordType != "Compressed" || parent.CompressedRole != "Parent")
+            return "Records can only be filed under a compressed parent.";
         // Cycle check: walk the ancestor chain.
         var seen = new HashSet<int> { input.Id };
         var cur = parent;
@@ -1109,6 +1151,42 @@ public class PrimService
         {
             if (!seen.Add(cur.Id)) return "This would create a circular parent chain.";
             cur = cur.ParentRecordId == null ? null : await db.Records.FindAsync(cur.ParentRecordId.Value);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// v0.12.0 compressed Parent/Child rules, enforced in the service (not
+    /// just the dialog): the role is required for the Compressed type; a
+    /// Child must file under a parent; a Parent cannot itself be filed under
+    /// anything (no nesting); a Child cannot have children of its own; and a
+    /// parent that has children cannot change to a non-Compressed type.
+    /// </summary>
+    private static async Task<string?> ValidateCompressedRoleAsync(PrimDbContext db, RecordItem input)
+    {
+        if (input.RecordType == "Compressed"
+            && input.CompressedRole != "Parent" && input.CompressedRole != "Child")
+            return "Select whether this compressed record is a Parent or a Child.";
+        if (input.RecordType != "Compressed")
+            input.CompressedRole = null; // the role only applies to the Compressed type
+        if (input.CompressedRole == "Child" && input.ParentRecordId == null)
+            return "A compressed child must select a compressed parent.";
+        if (input.CompressedRole == "Parent" && input.ParentRecordId != null)
+            return "A compressed parent cannot be placed inside another record.";
+        if (input.Id != 0)
+        {
+            var hasChildren = await db.Records
+                .AnyAsync(r => !r.Deleted && r.ParentRecordId == input.Id);
+            if (input.CompressedRole == "Child" && hasChildren)
+                return "A compressed child cannot have children of its own.";
+            // A parent with children cannot change to a non-Compressed type.
+            // (The current row is read fresh — input carries the new type.)
+            var cur = await db.Records.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == input.Id);
+            if (cur != null && cur.RecordType == "Compressed" && input.RecordType != "Compressed"
+                && hasChildren)
+                return "Cannot change the type of a compressed parent that has children. " +
+                       "Move the children out first.";
         }
         return null;
     }
@@ -1424,6 +1502,27 @@ public class PrimService
         return (await db.Locations.FindAsync(locationId.Value))?.LocationName;
     }
 
+    // ---------------- theme preference (v0.12.0 dark/light mode) ----------------
+    // Per-user stored choice: "Light", "Dark", or null (no stored choice —
+    // the UI falls back to the OS prefers-color-scheme setting).
+    public async Task<string?> GetThemePreferenceAsync(string userId)
+    {
+        using var db = _factory.CreateDbContext();
+        return await db.Users.Where(u => u.UserId == userId)
+            .Select(u => u.ThemePreference).FirstOrDefaultAsync();
+    }
+
+    public async Task SetThemePreferenceAsync(string userId, string? theme)
+    {
+        if (theme != null && theme != "Light" && theme != "Dark")
+            throw new ArgumentException("Theme must be 'Light' or 'Dark'.", nameof(theme));
+        using var db = _factory.CreateDbContext();
+        var u = await db.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+        if (u == null) return;
+        u.ThemePreference = theme;
+        await db.SaveChangesAsync();
+    }
+
     // ---------------- workspaces / favorites (TIS-1411/351) ----------------
     public async Task AddToSlotAsync(string owner, string slot, string kind, int id)
     {
@@ -1453,6 +1552,164 @@ public class PrimService
     {
         using var db = _factory.CreateDbContext();
         return await db.WorkspaceItems.Where(w => w.OwnerUserId == owner && w.Slot == slot).OrderBy(w => w.AddedUtc).ToListAsync();
+    }
+
+    // ---------------- barcode scanning tool (v0.12.0) ----------------
+    /// <summary>An object resolved from a scanned barcode.</summary>
+    public record BarcodeHit(string Kind, int Id, string Name, string Label, string Barcode);
+
+    /// <summary>Per-barcode outcome of a barcode-tool action.</summary>
+    public record BarcodeOutcome(string Barcode, bool Ok, string Message);
+
+    /// <summary>Full result of a barcode-tool action, with success/fail counts.</summary>
+    public record BarcodeActionResult(List<BarcodeOutcome> Outcomes)
+    {
+        public int SuccessCount => Outcomes.Count(o => o.Ok);
+        public int FailCount => Outcomes.Count(o => !o.Ok);
+    }
+
+    private static string NormBarcode(string? s) => (s ?? "").Trim().ToUpperInvariant();
+
+    /// <summary>
+    /// Resolves scanned barcodes to objects across records, containers,
+    /// locations, and users. One indexed query per table (IN clause) — the
+    /// 20M-safe path, not a per-barcode round-trip.
+    /// </summary>
+    public async Task<Dictionary<string, BarcodeHit>> ResolveBarcodesAsync(IEnumerable<string> barcodes)
+    {
+        var list = barcodes.Select(NormBarcode).Where(s => s.Length > 0).Distinct().ToList();
+        var map = new Dictionary<string, BarcodeHit>(StringComparer.OrdinalIgnoreCase);
+        if (list.Count == 0) return map;
+        using var db = _factory.CreateDbContext();
+        foreach (var r in await db.Records.Where(x => !x.Deleted && list.Contains(x.Barcode)).ToListAsync())
+            map[r.Barcode] = new BarcodeHit("Record", r.Id, r.RecordNumber, $"{r.RecordNumber} · {r.Barcode}", r.Barcode);
+        foreach (var c in await db.Containers.Where(x => list.Contains(x.Barcode)).ToListAsync())
+            map[c.Barcode] = new BarcodeHit("Container", c.Id, c.ContainerName, $"{c.ContainerName} · {c.Barcode}", c.Barcode);
+        foreach (var l in await db.Locations.Where(x => list.Contains(x.Barcode)).ToListAsync())
+            map[l.Barcode] = new BarcodeHit("Location", l.Id, l.LocationName, $"{l.LocationName} · {l.Barcode}", l.Barcode);
+        foreach (var u in await db.Users.Where(x => list.Contains(x.Barcode)).ToListAsync())
+            map[u.Barcode] = new BarcodeHit("User", u.Id, u.DisplayName, $"{u.DisplayName} · {u.Barcode}", u.Barcode);
+        return map;
+    }
+
+    public async Task<BarcodeHit?> ResolveBarcodeAsync(string barcode)
+        => (await ResolveBarcodesAsync(new[] { barcode })).Values.FirstOrDefault();
+
+    /// <summary>Adds scanned objects to a workspace slot or Favorites.</summary>
+    public async Task<BarcodeActionResult> BarcodeAddToSlotAsync(string owner, string slot,
+        IEnumerable<string> barcodes)
+    {
+        var outcomes = new List<BarcodeOutcome>();
+        var hits = await ResolveBarcodesAsync(barcodes);
+        using var db = _factory.CreateDbContext();
+        foreach (var bc in barcodes.Select(NormBarcode).Where(s => s.Length > 0).Distinct())
+        {
+            if (!hits.TryGetValue(bc, out var hit))
+            { outcomes.Add(new BarcodeOutcome(bc, false, "Barcode not found.")); continue; }
+            if (await db.WorkspaceItems.AnyAsync(w => w.OwnerUserId == owner && w.Slot == slot
+                    && w.ObjectKind == hit.Kind && w.ObjectId == hit.Id))
+                outcomes.Add(new BarcodeOutcome(bc, true, $"Already in {slot}."));
+            else
+            {
+                db.WorkspaceItems.Add(new WorkspaceItem
+                {
+                    OwnerUserId = owner, Slot = slot, ObjectKind = hit.Kind, ObjectId = hit.Id,
+                    Label = hit.Label, AddedUtc = DateTime.UtcNow
+                });
+                outcomes.Add(new BarcodeOutcome(bc, true, $"Added to {slot}."));
+            }
+        }
+        await db.SaveChangesAsync();
+        return new BarcodeActionResult(outcomes);
+    }
+
+    /// <summary>Barcode tool: sets Home for scanned records/containers.</summary>
+    public async Task<BarcodeActionResult> BarcodeSetHomeAsync(IEnumerable<string> barcodes,
+        string destBarcode, string actor)
+        => await BarcodeMoveAsync(barcodes, destBarcode, null, actor);
+
+    /// <summary>Barcode tool: sets Assignee for scanned records/containers.</summary>
+    public async Task<BarcodeActionResult> BarcodeSetAssigneeAsync(IEnumerable<string> barcodes,
+        string userBarcode, string actor)
+        => await BarcodeMoveAsync(barcodes, null, userBarcode, actor);
+
+    /// <summary>Barcode tool: sets Home and Assignee in one pass.</summary>
+    public async Task<BarcodeActionResult> BarcodeSetHomeAndAssigneeAsync(IEnumerable<string> barcodes,
+        string homeBarcode, string userBarcode, string actor)
+        => await BarcodeMoveAsync(barcodes, homeBarcode, userBarcode, actor);
+
+    private async Task<BarcodeActionResult> BarcodeMoveAsync(IEnumerable<string> barcodes,
+        string? homeBarcode, string? userBarcode, string actor)
+    {
+        var outcomes = new List<BarcodeOutcome>();
+        var codes = barcodes.Select(NormBarcode).Where(s => s.Length > 0).Distinct().ToList();
+        static BarcodeActionResult FailAll(List<string> all, string msg)
+            => new(all.Select(bc => new BarcodeOutcome(bc, false, msg)).ToList());
+
+        BarcodeHit? home = null, assignee = null;
+        if (homeBarcode != null)
+        {
+            home = await ResolveBarcodeAsync(homeBarcode);
+            if (home == null)
+                return FailAll(codes, $"Destination barcode '{NormBarcode(homeBarcode)}' not found.");
+            if (home.Kind is not ("Location" or "Container" or "User"))
+                return FailAll(codes, $"'{home.Label}' is a {home.Kind} — home must be a location, container, or user.");
+        }
+        if (userBarcode != null)
+        {
+            assignee = await ResolveBarcodeAsync(userBarcode);
+            if (assignee == null)
+                return FailAll(codes, $"Assignee barcode '{NormBarcode(userBarcode)}' not found.");
+            if (assignee.Kind != "User")
+                return FailAll(codes, $"'{assignee.Label}' is a {assignee.Kind} — assignee must be a user.");
+        }
+
+        using var db = _factory.CreateDbContext();
+        var hits = await ResolveBarcodesAsync(codes);
+        foreach (var bc in codes)
+        {
+            if (!hits.TryGetValue(bc, out var hit))
+            { outcomes.Add(new BarcodeOutcome(bc, false, "Barcode not found.")); continue; }
+            if (hit.Kind is not ("Record" or "Container"))
+            { outcomes.Add(new BarcodeOutcome(bc, false, $"'{hit.Label}' is a {hit.Kind} — only records and containers can be moved.")); continue; }
+
+            if (hit.Kind == "Record")
+            {
+                var rec = await db.Records.FindAsync(hit.Id);
+                if (rec == null || rec.Deleted)
+                { outcomes.Add(new BarcodeOutcome(bc, false, "Record no longer exists.")); continue; }
+                if (rec.ParentRecordId != null)
+                {
+                    var p = await db.Records.FindAsync(rec.ParentRecordId.Value);
+                    outcomes.Add(new BarcodeOutcome(bc, false,
+                        $"Filed under compressed parent {p?.RecordNumber ?? "?"} — it moves with its parent."));
+                    continue;
+                }
+                var old = $"Home={rec.Home}, Assignee={rec.Assignee}";
+                if (home != null) { rec.Home = home.Name; rec.HomeKind = home.Kind; rec.HomeRefId = home.Id; }
+                if (assignee != null) { rec.Assignee = assignee.Name; rec.AssigneeKind = "User"; rec.AssigneeRefId = assignee.Id; }
+                rec.LastUpdatedUtc = DateTime.UtcNow; rec.LastUpdatedBy = actor; rec.RowVersion++;
+                AddAudit(db, "Record", rec.Id, rec.RecordNumber, "Moved", actor, "Movement", old,
+                    $"Home={rec.Home}, Assignee={rec.Assignee}");
+            }
+            else
+            {
+                var cont = await db.Containers.FindAsync(hit.Id);
+                if (cont == null)
+                { outcomes.Add(new BarcodeOutcome(bc, false, "Container no longer exists.")); continue; }
+                var old = $"Home={cont.Home}, Assignee={cont.Assignee}";
+                if (home != null) { cont.Home = home.Name; cont.HomeKind = home.Kind; cont.HomeRefId = home.Id; }
+                if (assignee != null) { cont.Assignee = assignee.Name; cont.AssigneeKind = "User"; cont.AssigneeRefId = assignee.Id; }
+                cont.LastUpdatedUtc = DateTime.UtcNow; cont.LastUpdatedBy = actor; cont.RowVersion++;
+                AddAudit(db, "Container", cont.Id, cont.ContainerName, "Moved", actor, "Movement", old,
+                    $"Home={cont.Home}, Assignee={cont.Assignee}");
+            }
+            outcomes.Add(new BarcodeOutcome(bc, true,
+                $"Moved{(home != null ? $" home → {home.Name}" : "")}{(assignee != null ? $" assignee → {assignee.Name}" : "")}."));
+        }
+        await db.SaveChangesAsync();
+        await ArchiveAuditIfNeededAsync();
+        return new BarcodeActionResult(outcomes);
     }
 
     // ---------------- saved searches (TIS-358) ----------------

@@ -36,7 +36,13 @@ public static class SeedData
         AddColumn(db, "Users", "PasswordHash", "TEXT");
         AddColumn(db, "Users", "PasswordSalt", "TEXT");
         AddColumn(db, "Users", "LocationId", "INTEGER");
+        AddColumn(db, "Users", "Barcode", "TEXT");          // v0.12.0: user barcodes for scanning
+        AddColumn(db, "Users", "ThemePreference", "TEXT");  // v0.12.0: per-user dark/light mode
         AddColumn(db, "Records", "ParentRecordId", "INTEGER");
+        AddColumn(db, "Records", "CompressedRole", "TEXT"); // v0.12.0: Parent | Child
+        BackfillUserBarcodes(db);
+        BackfillCompressedRoles(db);
+        BackfillChildHoming(db);
         AddColumn(db, "Records", "AssigneeKind", "TEXT");
         AddColumn(db, "Containers", "AssigneeKind", "TEXT");
         AddColumn(db, "Records", "AssigneeRefId", "INTEGER");
@@ -156,6 +162,69 @@ public static class SeedData
             ON AuditEvents (ObjectKind, ObjectId)
             """);
         BackfillLabels(db);
+    }
+
+    // v0.12.0: a record filed under a compressed parent has the parent as
+    // its Home and Assignee (reference, not a copy). Pre-existing children
+    // stored the parent's old home instead — rewrite them to the parent
+    // record so the invariant holds for legacy data too. Idempotent.
+    private static void BackfillChildHoming(PrimDbContext db)
+    {
+#pragma warning disable EF1002
+        db.Database.ExecuteSqlRaw("""
+            UPDATE Records SET
+                Home = (SELECT RecordNumber FROM Records p WHERE p.Id = Records.ParentRecordId),
+                HomeKind = 'Record',
+                HomeRefId = ParentRecordId,
+                Assignee = (SELECT RecordNumber FROM Records p WHERE p.Id = Records.ParentRecordId),
+                AssigneeKind = 'Record',
+                AssigneeRefId = ParentRecordId
+            WHERE ParentRecordId IS NOT NULL
+              AND ParentRecordId IN (SELECT Id FROM Records)
+            """);
+#pragma warning restore EF1002
+    }
+
+    // v0.12.0: existing users predate system-assigned barcodes. Assign
+    // USRnnnnnn sequentially (same scheme as records/containers/locations).
+    // Idempotent: only touches rows with a null/empty barcode.
+    private static void BackfillUserBarcodes(PrimDbContext db)
+    {
+        var users = db.Users.ToList();
+        var max = 0;
+        foreach (var u in users)
+            if (u.Barcode != null && u.Barcode.StartsWith("USR")
+                && int.TryParse(u.Barcode[3..], out var n) && n > max) max = n;
+        var changed = false;
+        foreach (var u in users.OrderBy(u => u.Id))
+        {
+            if (string.IsNullOrWhiteSpace(u.Barcode))
+            {
+                max++;
+                u.Barcode = "USR" + max.ToString("D6");
+                changed = true;
+            }
+        }
+        if (changed) db.SaveChanges();
+    }
+
+    // v0.12.0: existing Compressed rows predate the Parent/Child role.
+    // A compressed record that already has children becomes a Parent; one
+    // already filed under another record becomes a Child. Rows with neither
+    // keep a null role and must choose one the next time they are edited.
+    private static void BackfillCompressedRoles(PrimDbContext db)
+    {
+#pragma warning disable EF1002
+        db.Database.ExecuteSqlRaw("""
+            UPDATE Records SET CompressedRole = 'Child'
+            WHERE RecordType = 'Compressed' AND CompressedRole IS NULL AND ParentRecordId IS NOT NULL
+            """);
+        db.Database.ExecuteSqlRaw("""
+            UPDATE Records SET CompressedRole = 'Parent'
+            WHERE RecordType = 'Compressed' AND CompressedRole IS NULL AND Id IN (
+                SELECT ParentRecordId FROM Records WHERE ParentRecordId IS NOT NULL)
+            """);
+#pragma warning restore EF1002
     }
 
     // One-time promotion of the legacy RecordItem.Labels comma-separated text
@@ -289,6 +358,10 @@ public static class SeedData
             NewDevUser("recordsmgr01", "Records Manager", "Records Manager", "recordsmgr01@prim.local", now),
             NewDevUser("mtnelson", "Mike Nelson", "Staff", "mtnelson@prim.local", now),
         };
+        // System-assigned user barcodes (v0.12.0) — same scheme as the
+        // backfill for existing databases.
+        for (int i = 0; i < users.Length; i++)
+            users[i].Barcode = "USR" + (i + 1).ToString("D6");
         db.Users.AddRange(users);
 
         // Location hierarchy: BLDG CRC -> SFR 1 -> Row 1 -> Compartment 1 -> Shelf 1 (TIS-367)
@@ -327,7 +400,7 @@ public static class SeedData
         {
             new RecordItem { RecordNumber = "R-000001", Barcode = "REC000001", RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "12345", SubfileId = "A", Volume = "1", SerialStart = "1", SerialEnd = "250", AuxiliaryOffice = "AT", SecurityClassification = "Unclassified", Subject = "Quarterly review file", Notes = "Seeded demo record.", Home = "HQ-SHIP-LD263S", HomeKind = "Container", HomeRefId = box.Id, Assignee = "recordsmgr01", AssigneeKind = "User", State = "Active", CreatedUtc = now, CreatedBy = "admin01", LastUpdatedUtc = now, LastUpdatedBy = "admin01" },
             new RecordItem { RecordNumber = "R-000002", Barcode = "REC000002", RecordType = "Case File", CaseClassification = "92", FieldOffice = "NY", CaseNumber = "88710", Volume = "2", SerialStart = "1", SerialEnd = "96", IsBulky = true, SecurityClassification = "Confidential", Home = "TOTE02015", HomeKind = "Container", HomeRefId = tote.Id, Assignee = "recordsmgr01", AssigneeKind = "User", State = "Active", CreatedUtc = now, CreatedBy = "admin01", LastUpdatedUtc = now, LastUpdatedBy = "admin01" },
-            new RecordItem { RecordNumber = "R-000003", Barcode = "REC000003", RecordType = "Compressed", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "12345", SubfileId = "B", Volume = "1", SecurityClassification = "Unclassified", Home = "HQ-SHIP-LD263S", HomeKind = "Container", HomeRefId = box.Id, Assignee = "recordsmgr01", AssigneeKind = "User", State = "Active", CreatedUtc = now, CreatedBy = "admin01", LastUpdatedUtc = now, LastUpdatedBy = "admin01" },
+            new RecordItem { RecordNumber = "R-000003", Barcode = "REC000003", RecordType = "Compressed", CompressedRole = "Parent", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "12345", SubfileId = "B", Volume = "1", SecurityClassification = "Unclassified", Home = "HQ-SHIP-LD263S", HomeKind = "Container", HomeRefId = box.Id, Assignee = "recordsmgr01", AssigneeKind = "User", State = "Active", CreatedUtc = now, CreatedBy = "admin01", LastUpdatedUtc = now, LastUpdatedBy = "admin01" },
             new RecordItem { RecordNumber = "R-000004", Barcode = "REC000004", RecordType = "Abstract", CaseClassification = "65", FieldOffice = "WF", CaseNumber = "4451", Volume = "1", SerialStart = "1", SerialEnd = "12", Home = "recordsmgr01", HomeKind = "User", Assignee = "recordsmgr01", AssigneeKind = "User", State = "Disposition Ready for Review", CreatedUtc = now, CreatedBy = "admin01", LastUpdatedUtc = now, LastUpdatedBy = "admin01" },
             new RecordItem { RecordNumber = "R-000005", Barcode = "REC000005", RecordType = "HQ In Service", CaseClassification = "77", FieldOffice = "HQ", CaseNumber = "99012", Volume = "1", SerialStart = "1", SerialEnd = "40", Home = "SHELF 1", HomeKind = "Location", HomeRefId = shelf.Id, Assignee = "mtnelson", AssigneeKind = "User", State = "Active", CreatedUtc = now, CreatedBy = "admin01", LastUpdatedUtc = now, LastUpdatedBy = "admin01" },
         };

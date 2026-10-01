@@ -68,6 +68,13 @@ public partial class MoveDialog : ComponentBase
             App.LogItems("Moved items", labels);
             MudDialog.Close(DialogResult.Ok(true));
         }
+        // v0.12.0: MoveItemsAsync throws for filed records (parent invariant)
+        // and for invalid home/assignee kinds — show the message, keep the
+        // dialog open, never tear down the circuit.
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
         finally { _busy = false; }
     }
 }

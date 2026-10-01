@@ -30,6 +30,17 @@ window.prim = {
         const el = document.querySelector(selector);
         if (el) el.focus();
     },
+    // Dark/light mode (v0.12.0). MudBlazor's MudThemeProvider handles its
+    // own components; the body.dark class covers PRIM's custom CSS rules.
+    theme: {
+        prefersDark: function () {
+            return !!(window.matchMedia &&
+                window.matchMedia('(prefers-color-scheme: dark)').matches);
+        },
+        setDark: function (on) {
+            document.body.classList.toggle('dark', !!on);
+        }
+    },
     hotkeys: {
         _inited: false,
         _combos: {},

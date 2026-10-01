@@ -1,0 +1,102 @@
+@page "/tools/barcode"
+<PageTitle>PRIM — Barcode Scanning</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-2">Barcode Scanning</MudText>
+<MudText Typo="Typo.body2" Class="mb-4" Style="opacity:0.7">
+    Pick an action, scan barcodes with a keyboard-wedge scanner (Enter advances to the next field),
+    then run the action. Barcodes that fail stay in the scan field; successful ones are cleared.
+</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudSelect T="string" Label="Action" @bind-Value="_action" HelperText="Fields below change with the selected action.">
+            <MudSelectItem Value="@ActWorkspace">Add to Workspace 1–5 / Favorites</MudSelectItem>
+            <MudSelectItem Value="@ActHome">Add to Home or Container</MudSelectItem>
+            <MudSelectItem Value="@ActAssignee">Add to Assignee</MudSelectItem>
+            <MudSelectItem Value="@ActHomeAssignee">Add to Home &amp; Assignee</MudSelectItem>
+        </MudSelect>
+    </MudItem>
+</MudGrid>
+
+@if (_action == ActWorkspace)
+{
+    <MudGrid Class="mt-2">
+        <MudItem xs="12" md="6">
+            <MudSelect T="string" Label="Destination" @bind-Value="_slot">
+                @foreach (var s in Slots) { <MudSelectItem Value="@s">@s</MudSelectItem> }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" @ref="_objectsField" Label="Scan object barcodes (one per line)"
+                          @bind-Value="_objects" Lines="8" Variant="Variant.Outlined"
+                          HelperText="Records, containers, locations, and users can all go into workspaces." />
+        </MudItem>
+    </MudGrid>
+}
+else if (_action == ActHome)
+{
+    <MudGrid Class="mt-2">
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" @ref="_destField" Label="Destination barcode (location, container, or user)"
+                          @bind-Value="_dest" Immediate="true" Clearable="true"
+                          OnKeyDown="@(e => AdvanceOnEnter(e, _objectsField))"
+                          HelperText="Scan, then Enter moves to the objects field." />
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" @ref="_objectsField" Label="Scan object barcodes (one per line)"
+                          @bind-Value="_objects" Lines="8" Variant="Variant.Outlined"
+                          HelperText="Each scanned record/container gets this destination as its Home." />
+        </MudItem>
+    </MudGrid>
+}
+else if (_action == ActAssignee)
+{
+    <MudGrid Class="mt-2">
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" @ref="_assigneeField" Label="Assignee barcode (user)"
+                          @bind-Value="_assigneeBarcode" Immediate="true" Clearable="true"
+                          OnKeyDown="@(e => AdvanceOnEnter(e, _objectsField))"
+                          HelperText="Scan the user first, then Enter moves to the objects field." />
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" @ref="_objectsField" Label="Scan object barcodes (one per line)"
+                          @bind-Value="_objects" Lines="8" Variant="Variant.Outlined"
+                          HelperText="Each scanned record/container is assigned to this user." />
+        </MudItem>
+    </MudGrid>
+}
+else
+{
+    <MudGrid Class="mt-2">
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" @ref="_assigneeField" Label="Assignee barcode (user)"
+                          @bind-Value="_assigneeBarcode" Immediate="true" Clearable="true"
+                          OnKeyDown="@(e => AdvanceOnEnter(e, _homeField))"
+                          HelperText="Scan the assignee first — Enter moves to the home field." />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" @ref="_homeField" Label="Home barcode (location, container, or user)"
+                          @bind-Value="_homeBarcode" Immediate="true" Clearable="true"
+                          OnKeyDown="@(e => AdvanceOnEnter(e, _objectsField))"
+                          HelperText="Scan the home — Enter moves to the objects field." />
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" @ref="_objectsField" Label="Scan object barcodes (one per line)"
+                          @bind-Value="_objects" Lines="8" Variant="Variant.Outlined"
+                          HelperText="Each scanned record/container gets this home and assignee." />
+        </MudItem>
+    </MudGrid>
+}
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-4" Size="Size.Large"
+           Disabled="_running" OnClick="Execute">
+    @if (_running)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+        <span>Running…</span>
+    }
+    else
+    {
+        <span>@ActionButtonLabel</span>
+    }
+</MudButton>

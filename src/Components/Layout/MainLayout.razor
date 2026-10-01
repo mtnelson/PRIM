@@ -1,5 +1,5 @@
 @inherits LayoutComponentBase
-<MudThemeProvider />
+<MudThemeProvider IsDarkMode="_darkMode" />
 <MudDialogProvider />
 <MudSnackbarProvider />
 <MudPopoverProvider />
@@ -30,6 +30,10 @@ else
                 <MudMenuItem OnClick="NewLabel">Label</MudMenuItem>
             </ChildContent>
         </MudMenu>
+        <MudTooltip Text="@(_darkMode ? "Switch to light mode" : "Switch to dark mode")">
+            <MudIconButton Icon="@(_darkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                           Color="Color.Inherit" OnClick="ToggleTheme" />
+        </MudTooltip>
         <MudTooltip Text="Help — shortcuts and how PRIM works (F1)">
             <MudIconButton Icon="@Icons.Material.Filled.HelpOutline" Color="Color.Inherit" OnClick="ShowHelp" />
         </MudTooltip>
@@ -59,6 +63,9 @@ else
             <MudNavLink Href="workspaces" Icon="@Icons.Material.Filled.Work">Workspaces</MudNavLink>
             <MudNavLink Href="reports" Icon="@Icons.Material.Filled.Assessment">Reports</MudNavLink>
             <MudNavLink Href="admin" Icon="@Icons.Material.Filled.AdminPanelSettings">Admin</MudNavLink>
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.subtitle2" Class="pa-3 pb-1">TOOLS</MudText>
+            <MudNavLink Href="tools/barcode" Icon="@Icons.Material.Filled.QrCodeScanner">Barcode Scanning</MudNavLink>
             <MudDivider Class="my-2" />
             <MudText Typo="Typo.subtitle2" Class="pa-3 pb-1">RECENT</MudText>
             @if (App.Recent.Count == 0)

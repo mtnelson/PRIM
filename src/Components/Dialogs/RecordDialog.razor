@@ -12,6 +12,16 @@
                         @foreach (var t in SeedData.RecordTypes) { <MudSelectItem Value="t">@t</MudSelectItem> }
                     </MudSelect>
                 </MudItem>
+                @if (_model.RecordType == "Compressed")
+                {
+                    <MudItem xs="12" md="6" Class="d-flex align-center">
+                        <MudRadioGroup T="string" @bind-Value="_model.CompressedRole">
+                            <MudRadio Value="@("Parent")">Parent</MudRadio>
+                            <MudRadio Value="@("Child")">Child</MudRadio>
+                        </MudRadioGroup>
+                        <MudText Typo="Typo.caption" Class="ml-2">Required: a Parent holds other records; a Child is filed under a Parent.</MudText>
+                    </MudItem>
+                }
                 <MudItem xs="12" md="6">
                     <MudSelect T="string" Label="State" @bind-Value="_model.State">
                         @foreach (var s in SeedData.RecordStates) { <MudSelectItem Value="s">@s</MudSelectItem> }
@@ -66,28 +76,42 @@
                 <MudItem xs="12">
                     <MudTextField T="string" Label="Subject" @bind-Value="_model.Subject" Lines="2" />
                 </MudItem>
-                <MudItem xs="12" md="6">
-                    <MudTextField T="string" Label="Home *" @bind-Value="_model.Home" Required="true" ReadOnly="true"
-                                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickHome" />
-                    <MudText Typo="Typo.caption">@_model.HomeKind</MudText>
-                </MudItem>
-                <MudItem xs="12" md="6">
-                    <div class="d-flex gap-2 align-center">
-                        <MudTextField T="string" Label="Assignee *" Value="_model.Assignee" Required="true" ReadOnly="true"
-                                      Style="flex:1" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
-                                      OnAdornmentClick="PickAssignee" />
-                        <MudTooltip Text="Default assignee to home">
-                            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="MatchHome">Match Home</MudButton>
-                        </MudTooltip>
-                    </div>
-                    <MudText Typo="Typo.caption">@_model.AssigneeKind</MudText>
-                </MudItem>
-                <MudItem xs="12" md="6">
-                    <MudSelect T="int?" Label="Parent Record (compressed children)" @bind-Value="_model.ParentRecordId"
-                               Clearable="true" HelperText="Only compressed records can have child records.">
-                        @foreach (var p in _compressed) { <MudSelectItem Value="@((int?)p.Id)">@p.RecordNumber</MudSelectItem> }
-                    </MudSelect>
-                </MudItem>
+                @if (_model.ParentRecordId != null || (_model.RecordType == "Compressed" && _model.CompressedRole == "Child"))
+                {
+                    @* Filed under a compressed parent: Home and Assignee ARE the parent record itself. *@
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="int?" Label="Compressed Parent *" @bind-Value="_model.ParentRecordId"
+                                   Required="true" RequiredError="Select the compressed parent." Clearable="true"
+                                   HelperText="Home and Assignee are the parent record itself — the child moves with its parent automatically. Clear to un-file.">
+                            @foreach (var p in _compressedParents) { <MudSelectItem Value="@((int?)p.Id)">@p.RecordNumber (@p.Barcode)</MudSelectItem> }
+                        </MudSelect>
+                    </MudItem>
+                }
+                else
+                {
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Home *" @bind-Value="_model.Home" Required="true" ReadOnly="true"
+                                      Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="PickHome" />
+                        <MudText Typo="Typo.caption">@_model.HomeKind</MudText>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <div class="d-flex gap-2 align-center">
+                            <MudTextField T="string" Label="Assignee *" Value="_model.Assignee" Required="true" ReadOnly="true"
+                                          Style="flex:1" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                                          OnAdornmentClick="PickAssignee" />
+                            <MudTooltip Text="Default assignee to home">
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="MatchHome">Match Home</MudButton>
+                            </MudTooltip>
+                        </div>
+                        <MudText Typo="Typo.caption">@_model.AssigneeKind</MudText>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="int?" Label="Parent Record (compressed children)" @bind-Value="_model.ParentRecordId"
+                                   Clearable="true" HelperText="File this record under a compressed parent — any record type keeps its type.">
+                            @foreach (var p in _compressedParents) { <MudSelectItem Value="@((int?)p.Id)">@p.RecordNumber</MudSelectItem> }
+                        </MudSelect>
+                    </MudItem>
+                }
             </MudGrid>
             @if (!string.IsNullOrEmpty(_error))
             {

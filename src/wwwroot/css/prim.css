@@ -57,6 +57,22 @@ tr.prim-row-nochildren td.mud-table-cell:first-child .mud-icon-button.mud-disabl
 .prim-grid { min-width: 0; }
 .prim-grid .mud-table-container { overflow-x: clip; }
 
+/* Dark mode (v0.12.0): MudBlazor handles its own components through the
+   theme provider; these rules cover PRIM's custom classes. The class is
+   toggled on <body> by prim.theme.setDark. */
+body.dark .login-wrap { background: #121212; }
+body.dark .log-row { border-bottom-color: #424242; }
+body.dark .log-time { color: #9e9e9e; }
+body.dark .label-sheet { border-color: #616161; }
+body.dark .mud-table-row.prim-row-selected,
+body.dark tr.prim-row-selected {
+    background-color: rgba(144, 202, 249, 0.16) !important;
+}
+body.dark .mud-table-row.prim-row-selected:hover,
+body.dark tr.prim-row-selected:hover {
+    background-color: rgba(144, 202, 249, 0.26) !important;
+}
+
 /* Search tab titles: the chip shows an ellipsis for long titles; the full
    search logic lives in the tab title and its hover tooltip. */
 .search-tab-title {

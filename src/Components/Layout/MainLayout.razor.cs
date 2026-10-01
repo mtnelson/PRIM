@@ -29,6 +29,10 @@ public partial class MainLayout : IDisposable
     private DotNetObjectReference<MainLayout>? _self;
     private MudMenu? _newMenu;
     private IDisposable? _globalNewRegistration;
+    // v0.12.0 dark/light mode: per-user stored preference; null preference
+    // falls back to the OS prefers-color-scheme setting (resolved via JS).
+    private bool _darkMode;
+    private string? _themeLoadedFor;
 
     protected override async Task OnInitializedAsync()
     {
@@ -37,6 +41,7 @@ public partial class MainLayout : IDisposable
         // registered combos change, even if this layout doesn't re-render.
         Hotkeys.CombosChanged += OnCombosChanged;
         App.ActiveAnnouncement = await Prim.GetAnnouncementAsync();
+        await LoadThemeAsync();
         Hotkeys.PushScope("shell");
         Hotkeys.Register("shell", "Alt+1", () => Nav.NavigateTo(""));
         Hotkeys.Register("shell", "Alt+2", () => Nav.NavigateTo("advanced"));
@@ -59,6 +64,16 @@ public partial class MainLayout : IDisposable
         {
             _self = DotNetObjectReference.Create(this);
             await PrimJs.TryInvokeVoidAsync(JS, "prim.hotkeys.init", _self);
+            // No stored preference: fall back to the OS color-scheme setting.
+            // (JS is only available after the first render — never call it
+            // from OnInitializedAsync, which also runs during prerendering.)
+            if (App.IsAuthenticated && _themeLoadedFor == App.CurrentUserId
+                && await Prim.GetThemePreferenceAsync(App.CurrentUserId) == null)
+            {
+                _darkMode = await PrimJs.TryInvokeAsync<bool>(JS, "prim.theme.prefersDark") == true;
+                StateHasChanged();
+            }
+            await PrimJs.TryInvokeVoidAsync(JS, "prim.theme.setDark", _darkMode);
         }
         // Keep the browser's synchronous preventDefault set in sync. The
         // CombosChanged event (subscribed in OnInitializedAsync) re-renders
@@ -140,7 +155,42 @@ public partial class MainLayout : IDisposable
         }
     }
 
-    private void OnAppChanged() => InvokeAsync(StateHasChanged);
+    private async Task<string?> LoadThemeAsync()
+    {
+        if (!App.IsAuthenticated) return null;
+        _themeLoadedFor = App.CurrentUserId;
+        var pref = await Prim.GetThemePreferenceAsync(App.CurrentUserId);
+        if (pref != null) _darkMode = pref == "Dark";
+        // pref == null: OS default is resolved via JS in OnAfterRenderAsync
+        // (first render) or in OnAppChanged (user switch) — never before the
+        // interactive circuit exists, where JS interop is unavailable.
+        return pref;
+    }
+
+    private async Task ToggleTheme()
+    {
+        _darkMode = !_darkMode;
+        await PrimJs.TryInvokeVoidAsync(JS, "prim.theme.setDark", _darkMode);
+        if (App.IsAuthenticated)
+            await Prim.SetThemePreferenceAsync(App.CurrentUserId, _darkMode ? "Dark" : "Light");
+    }
+
+    private void OnAppChanged() => InvokeAsync(async () =>
+    {
+        // Sign-in/out changes the user: reload their stored theme choice.
+        if (App.IsAuthenticated && _themeLoadedFor != App.CurrentUserId)
+        {
+            var pref = await LoadThemeAsync();
+            if (pref == null)
+                _darkMode = await PrimJs.TryInvokeAsync<bool>(JS, "prim.theme.prefersDark") == true;
+            await PrimJs.TryInvokeVoidAsync(JS, "prim.theme.setDark", _darkMode);
+        }
+        else if (!App.IsAuthenticated)
+        {
+            _themeLoadedFor = null;
+        }
+        StateHasChanged();
+    });
 
     public void Dispose()
     {

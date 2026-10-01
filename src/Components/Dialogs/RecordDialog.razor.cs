@@ -24,7 +24,7 @@ public partial class RecordDialog : ComponentBase
 
     private MudForm _form = null!;
     private RecordItem _model = new();
-    private List<RecordItem> _compressed = new();
+    private List<RecordItem> _compressedParents = new();
     private List<string> _labels = new();
     private string? _error;
     private string _originalType = "";
@@ -32,7 +32,11 @@ public partial class RecordDialog : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        _compressed = (await Prim.GetRecordsAsync()).Where(r => r.RecordType == "Compressed").ToList();
+        // v0.12.0: only Compressed Parents can accept filed children (no
+        // nesting); a record can never be its own parent.
+        _compressedParents = (await Prim.GetRecordsAsync())
+            .Where(r => r.RecordType == "Compressed" && r.CompressedRole == "Parent" && r.Id != Model.Id)
+            .ToList();
         _model = Model.Id == 0
             ? new RecordItem { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : Clone(Model);
@@ -49,7 +53,8 @@ public partial class RecordDialog : ComponentBase
         Labels = r.Labels, SecurityClassification = r.SecurityClassification, Subject = r.Subject, Notes = r.Notes,
         Home = r.Home, HomeKind = r.HomeKind, HomeRefId = r.HomeRefId,
         Assignee = r.Assignee, AssigneeKind = r.AssigneeKind, AssigneeRefId = r.AssigneeRefId,
-        ParentRecordId = r.ParentRecordId, State = r.State, RowVersion = r.RowVersion
+        ParentRecordId = r.ParentRecordId, CompressedRole = r.CompressedRole,
+        State = r.State, RowVersion = r.RowVersion
     };
 
     private void UpperClass(string v) => _model.CaseClassification = v.ToUpperInvariant();

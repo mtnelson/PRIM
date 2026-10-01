@@ -1,4 +1,8 @@
-# PRIM Changelog
+# RIM Changelog
+
+## v0.13.0 — 2026-10-01
+- Renamed: PRIM is now RIM — new name and new logo throughout the app (titles, header, login screen, help, release notes).
+- Compatibility note: your existing data is untouched. The database file stays `prim.db`, the `ConnectionStrings:Prim` key and `Prim:HttpPort` setting keep their names, and all database tables are unchanged — just upgrade in place.
 
 ## v0.12.0 — 2026-10-01
 - Dark / light mode: new toggle in the app header (next to the + button). Your choice is remembered per user; with no stored choice the app follows your OS setting.

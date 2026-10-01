@@ -16,19 +16,19 @@ body {
 }
 
 /* Selected grid rows: obvious highlight (selection) */
-.mud-table-row.prim-row-selected,
-tr.prim-row-selected {
+.mud-table-row.rim-row-selected,
+tr.rim-row-selected {
     background-color: rgba(25, 118, 210, 0.16) !important;
 }
-.mud-table-row.prim-row-selected:hover,
-tr.prim-row-selected:hover {
+.mud-table-row.rim-row-selected:hover,
+tr.rim-row-selected:hover {
     background-color: rgba(25, 118, 210, 0.26) !important;
 }
 
 /* Hierarchy caret: the expand button is disabled on rows without children
    (ButtonDisabledFunc); hide it so the caret only appears where there is
    something to expand. The hierarchy column is the first column. */
-tr.prim-row-nochildren td.mud-table-cell:first-child .mud-icon-button.mud-disabled {
+tr.rim-row-nochildren td.mud-table-cell:first-child .mud-icon-button.mud-disabled {
     visibility: hidden;
 }
 
@@ -49,27 +49,27 @@ tr.prim-row-nochildren td.mud-table-cell:first-child .mud-icon-button.mud-disabl
     .label-sheet:last-child { page-break-after: auto; }
 }
 
-/* PRIM data grids: exactly one horizontal scrollbar.
+/* RIM data grids: exactly one horizontal scrollbar.
    MudBlazor gives the outer grid element overflow-x when HorizontalScrollbar is
    set; the inner .mud-table-container must never add a second one, and the
    grid must be allowed to shrink inside flex layouts (min-width: 0) so the
    page body never grows its own horizontal scrollbar. */
-.prim-grid { min-width: 0; }
-.prim-grid .mud-table-container { overflow-x: clip; }
+.rim-grid { min-width: 0; }
+.rim-grid .mud-table-container { overflow-x: clip; }
 
 /* Dark mode (v0.12.0): MudBlazor handles its own components through the
-   theme provider; these rules cover PRIM's custom classes. The class is
-   toggled on <body> by prim.theme.setDark. */
+   theme provider; these rules cover RIM's custom classes. The class is
+   toggled on <body> by rim.theme.setDark. */
 body.dark .login-wrap { background: #121212; }
 body.dark .log-row { border-bottom-color: #424242; }
 body.dark .log-time { color: #9e9e9e; }
 body.dark .label-sheet { border-color: #616161; }
-body.dark .mud-table-row.prim-row-selected,
-body.dark tr.prim-row-selected {
+body.dark .mud-table-row.rim-row-selected,
+body.dark tr.rim-row-selected {
     background-color: rgba(144, 202, 249, 0.16) !important;
 }
-body.dark .mud-table-row.prim-row-selected:hover,
-body.dark tr.prim-row-selected:hover {
+body.dark .mud-table-row.rim-row-selected:hover,
+body.dark tr.rim-row-selected:hover {
     background-color: rgba(144, 202, 249, 0.26) !important;
 }
 

@@ -1,6 +1,6 @@
-# PRIM — Setup and Run Guide
+# RIM — Setup and Run Guide
 
-**PRIM — Physical Records Inventory Manager.** A Content Manager–style
+**RIM — Physical Records Inventory Manager.** A Content Manager–style
 records-management prototype: Blazor Server on .NET 8 with a MudBlazor
 desktop interface. It tracks **metadata and physical locations only** —
 no electronic documents are attached or stored.
@@ -13,15 +13,15 @@ no electronic documents are attached or stored.
 
 ## Install
 
-1. Unzip the package to any folder, e.g. `C:\PRIM\`.
+1. Unzip the package to any folder, e.g. `C:\RIM\`.
    (Avoid `C:\Program Files\` unless you run as administrator —
    the app writes its database next to the executable.)
-2. Double-click **`Start PRIM.bat`**.
+2. Double-click **`Start RIM.bat`**.
 3. Your browser opens to `http://localhost:5000/`.
 4. Sign in on the login screen. Dev credentials (password = username):
    `admin01` (Admin), `recordsmgr01` (Records Manager), `mtnelson` (Staff).
 
-To stop the app, close the "PRIM Server" console window.
+To stop the app, close the "RIM Server" console window.
 
 ## First-run verification
 
@@ -32,7 +32,7 @@ right-click menus, dialogs, search, and exports — works in your browser.
 ## Your data
 
 - The SQLite database is created automatically on first run at
-  `data\prim.db` next to `Prim.exe`, pre-loaded with sample
+  `data\prim.db` next to `Rim.exe`, pre-loaded with sample
   records, containers, locations, and users.
 - **Back up** by copying `data\prim.db` while the app is stopped.
 - To start over with a fresh database, stop the app and delete
@@ -41,7 +41,7 @@ right-click menus, dialogs, search, and exports — works in your browser.
 ## Changing the port
 
 Edit `appsettings.json` and set `Prim:HttpPort` (default `5000`),
-then restart. Update the URL in `Start PRIM.bat` to match.
+then restart. Update the URL in `Start RIM.bat` to match.
 
 ## Switching to SQL Server (optional)
 
@@ -61,7 +61,7 @@ workflows, consignment lists, document queues. Record requests
 
 - **Browser shows "can't reach this site":** the server is still starting;
   wait a few seconds and refresh. If it persists, check the
-  "PRIM Server" window for error messages.
+  "RIM Server" window for error messages.
 - **Port already in use:** change `Prim:HttpPort` in `appsettings.json`.
 - **Windows SmartScreen warning:** this is expected for an unsigned
   self-published app — choose "More info" then "Run anyway".

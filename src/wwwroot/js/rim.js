@@ -1,6 +1,7 @@
-// PRIM client helpers. NOTE: callers reference these as prim.* — the global
-// MUST stay named `prim` (a previous rename to `ripdesk` broke Copy/Export/Print).
-window.prim = {
+// RIM client helpers. Callers (via RimJs) reference these as rim.* — the
+// global MUST stay named `rim` and the two sides must be renamed together
+// (a past one-sided rename broke Copy/Export/Print).
+window.rim = {
     download: function (filename, content, mime) {
         const blob = new Blob([content], { type: mime || 'text/plain' });
         const url = URL.createObjectURL(blob);
@@ -31,7 +32,7 @@ window.prim = {
         if (el) el.focus();
     },
     // Dark/light mode (v0.12.0). MudBlazor's MudThemeProvider handles its
-    // own components; the body.dark class covers PRIM's custom CSS rules.
+    // own components; the body.dark class covers RIM's custom CSS rules.
     theme: {
         prefersDark: function () {
             return !!(window.matchMedia &&
@@ -52,18 +53,18 @@ window.prim = {
         setCombos: function (arr) {
             const s = {};
             (arr || []).forEach(c => { s[c] = 1; });
-            window.prim.hotkeys._combos = s;
+            window.rim.hotkeys._combos = s;
         },
         init: function (dotNet) {
-            if (window.prim.hotkeys._inited) return;
-            window.prim.hotkeys._inited = true;
+            if (window.rim.hotkeys._inited) return;
+            window.rim.hotkeys._inited = true;
             document.addEventListener('keydown', function (e) {
                 const tag = (e.target && e.target.tagName) || '';
                 const editable = /^(INPUT|TEXTAREA|SELECT)$/.test(tag) ||
                     (e.target && e.target.isContentEditable);
                 // Escape always goes to the app (close dialog / clear selection).
                 if (e.key === 'Escape') {
-                    if (window.prim.hotkeys._combos['Escape']) e.preventDefault();
+                    if (window.rim.hotkeys._combos['Escape']) e.preventDefault();
                     dotNet.invokeMethodAsync('OnHotkey', 'Escape');
                     return;
                 }
@@ -73,22 +74,22 @@ window.prim = {
                 // here too, or the browser's native action (new window,
                 // save-page dialog, ...) fires instead of the app handler.
                 if (editable) {
-                    const ec = window.prim.hotkeys.combo(e);
-                    if (ec && window.prim.hotkeys._combos[ec] &&
+                    const ec = window.rim.hotkeys.combo(e);
+                    if (ec && window.rim.hotkeys._combos[ec] &&
                         !/^(Ctrl\+(C|X|V|Z|Y|A)|Delete|Backspace)$/.test(ec)) {
                         e.preventDefault();
                         dotNet.invokeMethodAsync('OnHotkey', ec);
                     }
                     return;
                 }
-                const combo = window.prim.hotkeys.combo(e);
+                const combo = window.rim.hotkeys.combo(e);
                 if (!combo) return;
                 // If the user selected actual text, Ctrl+C / Ctrl+A belong to
                 // the browser (copy/select that text), not to the grid.
                 const sel = window.getSelection && window.getSelection();
                 const hasTextSel = sel && !sel.isCollapsed;
                 if (hasTextSel && (combo === 'Ctrl+C' || combo === 'Ctrl+A')) return;
-                if (window.prim.hotkeys._combos[combo]) e.preventDefault();
+                if (window.rim.hotkeys._combos[combo]) e.preventDefault();
                 dotNet.invokeMethodAsync('OnHotkey', combo);
             });
         },

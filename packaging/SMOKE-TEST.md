@@ -1,12 +1,12 @@
-# PRIM — Browser Smoke Test
+# RIM — Browser Smoke Test
 
-Run this once on the PC where PRIM is installed. It verifies the
+Run this once on the PC where RIM is installed. It verifies the
 interactive behavior that automated server-side tests cannot cover
 (Blazor circuit, right-click menus, dialogs, clipboard, printing).
 Takes about 5 minutes.
 
-Preconditions: PRIM installed per `README.md`, server started via
-`Start PRIM.bat`, browser open at `http://localhost:5000/`.
+Preconditions: RIM installed per `README.md`, server started via
+`Start RIM.bat`, browser open at `http://localhost:5000/`.
 
 ## 0. Login
 
@@ -18,7 +18,7 @@ Preconditions: PRIM installed per `README.md`, server started via
 ## 1. Startup
 
 - [ ] Page loads with no "couldn't connect" / error banner.
-- [ ] Top bar shows **PRIM — Physical Records Inventory Manager**.
+- [ ] Top bar shows **RIM — Physical Records Inventory Manager**.
 - [ ] Left shortcut pane lists: Dashboard, Records, Containers,
       Locations, Users, Advanced Search, Workspaces, Reports, Administration.
 - [ ] Announcement banner is visible (seeded welcome message).
@@ -169,9 +169,9 @@ Click each shortcut; each page renders its grid/content with no error:
 
 ## 9. Shutdown
 
-- [ ] Close the "PRIM Server" console window; the browser can no longer
+- [ ] Close the "RIM Server" console window; the browser can no longer
       reach the site (server stopped cleanly).
-- [ ] `data\prim.db` exists next to `Prim.exe` (your data file — back it up).
+- [ ] `data\prim.db` exists next to `Rim.exe` (your data file — back it up).
 
 If any step fails, note the exact step, what you saw, and any text in the
 F12 Console, and report it back.

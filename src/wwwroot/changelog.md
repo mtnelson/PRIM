@@ -1,5 +1,24 @@
 # RIM Changelog
 
+## v0.13.1 — 2026-10-01 — code-review hardening
+- Fixed a startup crash when upgrading from an older database: schema columns are now all added before any backfill runs.
+- The automatic schema upgrade now works on SQL Server as well as SQLite (provider-specific upgrade steps); previously it used SQLite-only statements and SQL Server could not start.
+- Security: the Users and Admin pages now require the Administrator role — non-admins see "not authorized" and the nav links are hidden for them. Admin write paths pass the caller's role (`actorRole`) for server-side enforcement.
+- Development password login is now opt-in via `Auth:AllowDevPasswords` (default off — fail closed), with login-attempt throttling (5 failures/minute per username, then a 5-minute lockout), minimum password length raised to 8, and a loud startup warning logged whenever it is enabled.
+- The compressed-parent dropdown, the home/assignee picker, and the Admin recycle bin now use server-side filtered, take-capped queries (500-row pages with search) instead of loading whole tables; picker tree nodes load their children lazily on expand.
+- The per-item audit log now consults an in-memory manifest mapping export files to the items they contain, so opening it reads only files that can hold that item's rows instead of line-scanning every archive file.
+- Record/Container/Location/User/Delete dialog save handlers (and Move) now surface database errors in the dialog via Snackbar instead of tearing the circuit.
+- Packaged README install steps fixed to the RIM names (`Start RIM.bat`, `Rim.exe`, `C:\RIM\`, "RIM Server" window); `prim.db`, `ConnectionStrings:Prim`, and `Prim:HttpPort` keep their legacy names.
+- Barcode uniqueness is now enforced for containers, locations, and users (was records-only); database save errors surface as messages in the dialog instead of crashing the page; numbering a new item survives concurrent creates and ignores legacy non-conforming numbers.
+- Ancestor breadcrumb paths are now resolved with small batched queries instead of loading entire tables per grid page — this was the single biggest 20M-record scalability blocker.
+- Added the missing database indexes the barcode tool and tree grids need (barcodes on all four tables, parent/home references).
+- Compressed-record rules tightened: cannot file under a deleted parent, cannot delete a parent that still has children, leaving the Compressed type unfiles the record (other types keep their parent link), and the parent link is only cleared when actually leaving the Compressed type.
+- Audit retention now runs in the background instead of blocking every save; a failed audit export (e.g. disk full) no longer breaks all writes.
+- Grid paging keeps working with explicit sort orders at scale (keyset resume instead of degrading OFFSET); Reports grouping and Dashboard quick search are bounded server-side queries.
+- Barcode moves resolve all barcodes in batched queries (no more one-query-per-barcode) and stay under SQL Server's parameter limit.
+- Search wildcards now behave identically on SQLite and SQL Server.
+- Upgrade note: existing databases gain the new indexes automatically on startup (barcode indexes are non-unique on upgraded databases so legacy duplicates can't block startup); unique enforcement applies to fresh databases.
+
 ## v0.13.0 — 2026-10-01
 - Renamed: PRIM is now RIM — new name and new logo throughout the app (titles, header, login screen, help, release notes).
 - Compatibility note: your existing data is untouched. The database file stays `prim.db`, the `ConnectionStrings:Prim` key and `Prim:HttpPort` setting keep their names, and all database tables are unchanged — just upgrade in place.

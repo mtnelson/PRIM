@@ -1,11 +1,11 @@
-# PRIM — Physical Records Inventory Manager
+# RIM — Physical Records Inventory Manager
 
-PRIM is a metadata-only records inventory system (Blazor Server / .NET 8 /
+RIM is a metadata-only records inventory system (Blazor Server / .NET 8 /
 MudBlazor): records, containers, locations, and users with a Content
 Manager–style desktop shell. SQLite by default; SQL Server path documented.
 
 This repo contains the full prototype source, integration tests, and
-packaging docs (`SMOKE-TEST.md`, `Start PRIM.bat`).
+packaging docs (`packaging/`, `SMOKE-TEST.md`, `Start RIM.bat`).
 
 ## Run on your PC
 
@@ -14,18 +14,22 @@ no network dependencies).
 
 1. **Download** the portable zip (54 MB):
    <https://github.com/mtnelson/PRIM/releases/download/rim-v0.13.0/RIM-portable-win-x64.zip>
-2. **Unzip** to any folder, e.g. `C:\PRIM\` (avoid `C:\Program Files\` unless
+2. **Unzip** to any folder, e.g. `C:\RIM\` (avoid `C:\Program Files\` unless
    running as administrator — the app writes its database next to the exe).
-3. **Double-click `Start PRIM.bat`**. Your browser opens to
+   Extract into a fresh folder; do not unzip over an old install.
+3. **Double-click `Start RIM.bat`**. Your browser opens to
    `http://localhost:5000/`.
 4. Sign in on the login screen. Dev credentials (password = username):
    `admin01` (Admin), `recordsmgr01` (Records Manager), `mtnelson` (Staff).
+   (Dev password login is enabled by `Auth:AllowDevPasswords` in
+   `appsettings.json`; the app logs a warning while it is on. Set it to
+   `false` to disable password login entirely.)
 5. Run the 5-minute smoke test in `SMOKE-TEST.md`.
 
-Your data lives in `data\prim.db` next to `Prim.exe` — back it up by copying
-that file while the app is stopped. To stop the app, close the "PRIM Server"
+Your data lives in `data\prim.db` next to `Rim.exe` — back it up by copying
+that file while the app is stopped. To stop the app, close the "RIM Server"
 console window. Default port is 5000 (change via `Prim:HttpPort` in
-`appsettings.json`, and update the URL in `Start PRIM.bat`).
+`appsettings.json`, and update the URL in `Start RIM.bat`).
 
 ## Build from source
 
@@ -36,4 +40,5 @@ dotnet build -c Release
 dotnet test
 ```
 
-See the source `README.md` in the repo root for details.
+See `packaging/` for the portable-zip build notes and `SMOKE-TEST.md` for
+the Windows verification checklist.

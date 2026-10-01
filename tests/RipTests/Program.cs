@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Primitives;
+using System.Reflection;
 using Rim.Data;
 using Rim.Services;
 
@@ -45,7 +46,7 @@ Check(advWild.Count == 2, "advanced wildcard Home HQ-SHIP-* -> 2", $"got {advWil
 
 // ---- record create: system numbers, uppercase normalization ----
 var nr = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "hq", CaseNumber = "abc123", Volume = "1", Subject = "harness test", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
-var cr = await svc.SaveRecordAsync(nr, "harness");
+var cr = await svc.SaveRecordAsync(nr, "harness", "Records Manager");
 Check(cr.Ok, "record create ok", cr.Error);
 Check(nr.RecordNumber == "R-000006" && nr.Barcode == "REC000006", "system-generated R-000006/REC000006", $"{nr.RecordNumber}/{nr.Barcode}");
 Check(nr.CaseNumber == "ABC123", "case number forced uppercase");
@@ -57,7 +58,7 @@ Check(auditCreate.Any(a => a.Action == "Created"), "audit Created event");
 var loaded = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000001");
 var rv = loaded.RowVersion;
 loaded.Subject = "Updated subject";
-var up = await svc.SaveRecordAsync(loaded, "harness");
+var up = await svc.SaveRecordAsync(loaded, "harness", "Records Manager");
 Check(up.Ok, "record update ok", up.Error);
 var auditUpd = await svc.GetAuditAsync("Record", loaded.Id);
 var subjAudit = auditUpd.FirstOrDefault(a => a.FieldName == "Subject");
@@ -68,9 +69,9 @@ Check(subjAudit != null && subjAudit.OldValue == "Quarterly review file" && subj
 var stale = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000002");
 var staleRv = stale.RowVersion;
 var fresh = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000002");
-fresh.Notes = "fresh change"; await svc.SaveRecordAsync(fresh, "harness");
+fresh.Notes = "fresh change"; await svc.SaveRecordAsync(fresh, "harness", "Records Manager");
 stale.Notes = "stale change";
-var cc = await svc.SaveRecordAsync(stale, "harness");
+var cc = await svc.SaveRecordAsync(stale, "harness", "Records Manager");
 Check(!cc.Ok && cc.Error != null && cc.Error.Contains("latest version"), "concurrency rejects stale RowVersion", cc.Error);
 Check(staleRv == fresh.RowVersion - 1 || stale.RowVersion != (await svc.GetRecordAsync(stale.Id))!.RowVersion, "rowversion advanced");
 
@@ -78,17 +79,22 @@ Check(staleRv == fresh.RowVersion - 1 || stale.RowVersion != (await svc.GetRecor
 async Task<int> NewDeletable(string subj)
 {
     var r = new RecordItem { RecordType = "Case File", CaseClassification = "99", FieldOffice = "HQ", CaseNumber = "DEL" + Guid.NewGuid().ToString("N")[..6].ToUpper(), Volume = "1", Subject = subj, Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
-    var res = await svc.SaveRecordAsync(r, "harness");
+    var res = await svc.SaveRecordAsync(r, "harness", "Records Manager");
     if (!res.Ok) throw new Exception("setup create failed: " + res.Error);
     return r.Id;
 }
 var d1 = await NewDeletable("dup"); var d2 = await NewDeletable("merged");
 var d3 = await NewDeletable("invalid"); var d4 = await NewDeletable("dispo"); var d5 = await NewDeletable("other");
-Check(await svc.DeleteRecordsAsync(new[] { d1 }, "Duplicate entry", null, null, "harness") == 1, "delete reason: Duplicate entry");
-Check(await svc.DeleteRecordsAsync(new[] { d2 }, "Merged with case file", "REC000001", null, "harness") == 1, "delete reason: Merged with case file");
-Check(await svc.DeleteRecordsAsync(new[] { d3 }, "Invalid Case Number", null, null, "harness") == 1, "delete reason: Invalid Case Number");
-Check(await svc.DeleteRecordsAsync(new[] { d4 }, "All files within range dispositioned", null, null, "harness") == 1, "delete reason: dispositioned");
-Check(await svc.DeleteRecordsAsync(new[] { d5 }, "Other", null, "entered in error", "harness") == 1, "delete reason: Other");
+var dr1 = await svc.DeleteRecordsAsync(new[] { d1 }, "Duplicate entry", null, null, "harness");
+Check(dr1.Ok && dr1.Count == 1, "delete reason: Duplicate entry", dr1.Error);
+var dr2 = await svc.DeleteRecordsAsync(new[] { d2 }, "Merged with case file", "REC000001", null, "harness");
+Check(dr2.Ok && dr2.Count == 1, "delete reason: Merged with case file", dr2.Error);
+var dr3 = await svc.DeleteRecordsAsync(new[] { d3 }, "Invalid Case Number", null, null, "harness");
+Check(dr3.Ok && dr3.Count == 1, "delete reason: Invalid Case Number", dr3.Error);
+var dr4 = await svc.DeleteRecordsAsync(new[] { d4 }, "All files within range dispositioned", null, null, "harness");
+Check(dr4.Ok && dr4.Count == 1, "delete reason: dispositioned", dr4.Error);
+var dr5 = await svc.DeleteRecordsAsync(new[] { d5 }, "Other", null, "entered in error", "harness");
+Check(dr5.Ok && dr5.Count == 1, "delete reason: Other", dr5.Error);
 var delRec = (await svc.GetRecordsAsync(includeDeleted: true)).First(r => r.Id == d5);
 Check(delRec.Deleted && delRec.DeleteReason == "Other: entered in error", "Other reason text stored", delRec.DeleteReason);
 var mergedRec = (await svc.GetRecordsAsync(includeDeleted: true)).First(r => r.Id == d2);
@@ -100,20 +106,17 @@ Check(delAudit.Any(a => a.Action == "Deleted" && (a.NewValue ?? "").Contains("Du
 
 // ---- deletion reason validation (service-level, TIS-370) ----
 var dv1 = await NewDeletable("neg-merge");
-var negMerge = false;
-try { await svc.DeleteRecordsAsync(new[] { dv1 }, "Merged with case file", null, null, "harness"); }
-catch (ArgumentException) { negMerge = true; }
-Check(negMerge, "service rejects merge without barcode");
+var negMergeRes = await svc.DeleteRecordsAsync(new[] { dv1 }, "Merged with case file", null, null, "harness");
+Check(!negMergeRes.Ok && negMergeRes.Count == 0 && negMergeRes.Error != null, "service rejects merge without barcode", negMergeRes.Error);
 var dv2 = await NewDeletable("neg-other");
-var negOther = false;
-try { await svc.DeleteRecordsAsync(new[] { dv2 }, "Other", null, "   ", "harness"); }
-catch (ArgumentException) { negOther = true; }
-Check(negOther, "service rejects Other without reason text");
+var negOtherRes = await svc.DeleteRecordsAsync(new[] { dv2 }, "Other", null, "   ", "harness");
+Check(!negOtherRes.Ok && negOtherRes.Count == 0 && negOtherRes.Error != null, "service rejects Other without reason text", negOtherRes.Error);
 var stillThere = await svc.GetRecordAsync(dv1);
 Check(stillThere != null && !stillThere.Deleted, "rejected delete leaves record intact");
 
 // ---- restore ----
-Check(await svc.RestoreRecordsAsync(new[] { d1, d2 }, "harness") == 2, "restore 2 records");
+var rr = await svc.RestoreRecordsAsync(new[] { d1, d2 }, "harness");
+Check(rr.Ok && rr.Count == 2, "restore 2 records", rr.Error);
 var restored = await svc.GetRecordAsync(d1);
 Check(restored != null && !restored.Deleted && restored.DeleteReason == null, "restored flags cleared");
 
@@ -122,10 +125,10 @@ var nc = new Container { ContainerName = "TEST-BOX-001", ContainerType = "Box", 
 var ccRes = await svc.SaveContainerAsync(nc, "harness");
 Check(ccRes.Ok && nc.Barcode == "CON000007", "container create CON000007", $"{ccRes.Error} {nc.Barcode}");
 var dupC = new Container { ContainerName = "TEST-BOX-001", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "TEST", FormattedNumber = "002", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User" };
-bool dupThrew = false;
-try { await svc.SaveContainerAsync(dupC, "harness"); } catch (DbUpdateException) { dupThrew = true; }
-Check(dupThrew, "duplicate container (type+name) rejected by unique index");
-Check(await svc.DeleteContainersAsync(new[] { nc.Id }, "harness") == 1, "container hard delete");
+var dupCRes = await svc.SaveContainerAsync(dupC, "harness");
+Check(!dupCRes.Ok, "duplicate container (type+name) rejected as clean tuple", dupCRes.Error);
+var dcNc = await svc.DeleteContainersAsync(new[] { nc.Id }, "harness");
+Check(dcNc.Ok && dcNc.Count == 1, "container hard delete", dcNc.Error);
 Check((await svc.GetContainersAsync()).All(c => c.Id != nc.Id), "container gone after delete");
 var cAudit = await svc.GetAuditAsync("Container", nc.Id);
 Check(cAudit.Any(a => a.Action == "Deleted"), "audit container Deleted");
@@ -135,12 +138,12 @@ var pc = new Container { ContainerName = "PARENT-BOX-001", ContainerType = "Box"
 Check((await svc.SaveContainerAsync(pc, "harness")).Ok, "parent container create");
 var kc = new Container { ContainerName = "CHILD-BOX-001", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "TEST", FormattedNumber = "011", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", ParentContainerId = pc.Id };
 Check((await svc.SaveContainerAsync(kc, "harness")).Ok, "child container create");
-var blocked = false;
-try { await svc.DeleteContainersAsync(new[] { pc.Id }, "harness"); }
-catch (InvalidOperationException) { blocked = true; }
-Check(blocked, "delete refused for container with children");
-Check(await svc.DeleteContainersAsync(new[] { kc.Id }, "harness") == 1, "child container deleted");
-Check(await svc.DeleteContainersAsync(new[] { pc.Id }, "harness") == 1, "parent deleted after child removed");
+var blockedRes = await svc.DeleteContainersAsync(new[] { pc.Id }, "harness");
+Check(!blockedRes.Ok && blockedRes.Count == 0, "delete refused for container with children", blockedRes.Error);
+var dcKc = await svc.DeleteContainersAsync(new[] { kc.Id }, "harness");
+Check(dcKc.Ok && dcKc.Count == 1, "child container deleted", dcKc.Error);
+var dcPc = await svc.DeleteContainersAsync(new[] { pc.Id }, "harness");
+Check(dcPc.Ok && dcPc.Count == 1, "parent deleted after child removed", dcPc.Error);
 
 // ---- container update + optimistic concurrency (same RowVersion pattern as records) ----
 var cu = new Container { ContainerName = "CONC-BOX-001", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "TEST", FormattedNumber = "020", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User" };
@@ -170,9 +173,9 @@ Check(!selfP.Ok, "self-parent rejected");
 
 // ---- users ----
 var nu = new AppUser { UserId = "htest", DisplayName = "Harness Tester", Role = "Staff", Email = "htest@local" };
-Check((await svc.SaveUserAsync(nu, "harness")).Ok, "user create");
+Check((await svc.SaveUserAsync(nu, "harness", "Admin")).Ok, "user create");
 var dupU = new AppUser { UserId = "htest", DisplayName = "Dup", Role = "Staff" };
-var dupUr = await svc.SaveUserAsync(dupU, "harness");
+var dupUr = await svc.SaveUserAsync(dupU, "harness", "Admin");
 Check(!dupUr.Ok && dupUr.Error != null && dupUr.Error.Contains("already exists"), "duplicate UserId rejected", dupUr.Error);
 
 // ---- move items ----
@@ -236,32 +239,32 @@ Check(HomeRules.ValidateHome("Container", "Location") == null, "container homed 
 Check(HomeRules.ValidateHome("Record", "Compressed") != null, "record homed to compressed rejected");
 Check(HomeRules.ValidateHome("Container", "Record") != null, "container homed to record rejected");
 var badHome = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "BADHOME1", Volume = "1", Home = "X", HomeKind = "Compressed", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
-Check(!(await svc.SaveRecordAsync(badHome, "harness")).Ok, "save record with compressed home rejected");
+Check(!(await svc.SaveRecordAsync(badHome, "harness", "Records Manager")).Ok, "save record with compressed home rejected");
 var badAssignee = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "BADASSIGN1", Volume = "1", Home = "SHELF 1", HomeKind = "Location", Assignee = "X", AssigneeKind = "Compressed", State = "Active" };
-Check(!(await svc.SaveRecordAsync(badAssignee, "harness")).Ok, "save record with compressed assignee rejected");
+Check(!(await svc.SaveRecordAsync(badAssignee, "harness", "Records Manager")).Ok, "save record with compressed assignee rejected");
 var badContainer = new Container { ContainerName = "BADHOME-BOX", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "TEST", FormattedNumber = "099", Home = "X", HomeKind = "Record", Assignee = "mtnelson", AssigneeKind = "User" };
 Check(!(await svc.SaveContainerAsync(badContainer, "harness")).Ok, "save container with record home rejected");
 
 // ---- compressed record children ----
 var parent = new RecordItem { RecordType = "Compressed", CompressedRole = "Parent", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "PAR001", Volume = "1", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
-Check((await svc.SaveRecordAsync(parent, "harness")).Ok, "compressed parent created");
+Check((await svc.SaveRecordAsync(parent, "harness", "Records Manager")).Ok, "compressed parent created");
 var child = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "CHD001", Volume = "1", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", ParentRecordId = parent.Id, State = "Active" };
-Check((await svc.SaveRecordAsync(child, "harness")).Ok, "child of compressed record ok");
+Check((await svc.SaveRecordAsync(child, "harness", "Records Manager")).Ok, "child of compressed record ok");
 var kids = await svc.GetChildRecordsAsync(parent.Id);
 Check(kids.Count == 1 && kids[0].Id == child.Id, "compressed children listed");
 var nonCompressed = (await svc.GetRecordsAsync()).First(r => r.RecordType == "Case File" && r.RecordNumber == "R-000001");
 var badChild = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "CHD002", Volume = "1", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", ParentRecordId = nonCompressed.Id, State = "Active" };
-Check(!(await svc.SaveRecordAsync(badChild, "harness")).Ok, "child of non-compressed record rejected");
+Check(!(await svc.SaveRecordAsync(badChild, "harness", "Records Manager")).Ok, "child of non-compressed record rejected");
 var selfParent = await svc.GetRecordAsync(parent.Id);
 selfParent!.ParentRecordId = selfParent.Id;
-Check(!(await svc.SaveRecordAsync(selfParent, "harness")).Ok, "self-parent rejected");
+Check(!(await svc.SaveRecordAsync(selfParent, "harness", "Records Manager")).Ok, "self-parent rejected");
 
 // ---- user location membership ----
 var locUser = new AppUser { UserId = "locuser", DisplayName = "Location User", Role = "Staff", LocationId = 1 };
-Check((await svc.SaveUserAsync(locUser, "harness")).Ok, "user with location membership");
+Check((await svc.SaveUserAsync(locUser, "harness", "Admin")).Ok, "user with location membership");
 var locUserReload = (await svc.GetUsersAsync()).First(u => u.UserId == "locuser");
 Check(locUserReload.LocationId == 1, "location membership persisted");
-var pwLoc = await svc.SetUserPasswordAsync("locuser", "secret99", "harness");
+var pwLoc = await svc.SetUserPasswordAsync("locuser", "secret99", "harness", "Admin");
 Check(pwLoc.Ok, "set user password");
 
 // ---- authentication via IAuthProvider (dev passwords) ----
@@ -300,7 +303,7 @@ Check(seedBox.AssigneeRefId == recMgrUser.Id && seedBox.HomeRefId != null, "seed
 
 // ---- record/container create resolves assignee name to ref id ----
 var refRec = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "REFASSIGN1", Volume = "1", Subject = "ref test", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
-Check((await svc.SaveRecordAsync(refRec, "harness")).Ok, "ref record create ok");
+Check((await svc.SaveRecordAsync(refRec, "harness", "Records Manager")).Ok, "ref record create ok");
 Check(refRec.AssigneeRefId == mtUser.Id, "record save resolves assignee name to ref id", refRec.AssigneeRefId?.ToString());
 var refCont = new Container { ContainerName = "REFASSIGN-BOX", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "TEST", FormattedNumber = "030", Home = "SHELF 1", HomeKind = "Location", Assignee = "recordsmgr01", AssigneeKind = "User" };
 Check((await svc.SaveContainerAsync(refCont, "harness")).Ok, "ref container create ok");
@@ -308,7 +311,7 @@ Check(refCont.AssigneeRefId == recMgrUser.Id, "container save resolves assignee 
 
 // ---- MoveItemsAsync: explicit assignee ref id + assignee-follows-home ----
 var mvT = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "MVREF1", Volume = "1", Subject = "move ref test", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
-Check((await svc.SaveRecordAsync(mvT, "harness")).Ok, "move-ref record create ok");
+Check((await svc.SaveRecordAsync(mvT, "harness", "Records Manager")).Ok, "move-ref record create ok");
 await svc.MoveItemsAsync("Record", new[] { mvT.Id }, null, null, null, "recordsmgr01", "User", recMgrUser.Id, false, "harness");
 var mvT2 = await svc.GetRecordAsync(mvT.Id);
 Check(mvT2!.AssigneeRefId == recMgrUser.Id && mvT2.Assignee == "recordsmgr01", "move sets explicit assignee ref id", mvT2.AssigneeRefId?.ToString());
@@ -354,9 +357,12 @@ Check(kidsOfMgr.Any(k => k.Kind == "Record" && k.Label == "R-000004"),
 // ---- child rows carry every grid column ----
 Check(kidsOfParent.All(k => k.Cells != null && k.Columns != null && k.Columns.Count > 0),
     "child items carry Cells + Columns");
-var kidRec = kidsOfParent[0];
-Check(kidRec.Columns!.Count == GridColumns.RecordColumns().Count
-      && kidRec.Cells!["RecordNumber"] == kidRec.Label
+// Guard: if the parent/child link above failed, kidsOfParent is empty —
+// record the failure without aborting the whole run.
+Check(kidsOfParent.Count > 0, "compressed parent returned its child row");
+var kidRec = kidsOfParent.Count > 0 ? kidsOfParent[0] : null;
+Check(kidRec != null && kidRec.Columns!.Count == GridColumns.RecordColumns().Count
+      && kidRec!.Cells!["RecordNumber"] == kidRec.Label
       && kidRec.Cells!["Barcode"] == child.Barcode
       && kidRec.Columns.Select(c => c.Key).SequenceEqual(GridColumns.RecordColumns().Select(c => c.Key)),
     "record child exposes every record column");
@@ -521,7 +527,7 @@ var allRecs = await svc.GetRecordsAsync();
 }
 {
     var inact = new AppUser { UserId = "inactive01", DisplayName = "Inactive One", Role = "Viewer", Active = false };
-    var su = await svc.SaveUserAsync(inact, "harness");
+    var su = await svc.SaveUserAsync(inact, "harness", "Admin");
     Check(su.Ok, "inactive user create ok", su.Error);
     var uActive = await svc.GetUsersPageAsync(new GridPageRequest { Take = 500 }, includeInactive: false);
     var uAll = await svc.GetUsersPageAsync(new GridPageRequest { Take = 500 }, includeInactive: true);
@@ -591,7 +597,8 @@ var allRecs = await svc.GetRecordsAsync();
 {
     var before = (await svc.GetRecordsAsync()).Count;
     var maxNumBefore = (await svc.GetRecordsAsync()).Select(r => r.RecordNumber).Max();
-    var seededNums = await svc.SeedTestRecordsAsync(25, "harness");
+    var (seed25Ok, seed25Err, seededNums) = await svc.SeedTestRecordsAsync(25, "harness", "Admin");
+Check(seed25Ok, "SeedTestRecordsAsync(25) ok", seed25Err);
     Check(seededNums.Count == 25, "SeedTestRecordsAsync(25) returns 25 record numbers");
     var afterRecs = await svc.GetRecordsAsync();
     Check(afterRecs.Count == before + 25, "seed adds exactly 25 records", $"before={before} after={afterRecs.Count}");
@@ -737,7 +744,8 @@ var allRecs = await svc.GetRecordsAsync();
         while (m) { var p = await svc.GetRecordsPageAsync(new GridPageRequest { Take = 500, AfterId = c });
             if (p.Rows.Count > 0) { maxIdBefore = Math.Max(maxIdBefore, p.Rows[^1].Id); c = p.Rows[^1].Id; } m = p.HasMore; }
     }
-    var addedNums = await svc.SeedTestRecordsAsync(1500, "harness");
+    var (seed1500Ok, seed1500Err, addedNums) = await svc.SeedTestRecordsAsync(1500, "harness", "Admin");
+Check(seed1500Ok, "SeedTestRecordsAsync(1500) ok", seed1500Err);
     Check(addedNums.Count == 1500, "seed 1500 returns 1500 numbers", $"got {addedNums.Count}");
 
     var seen = new List<int>(); var chunkSizes = new List<int>();
@@ -856,9 +864,11 @@ using (var db = factory.CreateDbContext())
         });
     await db.SaveChangesAsync();
 }
-Check(await svc.ArchiveAuditIfNeededAsync(maxHotRows: 1_000_000) == 0, "archival no-op under cap");
-var moved = await svc.ArchiveAuditIfNeededAsync(maxHotRows: 10);
-Check(moved == hotBefore + 30 - 10, "archival moves overflow oldest-first", $"moved {moved}");
+Check((await svc.ArchiveAuditIfNeededAsync("Admin", maxHotRows: 1_000_000)).Moved == 0, "archival no-op under cap");
+var archDenied = await svc.ArchiveAuditIfNeededAsync("Staff", maxHotRows: 10);
+Check(!archDenied.Ok && archDenied.Moved == 0 && archDenied.Error != null, "archival denied for Staff role", archDenied.Error);
+var archRes = await svc.ArchiveAuditIfNeededAsync("Admin", maxHotRows: 10);
+Check(archRes.Ok && archRes.Moved == hotBefore + 30 - 10, "archival moves overflow oldest-first", archRes.Error ?? $"moved {archRes.Moved}");
 using (var db = factory.CreateDbContext())
 {
     Check(await db.AuditEvents.LongCountAsync() == 10, "hot table at cap after archival");
@@ -877,8 +887,12 @@ var tmpAudit = Path.Combine(Path.GetTempPath(), $"audittest-{Guid.NewGuid():N}")
 var svc2 = new RimService(factory, null, tmpAudit);
 long archBefore;
 using (var db = factory.CreateDbContext()) archBefore = await db.ArchivedAuditEvents.LongCountAsync();
-Check(await svc2.ExportAuditArchiveIfNeededAsync(maxArchiveRows: 1_000_000) == null, "export no-op under cap");
-var expPath = await svc2.ExportAuditArchiveIfNeededAsync(maxArchiveRows: 5);
+Check((await svc2.ExportAuditArchiveIfNeededAsync("Admin", maxArchiveRows: 1_000_000)).Path == null, "export no-op under cap");
+var expRes = await svc2.ExportAuditArchiveIfNeededAsync("Admin", maxArchiveRows: 5);
+Check(expRes.Ok, "export ok", expRes.Error);
+var expDenied = await svc2.ExportAuditArchiveIfNeededAsync("Staff", maxArchiveRows: 5);
+Check(!expDenied.Ok && expDenied.Path == null, "export denied for Staff role", expDenied.Error);
+var expPath = expRes.Path;
 Check(expPath != null && File.Exists(expPath), "export writes .jsonl.gz");
 Check(expPath != null && File.Exists(expPath + ".sha256"), "export writes .sha256 sidecar");
 if (expPath != null)
@@ -901,10 +915,10 @@ try { await svc2.ReadAuditExportAsync("../../evil.gz"); } catch { threw = true; 
 Check(threw, "export reader rejects path traversal");
 try { Directory.Delete(tmpAudit, true); } catch { }
 
-// bulk-operation hook: archival runs automatically with a tiny configured cap
-var tinyCfg = new TestConfig(new Dictionary<string, string?> { ["Audit:MaxHotRows"] = "5" });
-var tmpAudit2 = Path.Combine(Path.GetTempPath(), $"audittest-{Guid.NewGuid():N}");
-var svc3 = new RimService(factory, tinyCfg, tmpAudit2);
+// retention runs fire-and-forget off the write path: writes must not block on
+// it, so assert on the deterministic direct call instead of background timing.
+long hookHotBefore;
+using (var db = factory.CreateDbContext()) hookHotBefore = await db.AuditEvents.LongCountAsync();
 using (var db = factory.CreateDbContext())
 {
     for (int i = 0; i < 8; i++)
@@ -915,10 +929,11 @@ using (var db = factory.CreateDbContext())
         });
     await db.SaveChangesAsync();
 }
-await svc3.MoveItemsAsync("Record", Array.Empty<int>(), null, null, null, null, null, null, false, "tester");
+await svc.MoveItemsAsync("Record", Array.Empty<int>(), null, null, null, null, null, null, false, "tester");
+var hookRes = await svc.ArchiveAuditIfNeededAsync("Admin", maxHotRows: 5);
 using (var db = factory.CreateDbContext())
-    Check(await db.AuditEvents.LongCountAsync() == 5, "bulk op triggers archival to configured cap");
-try { Directory.Delete(tmpAudit2, true); } catch { }
+    Check(hookRes.Ok && await db.AuditEvents.LongCountAsync() == 5,
+        "direct archival call trims hot table to cap", hookRes.Error ?? hookRes.Moved.ToString());
 
 // ---- advanced search: SQL tab query log ----
 {
@@ -1015,6 +1030,9 @@ try { Directory.Delete(tmpAudit2, true); } catch { }
     await using (var db = new RimDbContext(opts4))
     {
         await db.Database.EnsureCreatedAsync();
+        // v0.13.1 added a UNIQUE model index on Users.Barcode; SQLite will not
+        // DROP a column still referenced by an index, so drop it first.
+        await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_Users_Barcode");
         await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users DROP COLUMN Barcode");
         await db.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN Barcode TEXT");
         await db.Database.ExecuteSqlRawAsync(
@@ -1024,10 +1042,22 @@ try { Directory.Delete(tmpAudit2, true); } catch { }
     await using (var db = new RimDbContext(opts4))
     {
         SeedData.UpgradeSchema(db); // must not throw on NULL Barcode
-        var barcodes = await db.Users.Select(u => u.Barcode).ToListAsync();
-        Check(barcodes.Count > 0 && barcodes.All(b => b != null && b.StartsWith("USR")),
+        // The v0.13.1 M13 cheap-skip ("Any(u.Barcode == null || Barcode == '')")
+        // cannot see NULLs: Barcode is [Required], so EF translates "== null" to
+        // WHERE 0 and the backfill is skipped, leaving the NULL in place. A plain
+        // EF read of that row then throws ("The data is NULL at ordinal 0").
+        // Guard the throw so the suite records the failure instead of aborting.
+        List<string> barcodes = new();
+        Exception? readEx = null;
+        try { barcodes = await db.Users.Select(u => u.Barcode).ToListAsync(); }
+        catch (Exception ex) { readEx = ex; }
+        Check(readEx == null,
             "v0.13.0 UpgradeSchema backfills NULL user barcodes without crashing",
-            string.Join(",", barcodes));
+            readEx == null ? "" : $"EF read still crashes: {readEx.GetType().Name}: {readEx.Message}");
+        if (readEx == null)
+            Check(barcodes.Count > 0 && barcodes.All(b => b != null && b.StartsWith("USR")),
+                "v0.13.0 UpgradeSchema backfills NULL user barcodes without crashing",
+                string.Join(",", barcodes));
     }
     try { File.Delete(dbPath4); } catch { }
 }
@@ -1040,10 +1070,10 @@ Check(usersNow.First(u => u.UserId == "admin01").Barcode == "USR000001" &&
     "v0.12.0 seed users have sequential USR barcodes");
 var expectedUsr = "USR" + (usersNow.Count + 1).ToString("D6");
 var nusr = new AppUser { UserId = "scantest01", DisplayName = "Scan Test", Role = "Staff", Email = "scan@rim.local", PasswordHash = "x", PasswordSalt = "y" };
-var nusrRes = await svc.SaveUserAsync(nusr, "harness");
+var nusrRes = await svc.SaveUserAsync(nusr, "harness", "Admin");
 Check(nusrRes.Ok && nusr.Barcode == expectedUsr, "v0.12.0 new user gets next USR barcode", $"{nusrRes.Error}/{nusr.Barcode}");
 nusr.DisplayName = "Scan Test 2";
-var nusrUpd = await svc.SaveUserAsync(nusr, "harness");
+var nusrUpd = await svc.SaveUserAsync(nusr, "harness", "Admin");
 Check(nusrUpd.Ok && (await svc.GetUsersAsync()).First(u => u.UserId == "scantest01").Barcode == expectedUsr,
     "v0.12.0 user barcode survives update", nusrUpd.Error);
 
@@ -1071,30 +1101,30 @@ var seedParent = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-0
 Check(seedParent.RecordType == "Compressed" && seedParent.CompressedRole == "Parent",
     "v0.12.0 seed R-000003 is a Compressed Parent");
 
-var noRole = await svc.SaveRecordAsync(NewRec("Compressed", "CMP001"), "harness");
+var noRole = await svc.SaveRecordAsync(NewRec("Compressed", "CMP001"), "harness", "Records Manager");
 Check(!noRole.Ok && noRole.Error != null && noRole.Error.Contains("Parent or a Child"),
     "v0.12.0 Compressed requires a role", noRole.Error);
 
 var pRec = NewRec("Compressed", "CMP002", "Parent");
-var pRes = await svc.SaveRecordAsync(pRec, "harness");
+var pRes = await svc.SaveRecordAsync(pRec, "harness", "Records Manager");
 Check(pRes.Ok, "v0.12.0 Compressed Parent creates", pRes.Error);
 
-var childNoParent = await svc.SaveRecordAsync(NewRec("Compressed", "CMP003", "Child"), "harness");
+var childNoParent = await svc.SaveRecordAsync(NewRec("Compressed", "CMP003", "Child"), "harness", "Records Manager");
 Check(!childNoParent.Ok && childNoParent.Error != null && childNoParent.Error.Contains("compressed parent"),
     "v0.12.0 Compressed Child without parent rejected", childNoParent.Error);
 
 var nonParent = (await svc.GetRecordsAsync()).First(r => r.RecordNumber == "R-000001");
-var childBadParent = await svc.SaveRecordAsync(NewRec("Compressed", "CMP004", "Child", nonParent.Id), "harness");
+var childBadParent = await svc.SaveRecordAsync(NewRec("Compressed", "CMP004", "Child", nonParent.Id), "harness", "Records Manager");
 Check(!childBadParent.Ok && childBadParent.Error != null && childBadParent.Error.Contains("compressed parent"),
     "v0.12.0 Child under non-compressed record rejected", childBadParent.Error);
 
-var parentAsChild = await svc.SaveRecordAsync(NewRec("Compressed", "CMP005", "Parent", seedParent.Id), "harness");
+var parentAsChild = await svc.SaveRecordAsync(NewRec("Compressed", "CMP005", "Parent", seedParent.Id), "harness", "Records Manager");
 Check(!parentAsChild.Ok && parentAsChild.Error != null && parentAsChild.Error.Contains("cannot be placed inside"),
     "v0.12.0 Parent cannot be filed under another (no nesting)", parentAsChild.Error);
 
 // Happy path: child filed under seed parent — Home/Assignee become the parent record itself.
 var cchild = NewRec("Compressed", "CMP006", "Child", seedParent.Id);
-var childRes = await svc.SaveRecordAsync(cchild, "harness");
+var childRes = await svc.SaveRecordAsync(cchild, "harness", "Records Manager");
 Check(childRes.Ok, "v0.12.0 Compressed Child files under parent", childRes.Error);
 Check(cchild.Home == "R-000003" && cchild.HomeKind == "Record" && cchild.HomeRefId == seedParent.Id,
     "v0.12.0 child's Home is the parent record", $"{cchild.Home}/{cchild.HomeKind}/{cchild.HomeRefId}");
@@ -1103,7 +1133,7 @@ Check(cchild.Assignee == "R-000003" && cchild.AssigneeKind == "Record" && cchild
 
 // Any record type can be filed under a parent and keeps its type.
 var filedCase = NewRec("Case File", "CMP007", null, seedParent.Id);
-var filedRes = await svc.SaveRecordAsync(filedCase, "harness");
+var filedRes = await svc.SaveRecordAsync(filedCase, "harness", "Records Manager");
 Check(filedRes.Ok && filedCase.RecordType == "Case File" && filedCase.HomeKind == "Record",
     "v0.12.0 non-compressed record filed keeps type, homes to parent", filedRes.Error);
 
@@ -1118,19 +1148,19 @@ using (var db = factory.CreateDbContext())
     await db.SaveChangesAsync();
     legacyId = legacy.Id;
 }
-var childLegacy = await svc.SaveRecordAsync(NewRec("Case File", "CMP009", null, legacyId), "harness");
+var childLegacy = await svc.SaveRecordAsync(NewRec("Case File", "CMP009", null, legacyId), "harness", "Records Manager");
 Check(!childLegacy.Ok && childLegacy.Error != null && childLegacy.Error.Contains("compressed parent"),
     "v0.12.0 legacy null-role compressed cannot accept children", childLegacy.Error);
 
 // Parent with children cannot change type.
 var parentEdit = (await svc.GetRecordsAsync()).First(r => r.Id == seedParent.Id);
 parentEdit.RecordType = "Case File";
-var typeChg = await svc.SaveRecordAsync(parentEdit, "harness");
+var typeChg = await svc.SaveRecordAsync(parentEdit, "harness", "Records Manager");
 Check(!typeChg.Ok && typeChg.Error != null && typeChg.Error.Contains("children"),
     "v0.12.0 parent-with-children type change blocked", typeChg.Error);
 
 // A child cannot have children of its own.
-var grandChild = await svc.SaveRecordAsync(NewRec("Case File", "CMP010", null, cchild.Id), "harness");
+var grandChild = await svc.SaveRecordAsync(NewRec("Case File", "CMP010", null, cchild.Id), "harness", "Records Manager");
 Check(!grandChild.Ok && grandChild.Error != null && grandChild.Error.Contains("compressed parent"),
     "v0.12.0 child cannot accept children", grandChild.Error);
 
@@ -1228,6 +1258,438 @@ Check(unknownObj.FailCount == 1 && unknownObj.Outcomes[0].Message.Contains("not 
 
 var haRes = await svc.BarcodeSetHomeAndAssigneeAsync(new[] { "REC000002" }, "LOC000001", "USR000003", "harness");
 Check(haRes.SuccessCount == 1, "v0.12.0 set-home-and-assignee ok", string.Join("; ", haRes.Outcomes.Select(o => o.Message)));
+
+
+// ================= v0.13.1 review-fix regression tests =================
+
+// The v0.12.0 legacy-simulation rows above used deliberately non-conforming
+// numbers ("R-CMP008" etc.). They poison NextIntAsync for every later service
+// create (string MAX "R-CMP012" > "R-0015xx" -> TryParse fails -> returns 1 ->
+// "duplicate number"). Their assertions have all run; remove the artifacts so
+// the sections below exercise the service on a clean number sequence. The
+// underlying service defect has its own regression test on a separate DB.
+using (var cdb = factory.CreateDbContext())
+{
+    var poison = await cdb.Records.Where(r => r.RecordNumber == "R-CMP008" || r.RecordNumber == "R-CMP011" || r.RecordNumber == "R-CMP012").ToListAsync();
+    cdb.Records.RemoveRange(poison);
+    await cdb.SaveChangesAsync();
+    Console.WriteLine($"cleaned up {poison.Count} legacy R-CMPxxx rows");
+}
+// ---- H1: admin-only gates on user management, passwords, seeding, type changes ----
+var h1User = new AppUser { UserId = "h1user", DisplayName = "H1 User", Role = "Staff", Email = "h1@rim.local" };
+var h1Denied = await svc.SaveUserAsync(h1User, "harness", "Staff");
+Check(!h1Denied.Ok && h1Denied.Error != null && h1Denied.Error.Contains("administrators"),
+    "H1 SaveUserAsync denied for Staff", h1Denied.Error);
+Check(!(await svc.GetUsersAsync()).Any(u => u.UserId == "h1user"), "H1 denied user create left no row");
+Check((await svc.SaveUserAsync(h1User, "harness", "Admin")).Ok, "H1 SaveUserAsync allowed for Admin");
+
+var pwStaff = await svc.SetUserPasswordAsync("h1user", "newpassword99", "harness", "Staff");
+Check(!pwStaff.Ok && pwStaff.Error != null, "H1 SetUserPasswordAsync denied for Staff", pwStaff.Error);
+var pwShort = await svc.SetUserPasswordAsync("h1user", "short", "harness", "Admin");
+Check(!pwShort.Ok && pwShort.Error != null && pwShort.Error.Contains("8"),
+    "H1 password below 8 chars rejected", pwShort.Error);
+var pwOk = await svc.SetUserPasswordAsync("h1user", "newpassword99", "harness", "Admin");
+Check(pwOk.Ok, "H1 SetUserPasswordAsync allowed for Admin", pwOk.Error);
+var aH1 = await new DevPasswordAuthProvider(factory).AuthenticateAsync("h1user", "newpassword99");
+Check(aH1.Ok, "H1 admin-set password authenticates");
+
+var (seedStaffOk, seedStaffErr, seedStaffNums) = await svc.SeedTestRecordsAsync(3, "harness", "Staff");
+Check(!seedStaffOk && seedStaffErr != null && seedStaffNums.Count == 0,
+    "H1 SeedTestRecordsAsync denied for Staff", seedStaffErr);
+
+// Record-type change requires Records Manager or Admin; ordinary edits do not.
+var typeRec = (await svc.GetRecordsAsync()).First(r => r.RecordType == "Case File" && r.ParentRecordId == null);
+typeRec.RecordType = "Abstract";
+var typeStaff = await svc.SaveRecordAsync(typeRec, "harness", "Staff");
+Check(!typeStaff.Ok && typeStaff.Error != null && typeStaff.Error.Contains("Records Manager"),
+    "H1 record type change denied for Staff", typeStaff.Error);
+Check((await svc.GetRecordAsync(typeRec.Id))!.RecordType == "Case File",
+    "H1 denied type change left the row untouched");
+typeRec.RecordType = "Case File"; // restore, then prove non-type edits are still Staff-legal
+typeRec.Subject = "H1 staff subject edit";
+Check((await svc.SaveRecordAsync(typeRec, "harness", "Staff")).Ok, "H1 non-type edit allowed for Staff");
+var typeRec2 = await svc.GetRecordAsync(typeRec.Id);
+typeRec2!.RecordType = "Abstract";
+var typeMgr = await svc.SaveRecordAsync(typeRec2, "harness", "Records Manager");
+Check(typeMgr.Ok, "H1 record type change allowed for Records Manager", typeMgr.Error);
+Check((await svc.GetRecordAsync(typeRec.Id))!.RecordType == "Abstract", "H1 type change persisted");
+var typeAudit = await svc.GetAuditAsync("Record", typeRec.Id);
+Check(typeAudit.Any(a => a.Action == "Type Changed" && a.FieldName == "RecordType"),
+    "H1 type change audited as Type Changed");
+
+// ---- H3: duplicate barcodes return clean tuples; sequential creates get distinct numbers ----
+var h3c1 = new Container { ContainerName = "H3-BOX-001", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "H3", FormattedNumber = "001", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User" };
+var h3c2 = new Container { ContainerName = "H3-BOX-002", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "H3", FormattedNumber = "002", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User" };
+Check((await svc.SaveContainerAsync(h3c1, "harness")).Ok, "H3 container 1 created");
+Check((await svc.SaveContainerAsync(h3c2, "harness")).Ok, "H3 container 2 created");
+Check(h3c1.Barcode != null && h3c2.Barcode != null && h3c1.Barcode != h3c2.Barcode
+      && h3c1.Barcode.StartsWith("CON") && h3c2.Barcode.StartsWith("CON"),
+    "H3 sequential container creates get distinct numbers", $"{h3c1.Barcode}/{h3c2.Barcode}");
+var h3c2Dup = (await svc.GetContainersAsync()).First(c => c.Id == h3c2.Id);
+h3c2Dup.Barcode = h3c1.Barcode!;
+var h3DupRes = await svc.SaveContainerAsync(h3c2Dup, "harness");
+Check(!h3DupRes.Ok && h3DupRes.Error != null, "H3 duplicate container barcode -> clean tuple, no exception", h3DupRes.Error);
+Check((await svc.GetContainersAsync()).First(c => c.Id == h3c2.Id).Barcode == h3c2.Barcode,
+    "H3 rejected barcode update left the row untouched");
+
+var h3l1 = new Location { LocationName = "H3 Shelf 1", LocationType = "Shelf", ParentId = shelfLoc.Id };
+var h3l2 = new Location { LocationName = "H3 Shelf 2", LocationType = "Shelf", ParentId = shelfLoc.Id };
+Check((await svc.SaveLocationAsync(h3l1, "harness")).Ok, "H3 location 1 created");
+Check((await svc.SaveLocationAsync(h3l2, "harness")).Ok, "H3 location 2 created");
+Check(h3l1.Barcode != null && h3l2.Barcode != null && h3l1.Barcode != h3l2.Barcode,
+    "H3 sequential location creates get distinct numbers", $"{h3l1.Barcode}/{h3l2.Barcode}");
+var h3l2Dup = (await svc.GetLocationsAsync()).First(l => l.Id == h3l2.Id);
+h3l2Dup.Barcode = h3l1.Barcode!;
+var h3lDupRes = await svc.SaveLocationAsync(h3l2Dup, "harness");
+Check(!h3lDupRes.Ok && h3lDupRes.Error != null, "H3 duplicate location barcode -> clean tuple, no exception", h3lDupRes.Error);
+
+// User barcodes are system-assigned on create and never copied on update,
+// so no duplicate-barcode collision path exists there.
+var h3u1 = new AppUser { UserId = "h3user1", DisplayName = "H3 One", Role = "Staff" };
+var h3u2 = new AppUser { UserId = "h3user2", DisplayName = "H3 Two", Role = "Staff" };
+Check((await svc.SaveUserAsync(h3u1, "harness", "Admin")).Ok, "H3 user 1 created");
+Check((await svc.SaveUserAsync(h3u2, "harness", "Admin")).Ok, "H3 user 2 created");
+Check(h3u1.Barcode != null && h3u2.Barcode != null && h3u1.Barcode != h3u2.Barcode && h3u1.Barcode.StartsWith("USR"),
+    "H3 sequential user creates get distinct USR barcodes", $"{h3u1.Barcode}/{h3u2.Barcode}");
+var h3u2e = (await svc.GetUsersAsync()).First(u => u.UserId == "h3user2");
+h3u2e.Barcode = h3u1.Barcode!;
+var h3uUpd = await svc.SaveUserAsync(h3u2e, "harness", "Admin");
+Check(h3uUpd.Ok && (await svc.GetUsersAsync()).First(u => u.UserId == "h3user2").Barcode == h3u2.Barcode,
+    "H3 user update ignores caller-supplied barcode", h3uUpd.Error);
+
+// ---- B2: ancestor paths over location -> container -> compressed parent -> child ----
+var b2Bldg = new Location { LocationName = "B2 BLDG", LocationType = "Building" };
+Check((await svc.SaveLocationAsync(b2Bldg, "harness")).Ok, "B2 building created");
+var b2Shelf = new Location { LocationName = "B2 SHELF", LocationType = "Shelf", ParentId = b2Bldg.Id };
+Check((await svc.SaveLocationAsync(b2Shelf, "harness")).Ok, "B2 shelf created");
+var b2Box = new Container { ContainerName = "B2-BOX", ContainerType = "Box", FieldOffice = "HQ", ContainerCode = "B2", FormattedNumber = "001", Home = b2Shelf.LocationName, HomeKind = "Location", HomeRefId = b2Shelf.Id, Assignee = "mtnelson", AssigneeKind = "User" };
+Check((await svc.SaveContainerAsync(b2Box, "harness")).Ok, "B2 container created");
+var b2Parent = NewRec("Compressed", "B2PAR001", "Parent");
+b2Parent.Home = b2Box.ContainerName; b2Parent.HomeKind = "Container"; b2Parent.HomeRefId = b2Box.Id;
+b2Parent.Assignee = "mtnelson"; b2Parent.AssigneeKind = "User";
+var b2ParentRes = await svc.SaveRecordAsync(b2Parent, "harness", "Records Manager");
+Check(b2ParentRes.Ok, "B2 compressed parent created", b2ParentRes.Error);
+var b2ChildRes = await svc.SaveRecordAsync(NewRec("Compressed", "B2CHD001", "Child", b2Parent.Id), "harness", "Records Manager");
+var b2Child = b2ChildRes.Ok ? (await svc.GetRecordsAsync()).First(r => r.CaseNumber == "B2CHD001") : null;
+Check(b2ChildRes.Ok, "B2 compressed child created", b2ChildRes.Error);
+var b2Path = b2Child == null ? new List<Rim.Services.PathSeg>()
+    : (await svc.GetAncestorPathsAsync("Record", new[] { b2Child.Id }))[b2Child.Id];
+Check(b2Path.Count == 5, "B2 ancestor path has 5 segments", string.Join(" > ", b2Path.Select(p => p.Label)));
+Check(b2Path.Select(p => p.Kind).SequenceEqual(new[] { "Location", "Location", "Container", "Record", "Record" }),
+    "B2 ancestor kinds are root-first");
+Check(b2Path.Count == 5 && b2Path[0].Label == "B2 BLDG" && b2Path[1].Label == "B2 SHELF" && b2Path[2].Label == "B2-BOX",
+    "B2 ancestor labels are root-first");
+Check(b2Child != null && b2Path.Count == 5 && b2Path[3].Id == b2Parent.Id && b2Path[4].Id == b2Child.Id && b2Path[4].Label == b2Child.RecordNumber,
+    "B2 path ends [parent, child]");
+// Deliberately introduce a parent<->child cycle behind the service's back:
+// the path walk must still terminate.
+if (b2Child != null)
+{
+    using (var cdb = factory.CreateDbContext())
+    {
+        var prow = cdb.Records.First(r => r.Id == b2Parent.Id);
+        prow.ParentRecordId = b2Child.Id; cdb.SaveChanges();
+    }
+    var b2Cyc = (await svc.GetAncestorPathsAsync("Record", new[] { b2Child.Id }))[b2Child.Id];
+    Check(b2Cyc.Count >= 2 && b2Cyc.Count <= 50 && b2Cyc.Any(p => p.Id == b2Parent.Id) && b2Cyc.Last().Id == b2Child.Id,
+        "B2 ancestor path terminates on a cycle", b2Cyc.Count.ToString());
+    using (var cdb = factory.CreateDbContext())
+    {
+        var prow = cdb.Records.First(r => r.Id == b2Parent.Id);
+        prow.ParentRecordId = null; cdb.SaveChanges();
+    }
+}
+else Check(false, "B2 ancestor path terminates on a cycle", "child was not created");
+
+// ---- M3: filing under a soft-deleted parent is refused ----
+var m3Parent = NewRec("Compressed", "M3PAR001", "Parent");
+Check((await svc.SaveRecordAsync(m3Parent, "harness", "Records Manager")).Ok, "M3 compressed parent created");
+var m3Del = await svc.DeleteRecordsAsync(new[] { m3Parent.Id }, "Duplicate entry", null, null, "harness");
+Check(m3Del.Ok && m3Del.Count == 1, "M3 parent soft-deleted", m3Del.Error);
+var m3Child = await svc.SaveRecordAsync(NewRec("Compressed", "M3CHD001", "Child", m3Parent.Id), "harness", "Records Manager");
+Check(!m3Child.Ok && m3Child.Error != null && m3Child.Error.Contains("deleted"),
+    "M3 filing under a soft-deleted parent refused", m3Child.Error);
+
+// ---- M4: soft-deleting a compressed Parent with live children is refused ----
+var m4Parent = NewRec("Compressed", "M4PAR001", "Parent");
+Check((await svc.SaveRecordAsync(m4Parent, "harness", "Records Manager")).Ok, "M4 compressed parent created");
+var m4Child = NewRec("Compressed", "M4CHD001", "Child", m4Parent.Id);
+Check((await svc.SaveRecordAsync(m4Child, "harness", "Records Manager")).Ok, "M4 compressed child filed");
+var m4DelBlocked = await svc.DeleteRecordsAsync(new[] { m4Parent.Id }, "Duplicate entry", null, null, "harness");
+Check(!m4DelBlocked.Ok && m4DelBlocked.Count == 0 && m4DelBlocked.Error != null && m4DelBlocked.Error.Contains("children"),
+    "M4 delete of a parent with live children refused", m4DelBlocked.Error);
+var m4ParentAfter = m4Parent.Id == 0 ? null : await svc.GetRecordAsync(m4Parent.Id);
+Check(m4ParentAfter != null && !m4ParentAfter.Deleted, "M4 refused delete left the parent intact");
+var m4DelChild = await svc.DeleteRecordsAsync(new[] { m4Child.Id }, "Duplicate entry", null, null, "harness");
+Check(m4DelChild.Ok && m4DelChild.Count == 1, "M4 child deleted", m4DelChild.Error);
+var m4DelParent = await svc.DeleteRecordsAsync(new[] { m4Parent.Id }, "Duplicate entry", null, null, "harness");
+Check(m4DelParent.Ok && m4DelParent.Count == 1, "M4 parent deleted after children removed", m4DelParent.Error);
+
+// ---- M5: leaving the Compressed type clears ParentRecordId ----
+var m5Parent = NewRec("Compressed", "M5PAR001", "Parent");
+Check((await svc.SaveRecordAsync(m5Parent, "harness", "Records Manager")).Ok, "M5 compressed parent created");
+var m5Child = NewRec("Compressed", "M5CHD001", "Child", m5Parent.Id);
+Check((await svc.SaveRecordAsync(m5Child, "harness", "Records Manager")).Ok, "M5 compressed child filed");
+var m5Edit = m5Child.Id == 0 ? null : await svc.GetRecordAsync(m5Child.Id);
+if (m5Edit == null) Check(false, "M5 child type change accepted with a fresh home", "child was not created");
+else
+{
+m5Edit.RecordType = "Case File";
+m5Edit.Home = "SHELF 1"; m5Edit.HomeKind = "Location"; m5Edit.HomeRefId = shelfLoc.Id;
+m5Edit.Assignee = "mtnelson"; m5Edit.AssigneeKind = "User";
+var m5Res = await svc.SaveRecordAsync(m5Edit, "harness", "Records Manager");
+Check(m5Res.Ok, "M5 child type change accepted with a fresh home", m5Res.Error);
+var m5After = m5Child.Id == 0 ? null : await svc.GetRecordAsync(m5Child.Id);
+Check(m5After != null && m5After.ParentRecordId == null && m5After.CompressedRole == null,
+    "M5 leaving Compressed clears ParentRecordId and role");
+Check(m5After != null && m5After.HomeKind == "Location" && m5After.Home == "SHELF 1",
+    "M5 record keeps the supplied home", m5After == null ? "no row" : $"{m5After.HomeKind}/{m5After.Home}");
+}
+
+// ---- review gap: MoveItemsAsync refuses a batch containing filed children (atomically) ----
+var mvFiled = NewRec("Compressed", "MVFCHD01", "Child", m5Parent.Id);
+Check((await svc.SaveRecordAsync(mvFiled, "harness", "Records Manager")).Ok, "gap filed child created");
+var mvPlain = (await svc.GetRecordsAsync()).First(r => r.RecordType == "Case File" && r.ParentRecordId == null);
+var mvPlainHomeBefore = mvPlain.Home;
+var mvGapThrew = false;
+try { await svc.MoveItemsAsync("Record", new[] { mvPlain.Id, mvFiled.Id }, "BLDG CRC", "Location", 1, null, null, null, false, "harness"); }
+catch (InvalidOperationException) { mvGapThrew = true; }
+Check(mvGapThrew, "gap mixed batch with a filed child refused");
+Check((await svc.GetRecordAsync(mvPlain.Id))!.Home == mvPlainHomeBefore,
+    "gap refused batch moved nothing");
+
+// ---- review gap: homing a record to a compressed CHILD is refused ----
+var hcChild = NewRec("Compressed", "HCCHD001", "Child", m5Parent.Id);
+Check((await svc.SaveRecordAsync(hcChild, "harness", "Records Manager")).Ok, "gap compressed child created");
+var hcFile = await svc.SaveRecordAsync(NewRec("Case File", "HCFILE01", null, hcChild.Id), "harness", "Records Manager");
+Check(!hcFile.Ok && hcFile.Error != null && hcFile.Error.Contains("compressed parent"),
+    "gap filing under a compressed child refused", hcFile.Error);
+
+
+// ---- review gap: NextIntAsync must ignore non-conforming legacy numbers ----
+// A legacy row whose number has the right prefix+length but a non-numeric
+// suffix ("R-CMP008" sorts ABOVE "R-001505" as a string) makes NextIntAsync's
+// string-MAX unparseable -> it returns 1 -> every later service create fails
+// with "duplicate number". Runs on its own DB so the poison cannot leak into
+// the shared suite database.
+{
+    var dbPathN = Path.Combine(Path.GetTempPath(), $"riptest-numn-{Guid.NewGuid():N}.db");
+    var optsN = new DbContextOptionsBuilder<RimDbContext>().UseSqlite($"Data Source={dbPathN}").Options;
+    var factoryN = new TestFactory(optsN);
+    using (var db = factoryN.CreateDbContext()) { db.Database.EnsureCreated(); SeedData.EnsureSeeded(db); }
+    var svcN = new RimService(factoryN);
+    using (var db = factoryN.CreateDbContext())
+    {
+        db.Records.Add(new RecordItem
+        {
+            RecordNumber = "R-CMP008", Barcode = "REC-CMP008", RecordType = "Compressed",
+            CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "NUMP008", Volume = "1",
+            Subject = "legacy poison row", Home = "SHELF 1", HomeKind = "Location",
+            Assignee = "mtnelson", AssigneeKind = "User", State = "Active",
+            CreatedUtc = DateTime.UtcNow, LastUpdatedUtc = DateTime.UtcNow, CreatedBy = "harness", LastUpdatedBy = "harness"
+        });
+        await db.SaveChangesAsync();
+    }
+    var numRec = new RecordItem { RecordType = "Case File", CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "NUMNEW1", Volume = "1", Subject = "numbering probe", Home = "SHELF 1", HomeKind = "Location", Assignee = "mtnelson", AssigneeKind = "User", State = "Active" };
+    // The H3 mitigation's guarantee: a persistent collision surfaces as a
+    // clean tuple, never an exception (SaveRecordAsync catches it internally).
+    Exception? numEx = null;
+    (bool Ok, string? Error) numRes = (false, null);
+    try { numRes = await svcN.SaveRecordAsync(numRec, "harness", "Records Manager"); }
+    catch (Exception ex) { numEx = ex; }
+    Check(numEx == null, "gap persistent collision never throws", numEx?.Message ?? "");
+    Check(numRes.Ok, "gap create succeeds despite a non-conforming legacy number", numRes.Error);
+    if (numRes.Ok)
+        Check(numRec.RecordNumber == "R-000006",
+            "gap numbering skips the non-conforming legacy number", numRec.RecordNumber);
+    try { File.Delete(dbPathN); } catch { }
+}
+
+// ---- B1: multi-generation legacy DB upgrade ----
+// Simulates a database from several generations back: it HAS ParentRecordId
+// (with a real filed child) but is MISSING AssigneeKind/AssigneeRefId,
+// CompressedRole, and the user Barcode column. The old code ran the child-
+// homing backfill before those columns were added and crashed with
+// "no such column" at startup; the fix adds every column first.
+{
+    var dbPathB1 = Path.Combine(Path.GetTempPath(), $"riptest-b1-{Guid.NewGuid():N}.db");
+    var optsB1 = new DbContextOptionsBuilder<RimDbContext>().UseSqlite($"Data Source={dbPathB1}").Options;
+    int b1UserId, b1ParentId, b1ChildId;
+    await using (var db = new RimDbContext(optsB1))
+    {
+        await db.Database.EnsureCreatedAsync();
+        var u = new AppUser { UserId = "b1user", DisplayName = "B1 User", Role = "Staff", Active = true, CreatedUtc = DateTime.UtcNow };
+        db.Users.Add(u);
+        await db.SaveChangesAsync();
+        var par = new RecordItem
+        {
+            RecordNumber = "R-B10001", Barcode = "REC-B10001", RecordType = "Compressed",
+            CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "B1PAR", Volume = "1",
+            Subject = "b1 parent", Home = "SHELF 1", HomeKind = "Location",
+            Assignee = "b1user", AssigneeKind = null, AssigneeRefId = null, State = "Active",
+            CreatedUtc = DateTime.UtcNow, LastUpdatedUtc = DateTime.UtcNow, CreatedBy = "b1", LastUpdatedBy = "b1"
+        };
+        db.Records.Add(par);
+        await db.SaveChangesAsync();
+        var ch = new RecordItem
+        {
+            RecordNumber = "R-B10002", Barcode = "REC-B10002", RecordType = "Case File", ParentRecordId = par.Id,
+            CaseClassification = "149", FieldOffice = "HQ", CaseNumber = "B1CHD", Volume = "1",
+            Subject = "b1 child", Home = "SHELF 1", HomeKind = "Location",
+            Assignee = "b1user", AssigneeKind = null, AssigneeRefId = null, State = "Active",
+            CreatedUtc = DateTime.UtcNow, LastUpdatedUtc = DateTime.UtcNow, CreatedBy = "b1", LastUpdatedBy = "b1"
+        };
+        db.Records.Add(ch);
+        await db.SaveChangesAsync();
+        b1UserId = u.Id; b1ParentId = par.Id; b1ChildId = ch.Id;
+        // Drop the model-created indexes that reference the columns first:
+        // SQLite refuses DROP COLUMN while an index names the column.
+        await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_Records_ParentRecordId");
+        await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_Users_Barcode");
+        foreach (var ddl in new[]
+        {
+            "ALTER TABLE Records DROP COLUMN AssigneeKind",
+            "ALTER TABLE Records DROP COLUMN AssigneeRefId",
+            "ALTER TABLE Records DROP COLUMN CompressedRole",
+            "ALTER TABLE Users DROP COLUMN Barcode",
+            "ALTER TABLE Containers DROP COLUMN AssigneeKind",
+            "ALTER TABLE Containers DROP COLUMN AssigneeRefId",
+        })
+            await db.Database.ExecuteSqlRawAsync(ddl);
+    }
+    await using (var db = new RimDbContext(optsB1))
+    {
+        // NOTE: the M13 cheap-skip in BackfillUserBarcodes cannot see NULL
+        // barcodes (Barcode is [Required], so EF turns "== null" into WHERE 0).
+        // On this legacy DB the re-added Barcode column holds NULL, the
+        // backfill is skipped, and BackfillRefIds then crashes materializing
+        // the user row ("The data is NULL at ordinal 0"). Guard the throw so
+        // the suite records it instead of aborting; the column-ordering
+        // assertions below still verify the B1 fix itself.
+        Exception? b1UpgEx = null;
+        try { SeedData.UpgradeSchema(db); }
+        catch (Exception ex) { b1UpgEx = ex; }
+        Check(b1UpgEx == null, "B1 UpgradeSchema completes without crashing on a legacy DB",
+            b1UpgEx == null ? "" : $"{b1UpgEx.GetType().Name}: {b1UpgEx.Message}");
+        var recCols = await db.Database.SqlQueryRaw<string>("SELECT name FROM pragma_table_info('Records')").ToListAsync();
+        foreach (var c in new[] { "ParentRecordId", "CompressedRole", "AssigneeKind", "AssigneeRefId" })
+            Check(recCols.Contains(c), $"B1 UpgradeSchema restores Records.{c} on a legacy DB");
+        var userCols = await db.Database.SqlQueryRaw<string>("SELECT name FROM pragma_table_info('Users')").ToListAsync();
+        Check(userCols.Contains("Barcode"), "B1 UpgradeSchema restores Users.Barcode on a legacy DB");
+        var contCols = await db.Database.SqlQueryRaw<string>("SELECT name FROM pragma_table_info('Containers')").ToListAsync();
+        Check(contCols.Contains("AssigneeKind") && contCols.Contains("AssigneeRefId"),
+            "B1 UpgradeSchema restores Containers assignee columns on a legacy DB");
+        // Read the barcode via raw SQL: EF materialization of the NULL row throws.
+        var b1Barcode = await db.Database.SqlQueryRaw<string>(
+            "SELECT COALESCE(Barcode,'<null>') AS Value FROM Users WHERE Id = " + b1UserId).SingleAsync();
+        Check(b1Barcode.StartsWith("USR"), "B1 legacy user got a USR barcode", b1Barcode);
+        var b1Parent = await db.Records.AsNoTracking().FirstAsync(x => x.Id == b1ParentId);
+        Check(b1Parent.CompressedRole == "Parent",
+            "B1 legacy compressed-with-children backfilled to Parent", b1Parent.CompressedRole);
+        // AssigneeKind defaulting runs before the crash; ref-id resolution
+        // (BackfillRefIds) does not, so only assert the default here.
+        Check(b1Parent.AssigneeKind == "User",
+            "B1 legacy assignee defaulted to User", b1Parent.AssigneeKind);
+        var b1Child = await db.Records.AsNoTracking().FirstAsync(x => x.Id == b1ChildId);
+        Check(b1Child.HomeKind == "Record" && b1Child.HomeRefId == b1ParentId
+              && b1Child.AssigneeKind == "Record" && b1Child.AssigneeRefId == b1ParentId,
+            "B1 legacy filed child re-homed to the parent record",
+            $"{b1Child.HomeKind}/{b1Child.AssigneeKind}");
+    }
+    try { File.Delete(dbPathB1); } catch { }
+}
+
+// ---- B3: DDL provider branching ----
+// SQLite branch: the upgrade backfills the EF-model indexes on existing DBs.
+{
+    var dbPathB3 = Path.Combine(Path.GetTempPath(), $"riptest-b3-{Guid.NewGuid():N}.db");
+    var optsB3 = new DbContextOptionsBuilder<RimDbContext>().UseSqlite($"Data Source={dbPathB3}").Options;
+    var b3Indexes = new[] { "IX_Containers_Barcode", "IX_Locations_Barcode", "IX_Users_Barcode",
+        "IX_Records_ParentRecordId", "IX_Records_Home", "IX_Containers_ParentContainerId",
+        "IX_Containers_Home", "IX_Locations_ParentId" };
+    await using (var db = new RimDbContext(optsB3))
+    {
+        await db.Database.EnsureCreatedAsync();
+        // Simulate a pre-v0.13.1 database that never got the backfilled indexes.
+        foreach (var ix in b3Indexes)
+        {
+#pragma warning disable EF1002 // fixed literal index names, never user input
+            await db.Database.ExecuteSqlRawAsync($"DROP INDEX IF EXISTS {ix}");
+#pragma warning restore EF1002
+        }
+        var before = await db.Database.SqlQueryRaw<string>("SELECT name FROM sqlite_master WHERE type='index'").ToListAsync();
+        Check(!b3Indexes.Any(ix => before.Contains(ix)), "B3 setup dropped the backfilled indexes");
+        SeedData.UpgradeSchema(db);
+        var after = await db.Database.SqlQueryRaw<string>("SELECT name FROM sqlite_master WHERE type='index'").ToListAsync();
+        foreach (var ix in b3Indexes)
+            Check(after.Contains(ix), $"B3 SQLite upgrade creates {ix}");
+        // Idempotent: a second run changes nothing and throws nothing.
+        SeedData.UpgradeSchema(db);
+        var twice = await db.Database.SqlQueryRaw<string>("SELECT name FROM sqlite_master WHERE type='index'").ToListAsync();
+        Check(b3Indexes.All(ix => twice.Contains(ix)), "B3 SQLite upgrade is idempotent");
+    }
+    try { File.Delete(dbPathB3); } catch { }
+}
+
+// SQL Server branch: the T-SQL builders are private, so extract their SQL
+// string literals from the IL and assert the dialect is clean T-SQL.
+{
+    static List<string> LdStrings(MethodInfo m)
+    {
+        var sizes = new Dictionary<short, int>();
+        foreach (var f in typeof(System.Reflection.Emit.OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static))
+        {
+            var oc = (System.Reflection.Emit.OpCode)f.GetValue(null)!;
+            int sz = oc.OperandType switch
+            {
+                System.Reflection.Emit.OperandType.InlineNone => 0,
+                System.Reflection.Emit.OperandType.ShortInlineI or System.Reflection.Emit.OperandType.ShortInlineVar or System.Reflection.Emit.OperandType.ShortInlineBrTarget => 1,
+                System.Reflection.Emit.OperandType.InlineVar => 2,
+                System.Reflection.Emit.OperandType.InlineI or System.Reflection.Emit.OperandType.InlineBrTarget or System.Reflection.Emit.OperandType.InlineField or
+                System.Reflection.Emit.OperandType.InlineMethod or System.Reflection.Emit.OperandType.InlineSig or System.Reflection.Emit.OperandType.InlineString or
+                System.Reflection.Emit.OperandType.InlineTok or System.Reflection.Emit.OperandType.InlineType or System.Reflection.Emit.OperandType.ShortInlineR => 4,
+                System.Reflection.Emit.OperandType.InlineI8 or System.Reflection.Emit.OperandType.InlineR => 8,
+                System.Reflection.Emit.OperandType.InlineSwitch => -1,
+                _ => 0,
+            };
+            sizes[oc.Value] = sz;
+        }
+        var il = m.GetMethodBody()!.GetILAsByteArray()!;
+        var list = new List<string>();
+        int i = 0;
+        while (i < il.Length)
+        {
+            short code = il[i++];
+            if (code == 0xFE) code = (short)(0xFE00 | il[i++]);
+            if (code == 0x72) // ldstr: metadata token for the string literal
+            {
+                int token = BitConverter.ToInt32(il, i);
+                try { var lit = m.Module.ResolveString(token); if (lit != null) list.Add(lit); } catch { }
+            }
+            int sz = sizes.TryGetValue(code, out var s) ? s : 0;
+            if (sz == -1) // InlineSwitch: count followed by N 4-byte targets
+            {
+                int n = BitConverter.ToInt32(il, i);
+                i += 4 + 4 * n;
+            }
+            else i += sz;
+        }
+        return list;
+    }
+    var serverBuilder = typeof(SeedData).GetMethod("CreateMissingTablesSqlServer", BindingFlags.NonPublic | BindingFlags.Static);
+    var indexBuilder = typeof(SeedData).GetMethod("CreateIndexSqlServer", BindingFlags.NonPublic | BindingFlags.Static);
+    Check(serverBuilder != null && indexBuilder != null, "B3 T-SQL builders found via reflection");
+    var tsql = string.Join("\n", LdStrings(serverBuilder!).Concat(LdStrings(indexBuilder!)));
+    Check(tsql.Length > 500, "B3 extracted T-SQL literals from the builders", $"chars={tsql.Length}");
+    foreach (var sqliteism in new[] { "AUTOINCREMENT", "PRAGMA", "CREATE TABLE IF NOT EXISTS",
+        "CREATE INDEX IF NOT EXISTS", "CREATE UNIQUE INDEX IF NOT EXISTS", "LIMIT" })
+        Check(!tsql.Contains(sqliteism, StringComparison.OrdinalIgnoreCase),
+            $"B3 T-SQL contains no SQLite-ism '{sqliteism}'");
+    Check(tsql.Contains("IDENTITY(1,1)"), "B3 T-SQL uses IDENTITY keys");
+    Check(tsql.Contains("sys.indexes"), "B3 T-SQL guards index creation via sys.indexes");
+    Check(tsql.Contains("OBJECT_ID"), "B3 T-SQL guards table creation via OBJECT_ID");
+    Check(tsql.Contains("NVARCHAR"), "B3 T-SQL uses NVARCHAR types");
+}
 
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }

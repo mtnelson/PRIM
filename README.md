@@ -13,7 +13,7 @@ No installs needed — the portable package is self-contained (no .NET SDK,
 no network dependencies).
 
 1. **Download** the portable zip (54 MB):
-   <https://github.com/mtnelson/PRIM/releases/download/prim-v0.11.2/PRIM-portable-win-x64.zip>
+   <https://github.com/mtnelson/PRIM/releases/download/prim-v0.12.0/PRIM-portable-win-x64.zip>
 2. **Unzip** to any folder, e.g. `C:\PRIM\` (avoid `C:\Program Files\` unless
    running as administrator — the app writes its database next to the exe).
 3. **Double-click `Start PRIM.bat`**. Your browser opens to

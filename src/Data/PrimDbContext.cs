@@ -19,6 +19,7 @@ public class PrimDbContext : DbContext
     public DbSet<UserGridLayout> UserGridLayouts => Set<UserGridLayout>();
     public DbSet<Label> Labels => Set<Label>();
     public DbSet<ObjectLabel> ObjectLabels => Set<ObjectLabel>();
+    public DbSet<SearchActivity> SearchActivities => Set<SearchActivity>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -33,6 +34,7 @@ public class PrimDbContext : DbContext
         m.Entity<Label>().HasIndex(l => l.Name).IsUnique();
         m.Entity<ObjectLabel>().HasIndex(o => new { o.LabelId, o.ObjectKind, o.ObjectId }).IsUnique();
         m.Entity<ObjectLabel>().HasIndex(o => new { o.ObjectKind, o.ObjectId });
+        m.Entity<SearchActivity>().HasIndex(s => new { s.UserId, s.TimestampUtc });
         m.Entity<AuditEvent>().HasIndex(a => new { a.ObjectKind, a.ObjectId });
         m.Entity<AuditEventArchive>().HasIndex(a => new { a.ObjectKind, a.ObjectId });
     }

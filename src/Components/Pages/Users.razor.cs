@@ -137,9 +137,6 @@ public partial class Users : ComponentBase, IDisposable
         await Prim.SaveSessionAsync(_activeTab);
     }
 
-    private static string Truncate(string s, int n)
-        => s.Length <= n ? s : s[..(n - 1)] + "\u2026";
-
     private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Users refreshed.", Severity.Info); }
 
     private async Task OnGridChanged()

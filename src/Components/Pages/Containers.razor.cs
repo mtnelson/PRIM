@@ -134,13 +134,12 @@ public partial class Containers : ComponentBase, IDisposable
     {
         if (_activeTab == null || _tabState == null) return;
         _activeTab.Filter = _filter;
-        _activeTab.Title = string.IsNullOrWhiteSpace(_filter) ? "All containers" : Truncate(_filter, 40);
+        // The full filter text is stored: long titles truncate visually in
+        // the tab strip (CSS ellipsis) and reveal fully on hover.
+        _activeTab.Title = string.IsNullOrWhiteSpace(_filter) ? "All containers" : _filter;
         _activeTab.ApplyTabState(_tabState);
         await Prim.SaveSessionAsync(_activeTab);
     }
-
-    private static string Truncate(string s, int n)
-        => s.Length <= n ? s : s[..(n - 1)] + "\u2026";
 
     private async Task Refresh() { await OnGridChanged(); Snackbar.Add("Containers refreshed.", Severity.Info); }
 

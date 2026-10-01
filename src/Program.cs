@@ -16,6 +16,10 @@ builder.Services.AddMudServices();
 var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
 Directory.CreateDirectory(dataDir);
 var sqlitePath = Path.Combine(dataDir, "prim.db");
+// Ring buffer of recently executed advanced-search SQL, shown on the
+// Advanced Search page's SQL tab. PrimService records into it via
+// ToQueryString (provider-agnostic); untagged queries cost nothing.
+builder.Services.AddSingleton<SearchQueryLog>();
 builder.Services.AddDbContextFactory<PrimDbContext>(opt =>
     opt.UseSqlite($"Data Source={sqlitePath}"));
 // builder.Services.AddDbContextFactory<PrimDbContext>(opt =>

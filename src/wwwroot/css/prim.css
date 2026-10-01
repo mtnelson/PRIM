@@ -56,3 +56,14 @@ tr.prim-row-nochildren td.mud-table-cell:first-child .mud-icon-button.mud-disabl
    page body never grows its own horizontal scrollbar. */
 .prim-grid { min-width: 0; }
 .prim-grid .mud-table-container { overflow-x: clip; }
+
+/* Search tab titles: the chip shows an ellipsis for long titles; the full
+   search logic lives in the tab title and its hover tooltip. */
+.search-tab-title {
+    display: inline-block;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}

@@ -25,10 +25,12 @@ public class PrimService
     private readonly int _maxHotRows;
     private readonly int _maxArchiveRows;
     private readonly string _auditArchiveDir;
+    private readonly SearchQueryLog? _queryLog;
 
-    public PrimService(IDbContextFactory<PrimDbContext> factory, IConfiguration? config = null, string? auditArchiveDir = null)
+    public PrimService(IDbContextFactory<PrimDbContext> factory, IConfiguration? config = null, string? auditArchiveDir = null, SearchQueryLog? queryLog = null)
     {
         _factory = factory;
+        _queryLog = queryLog;
         _maxHotRows = config?.GetValue<int?>("Audit:MaxHotRows") ?? 500_000;
         _maxArchiveRows = config?.GetValue<int?>("Audit:MaxArchiveRows") ?? 5_000_000;
         _auditArchiveDir = auditArchiveDir
@@ -248,7 +250,7 @@ public class PrimService
     }
 
     private static async Task<GridPageResult<T>> PageAsync<T>(IQueryable<T> q, GridPageRequest req,
-        HashSet<string> sortProps) where T : class
+        HashSet<string> sortProps, Action<string>? captureSql = null) where T : class
     {
         var take = Math.Clamp(req.Take, 1, 1000);
         List<T> rows;
@@ -266,7 +268,9 @@ public class PrimService
             q = req.SortDescending
                 ? q.OrderByDescending(x => EF.Property<int>(x, "Id"))
                 : q.OrderBy(x => EF.Property<int>(x, "Id"));
-            rows = await q.Take(take + 1).ToListAsync();
+            var final = q.Take(take + 1);
+            CaptureSql(final, captureSql);
+            rows = await final.ToListAsync();
         }
         else
         {
@@ -275,10 +279,20 @@ public class PrimService
                      .ThenBy(x => EF.Property<int>(x, "Id"))
                 : q.OrderBy(x => EF.Property<object>(x, req.SortColumn!))
                      .ThenBy(x => EF.Property<int>(x, "Id"));
-            rows = await q.Skip(req.Skip).Take(take + 1).ToListAsync();
+            var final = q.Skip(req.Skip).Take(take + 1);
+            CaptureSql(final, captureSql);
+            rows = await final.ToListAsync();
         }
         var hasMore = rows.Count > take;
         return new GridPageResult<T> { Rows = rows.Take(take).ToList(), HasMore = hasMore };
+    }
+
+    // Renders the final page SQL for the query log. Best-effort: a
+    // translation failure must never break the query itself.
+    private static void CaptureSql<T>(IQueryable<T> q, Action<string>? captureSql)
+    {
+        if (captureSql == null) return;
+        try { captureSql(q.ToQueryString()); } catch { /* query still runs */ }
     }
 
     // Bulk-generates `count` realistic test records (deterministic seed so
@@ -367,39 +381,247 @@ public class PrimService
     // filtering AND paging both happen in the database; Blazor only ever sees
     // 500-row chunks. This is the 20M-safe path: the previous AsEnumerable()
     // implementation materialized the whole table in memory.
-    private static readonly HashSet<string> AdvSearchFields = new()
+    // ---------------- advanced search SQL capture ----------------
+    // Records a tagged query's SQL + measured duration into the shared
+    // SearchQueryLog. No-op when no tag was supplied or no log is attached,
+    // so untagged queries pay nothing.
+    private void RecordSearchQuery(string? searchTag, string? sql, double durationMs)
+    {
+        if (_queryLog == null || sql == null) return;
+        if (SearchQueryLog.TryParseTag(searchTag, out var runId, out var kind, out var role))
+            _queryLog.Record(runId, kind, role, sql, durationMs);
+    }
+
+    // Applies the search tag (a SQL comment, always harmless), renders the
+    // final SQL via ToQueryString, executes, and records both. The tag is
+    // applied even without a log attached so the SQL comment is present
+    // whenever a caller asks for it.
+    private async Task<TResult> ExecSearchAsync<TItem, TResult>(
+        IQueryable<TItem> query, string? searchTag, Func<IQueryable<TItem>, Task<TResult>> exec)
+    {
+        if (searchTag != null)
+            query = query.TagWith(searchTag);
+        string? sql = null;
+        if (_queryLog != null && searchTag != null)
+        {
+            try { sql = query.ToQueryString(); } catch { sql = null; }
+        }
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try { return await exec(query); }
+        finally
+        {
+            sw.Stop();
+            RecordSearchQuery(searchTag, sql, sw.Elapsed.TotalMilliseconds);
+        }
+    }
+
+    private static readonly HashSet<string> AdvSearchRecordFields = new()
         { "RecordNumber","RecordType","CaseClassification","FieldOffice","CaseNumber","SubfileId","Volume",
           "SerialStart","SerialEnd","Barcode","Home","Assignee","Subject","State" };
+    // Searchable fields per object type for Advanced Search. Every name must
+    // be a string property on its entity; non-string properties (ids, flags)
+    // are excluded because the predicate builder coalesces to string.
+    private static readonly HashSet<string> AdvSearchContainerFields = new()
+        { "ContainerName","ContainerType","FieldOffice","ContainerCode","FormattedNumber",
+          "Description","Home","Assignee","Barcode" };
+    private static readonly HashSet<string> AdvSearchLocationFields = new()
+        { "LocationName","LocationType","Description","Barcode" };
+    private static readonly HashSet<string> AdvSearchUserFields = new()
+        { "UserId","DisplayName","Role","Email" };
 
     private static IQueryable<RecordItem> AdvancedSearchQuery(PrimDbContext db,
         List<(string Field, string Op, string Value)> rows, string logic)
     {
         IQueryable<RecordItem> q = db.Records.AsNoTracking().Where(r => !r.Deleted);
         var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
-        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate(crit, logic));
+        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate<RecordItem>(crit, logic, AdvSearchRecordFields));
+        return q;
+    }
+
+    private static IQueryable<Container> AdvancedSearchContainersQuery(PrimDbContext db,
+        List<(string Field, string Op, string Value)> rows, string logic)
+    {
+        IQueryable<Container> q = db.Containers.AsNoTracking();
+        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
+        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate<Container>(crit, logic, AdvSearchContainerFields));
+        return q;
+    }
+
+    private static IQueryable<Location> AdvancedSearchLocationsQuery(PrimDbContext db,
+        List<(string Field, string Op, string Value)> rows, string logic)
+    {
+        IQueryable<Location> q = db.Locations.AsNoTracking();
+        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
+        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate<Location>(crit, logic, AdvSearchLocationFields));
+        return q;
+    }
+
+    // Users: searches active AND inactive users (unlike the Users page's
+    // default active-only view) — a search should surface deactivated users too.
+    private static IQueryable<AppUser> AdvancedSearchUsersQuery(PrimDbContext db,
+        List<(string Field, string Op, string Value)> rows, string logic)
+    {
+        IQueryable<AppUser> q = db.Users.AsNoTracking();
+        var crit = rows.Where(r => !string.IsNullOrWhiteSpace(r.Value)).ToList();
+        if (crit.Count > 0) q = q.Where(BuildCriteriaPredicate<AppUser>(crit, logic, AdvSearchUserFields));
         return q;
     }
 
     public async Task<GridPageResult<RecordItem>> AdvancedSearchRecordsPageAsync(
-        List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req)
+        List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req,
+        string? searchTag = null)
     {
         using var db = _factory.CreateDbContext();
-        return await PageAsync(AdvancedSearchQuery(db, rows, logic), req, RecordSortProps);
+        var q = AdvancedSearchQuery(db, rows, logic);
+        if (searchTag != null) q = q.TagWith(searchTag);
+        // SQL-tab capture: render the final composed SQL only when tagged,
+        // so untagged grids pay nothing.
+        string? sql = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            return await PageAsync(q, req, RecordSortProps,
+                searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
+        }
+        finally
+        {
+            sw.Stop();
+            RecordSearchQuery(searchTag, sql, sw.Elapsed.TotalMilliseconds);
+        }
     }
 
     public async Task<int> AdvancedSearchRecordsCountAsync(
-        List<(string Field, string Op, string Value)> rows, string logic)
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
     {
         using var db = _factory.CreateDbContext();
-        return await AdvancedSearchQuery(db, rows, logic).CountAsync();
+        var q = AdvancedSearchQuery(db, rows, logic);
+        return await ExecSearchAsync(q, searchTag, x => x.CountAsync());
     }
 
     // All matching Ids (Id order) for select-all on an advanced search grid.
     public async Task<List<int>> AdvancedSearchRecordIdsAsync(
-        List<(string Field, string Op, string Value)> rows, string logic)
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
     {
         using var db = _factory.CreateDbContext();
-        return await AdvancedSearchQuery(db, rows, logic).OrderBy(r => r.Id).Select(r => r.Id).ToListAsync();
+        var q = AdvancedSearchQuery(db, rows, logic).OrderBy(r => r.Id).Select(r => r.Id);
+        return await ExecSearchAsync(q, searchTag, x => x.ToListAsync());
+    }
+
+    public async Task<GridPageResult<Container>> AdvancedSearchContainersPageAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req,
+        string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchContainersQuery(db, rows, logic);
+        if (searchTag != null) q = q.TagWith(searchTag);
+        // SQL-tab capture: render the final composed SQL only when tagged,
+        // so untagged grids pay nothing.
+        string? sql = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            return await PageAsync(q, req, ContainerSortProps,
+                searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
+        }
+        finally
+        {
+            sw.Stop();
+            RecordSearchQuery(searchTag, sql, sw.Elapsed.TotalMilliseconds);
+        }
+    }
+
+    public async Task<int> AdvancedSearchContainersCountAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchContainersQuery(db, rows, logic);
+        return await ExecSearchAsync(q, searchTag, x => x.CountAsync());
+    }
+
+    public async Task<List<int>> AdvancedSearchContainerIdsAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchContainersQuery(db, rows, logic).OrderBy(c => c.Id).Select(c => c.Id);
+        return await ExecSearchAsync(q, searchTag, x => x.ToListAsync());
+    }
+
+    public async Task<GridPageResult<Location>> AdvancedSearchLocationsPageAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req,
+        string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchLocationsQuery(db, rows, logic);
+        if (searchTag != null) q = q.TagWith(searchTag);
+        // SQL-tab capture: render the final composed SQL only when tagged,
+        // so untagged grids pay nothing.
+        string? sql = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            return await PageAsync(q, req, LocationSortProps,
+                searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
+        }
+        finally
+        {
+            sw.Stop();
+            RecordSearchQuery(searchTag, sql, sw.Elapsed.TotalMilliseconds);
+        }
+    }
+
+    public async Task<int> AdvancedSearchLocationsCountAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchLocationsQuery(db, rows, logic);
+        return await ExecSearchAsync(q, searchTag, x => x.CountAsync());
+    }
+
+    public async Task<List<int>> AdvancedSearchLocationIdsAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchLocationsQuery(db, rows, logic).OrderBy(l => l.Id).Select(l => l.Id);
+        return await ExecSearchAsync(q, searchTag, x => x.ToListAsync());
+    }
+
+    public async Task<GridPageResult<AppUser>> AdvancedSearchUsersPageAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, GridPageRequest req,
+        string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchUsersQuery(db, rows, logic);
+        if (searchTag != null) q = q.TagWith(searchTag);
+        // SQL-tab capture: render the final composed SQL only when tagged,
+        // so untagged grids pay nothing.
+        string? sql = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            return await PageAsync(q, req, UserSortProps,
+                searchTag != null ? (Action<string>)(s => { sql = s; }) : null);
+        }
+        finally
+        {
+            sw.Stop();
+            RecordSearchQuery(searchTag, sql, sw.Elapsed.TotalMilliseconds);
+        }
+    }
+
+    public async Task<int> AdvancedSearchUsersCountAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchUsersQuery(db, rows, logic);
+        return await ExecSearchAsync(q, searchTag, x => x.CountAsync());
+    }
+
+    public async Task<List<int>> AdvancedSearchUserIdsAsync(
+        List<(string Field, string Op, string Value)> rows, string logic, string? searchTag = null)
+    {
+        using var db = _factory.CreateDbContext();
+        var q = AdvancedSearchUsersQuery(db, rows, logic).OrderBy(u => u.Id).Select(u => u.Id);
+        return await ExecSearchAsync(q, searchTag, x => x.ToListAsync());
     }
 
     // Bounded compatibility wrapper: walks server-side pages up to maxResults.
@@ -419,41 +641,47 @@ public class PrimService
         return results;
     }
 
-    private static Expression<Func<RecordItem, bool>> BuildCriteriaPredicate(
-        List<(string Field, string Op, string Value)> rows, string logic)
+    private static Expression<Func<T, bool>> BuildCriteriaPredicate<T>(
+        List<(string Field, string Op, string Value)> rows, string logic, HashSet<string> fields)
     {
-        var param = Expression.Parameter(typeof(RecordItem), "r");
+        var param = Expression.Parameter(typeof(T), "r");
         Expression? body = null;
         foreach (var (field, op, value) in rows)
         {
-            var row = BuildRowPredicate(field, op, value);
+            var row = BuildRowPredicate<T>(fields, field, op, value);
             var rewritten = new ParameterReplacer(row.Parameters[0], param).Visit(row.Body);
             body = body is null ? rewritten
                 : logic == "OR" ? Expression.OrElse(body, rewritten)
                                 : Expression.AndAlso(body, rewritten);
         }
-        return Expression.Lambda<Func<RecordItem, bool>>(body ?? Expression.Constant(true), param);
+        return Expression.Lambda<Func<T, bool>>(body ?? Expression.Constant(true), param);
     }
 
-    private static Expression<Func<RecordItem, bool>> BuildRowPredicate(string field, string op, string value)
+    // Every field name must be a string property on T (checked against the
+    // per-type field set). "Contains" genuinely contains: the value is
+    // wrapped in %…% after escaping, so no asterisks are needed (explicit
+    // * and ? wildcards still work inside any operator).
+    private static Expression<Func<T, bool>> BuildRowPredicate<T>(
+        HashSet<string> fields, string field, string op, string value)
     {
-        var param = Expression.Parameter(typeof(RecordItem), "r");
-        if (!AdvSearchFields.Contains(field))
-            return Expression.Lambda<Func<RecordItem, bool>>(Expression.Constant(true), param);
+        var param = Expression.Parameter(typeof(T), "r");
+        if (!fields.Contains(field))
+            return Expression.Lambda<Func<T, bool>>(Expression.Constant(true), param);
         var prop = Expression.Property(param, field);
         var safe = Expression.Coalesce(prop, Expression.Constant(string.Empty));
         string pattern = op switch
         {
+            "Contains" => "%" + ToLike(value) + "%",
             "StartsWith" => ToLike(value.TrimEnd('*', '?')) + "%",
             "EndsWith" => "%" + ToLike(value.TrimStart('*', '?')),
-            _ => ToLike(value), // "=" / "Contains": wildcard match, * and ? supported
+            _ => ToLike(value), // "Equals": wildcard match, * and ? supported
         };
         var like = typeof(DbFunctionsExtensions).GetMethod(nameof(DbFunctionsExtensions.Like),
             new[] { typeof(DbFunctions), typeof(string), typeof(string) })!;
         var call = Expression.Call(like,
             Expression.Property(null, typeof(EF).GetProperty(nameof(EF.Functions))!),
             safe, Expression.Constant(pattern));
-        return Expression.Lambda<Func<RecordItem, bool>>(call, param);
+        return Expression.Lambda<Func<T, bool>>(call, param);
     }
 
     private sealed class ParameterReplacer : ExpressionVisitor
@@ -1296,6 +1524,40 @@ public class PrimService
         if (s != null) { db.SearchSessions.Remove(s); await db.SaveChangesAsync(); }
     }
 
+    // ---------------- search activity: per-user log of executed searches ----
+    public const int MaxSearchActivityPerUser = 200;
+
+    // Records one executed search, then prunes only the capped overflow
+    // (oldest first) so the per-user log never grows unboundedly.
+    public async Task LogSearchActivityAsync(SearchActivity a)
+    {
+        using var db = _factory.CreateDbContext();
+        db.SearchActivities.Add(a);
+        await db.SaveChangesAsync();
+        var overflowIds = await db.SearchActivities
+            .Where(s => s.UserId == a.UserId)
+            .OrderByDescending(s => s.TimestampUtc).ThenByDescending(s => s.Id)
+            .Select(s => s.Id)
+            .Skip(MaxSearchActivityPerUser)
+            .ToListAsync();
+        if (overflowIds.Count > 0)
+        {
+            await db.SearchActivities.Where(s => overflowIds.Contains(s.Id)).ExecuteDeleteAsync();
+        }
+    }
+
+    // Newest first. Plain projection-free read — the Activity tab renders
+    // rows directly with no per-row service calls.
+    public async Task<List<SearchActivity>> GetSearchActivityAsync(string userId, int take = 200)
+    {
+        using var db = _factory.CreateDbContext();
+        return await db.SearchActivities.AsNoTracking()
+            .Where(s => s.UserId == userId)
+            .OrderByDescending(s => s.TimestampUtc).ThenByDescending(s => s.Id)
+            .Take(Math.Clamp(take, 1, 500))
+            .ToListAsync();
+    }
+
     // ---------------- labels: named collections of objects ----------------
     public async Task<List<Label>> GetLabelsAsync()
     {
@@ -1375,6 +1637,44 @@ public class PrimService
     {
         var pairs = await GetObjectLabelPairsAsync(kind, new[] { id });
         return pairs.TryGetValue(id, out var list) ? list.Select(x => x.Name).ToList() : new();
+    }
+
+    // Full entities for every member of a label, by kind — backs the label
+    // detail page's per-kind data grids. Deleted records are excluded.
+    public async Task<List<RecordItem>> GetLabelRecordsAsync(int labelId)
+    {
+        using var db = _factory.CreateDbContext();
+        var ids = await db.ObjectLabels.Where(o => o.LabelId == labelId && o.ObjectKind == "Record")
+            .Select(o => o.ObjectId).ToListAsync();
+        return await db.Records.AsNoTracking().Where(r => !r.Deleted && ids.Contains(r.Id))
+            .OrderBy(r => r.RecordNumber).ToListAsync();
+    }
+
+    public async Task<List<Container>> GetLabelContainersAsync(int labelId)
+    {
+        using var db = _factory.CreateDbContext();
+        var ids = await db.ObjectLabels.Where(o => o.LabelId == labelId && o.ObjectKind == "Container")
+            .Select(o => o.ObjectId).ToListAsync();
+        return await db.Containers.AsNoTracking().Where(c => ids.Contains(c.Id))
+            .OrderBy(c => c.ContainerName).ToListAsync();
+    }
+
+    public async Task<List<Location>> GetLabelLocationsAsync(int labelId)
+    {
+        using var db = _factory.CreateDbContext();
+        var ids = await db.ObjectLabels.Where(o => o.LabelId == labelId && o.ObjectKind == "Location")
+            .Select(o => o.ObjectId).ToListAsync();
+        return await db.Locations.AsNoTracking().Where(l => ids.Contains(l.Id))
+            .OrderBy(l => l.LocationName).ToListAsync();
+    }
+
+    public async Task<List<AppUser>> GetLabelUsersAsync(int labelId)
+    {
+        using var db = _factory.CreateDbContext();
+        var ids = await db.ObjectLabels.Where(o => o.LabelId == labelId && o.ObjectKind == "User")
+            .Select(o => o.ObjectId).ToListAsync();
+        return await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id))
+            .OrderBy(u => u.DisplayName).ToListAsync();
     }
 
     // Replaces an object's label set; creates unknown names. Writes one audit

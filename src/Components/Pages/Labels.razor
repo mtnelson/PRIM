@@ -1,5 +1,6 @@
 @* Labels: named collections of objects. Create/manage labels here; click a
-   label (here or a chip in any data grid) to see every item that has it. *@
+   label (here or a chip in any data grid) to see every item that has it,
+   shown in full per-kind data grids with the usual column selector. *@
 @page "/labels"
 @page "/labels/{LabelId:int}"
 <PageTitle>PRIM — Labels</PageTitle>
@@ -52,19 +53,32 @@ else
         <MudIconButton Icon="@Icons.Material.Filled.Edit" title="Rename" OnClick="@(() => Rename(_label))" />
         <MudIconButton Icon="@Icons.Material.Filled.Delete" title="Delete" OnClick="@(() => Delete(_label))" />
     </div>
-    @if (_members.Count == 0)
+    @if (_totalMembers == 0)
     {
         <MudAlert Severity="Severity.Info">No items have this label yet. Add labels from any record, container, location, or user.</MudAlert>
     }
-    @foreach (var g in _members.GroupBy(m => m.Kind))
+    @if (_records.Count > 0)
     {
-        <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">@g.Key (@g.Count())</MudText>
-        <MudTable Items="g.ToList()" Hover="true" Dense="true">
-            <RowTemplate>
-                <MudTd><MudLink Typo="Typo.body2" OnClick="@(() => GoTo(context.Kind, context.Id))">@context.Label</MudLink></MudTd>
-            </RowTemplate>
-        </MudTable>
+        <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">Records (@_records.Count)</MudText>
+        <RecordGrid Items="_records" GridId="@($"label-{LabelId}-records")" Scope="labels"
+                    EditItem="EditRecord" DeleteItems="DeleteRecords" OnChanged="ReloadMembers" />
+    }
+    @if (_containers.Count > 0)
+    {
+        <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">Containers (@_containers.Count)</MudText>
+        <ContainerGrid Items="_containers" GridId="@($"label-{LabelId}-containers")" Scope="labels"
+                       EditItem="EditContainer" DeleteItems="DeleteContainers" OnChanged="ReloadMembers" />
+    }
+    @if (_locations.Count > 0)
+    {
+        <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">Locations (@_locations.Count)</MudText>
+        <LocationGrid Items="_locations" GridId="@($"label-{LabelId}-locations")" Scope="labels"
+                      EditItem="EditLocation" OnChanged="ReloadMembers" />
+    }
+    @if (_users.Count > 0)
+    {
+        <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">Users (@_users.Count)</MudText>
+        <UserGrid Items="_users" GridId="@($"label-{LabelId}-users")" Scope="labels"
+                  EditItem="EditUser" CanMove="false" OnChanged="ReloadMembers" />
     }
 }
-
-

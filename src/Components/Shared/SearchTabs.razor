@@ -1,18 +1,20 @@
 @* Tab strip for persisted search sessions. The page owns the tab list and all
-   session logic; this component only renders the strip and routes clicks. *@
+   session logic; this component only renders the strip and routes clicks.
+   Titles carry the full search logic: long titles truncate with an ellipsis
+   (see .search-tab-title) and reveal in full on hover. *@
 <div class="d-flex align-center flex-wrap gap-1 mb-2">
     @foreach (var t in Tabs)
     {
         var tab = t;
-        <MudChip T="string" Size="Size.Small"
-                 Color="@(tab.Id == ActiveId ? Color.Primary : Color.Default)"
-                 Variant="@(tab.Id == ActiveId ? Variant.Filled : Variant.Outlined)"
-                 OnClick="@(() => OnActivate.InvokeAsync(tab))"
-                 OnClose="@(() => OnClose.InvokeAsync(tab))">@tab.Title</MudChip>
+        <MudTooltip Text="@tab.Title">
+            <MudChip T="string" Size="Size.Small"
+                     Color="@(tab.Id == ActiveId ? Color.Primary : Color.Default)"
+                     Variant="@(tab.Id == ActiveId ? Variant.Filled : Variant.Outlined)"
+                     OnClick="@(() => OnActivate.InvokeAsync(tab))"
+                     OnClose="@(() => OnClose.InvokeAsync(tab))"><span class="search-tab-title">@tab.Title</span></MudChip>
+        </MudTooltip>
     }
     <MudTooltip Text="Open a new search tab">
         <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="OnAdd" />
     </MudTooltip>
 </div>
-
-

@@ -282,3 +282,21 @@ public class ObjectLabel
     [Required] public string ObjectKind { get; set; } = ""; // Record | Container | Location | User
     public int ObjectId { get; set; }
 }
+
+// ---------------------------------------------------------------------------
+// SEARCH ACTIVITY — persistent per-user log of every executed Advanced
+// Search: when it ran, what was searched, the criteria summary, how many
+// rows matched, and how long the count query took. Capped per user (see
+// PrimService.MaxSearchActivityPerUser); only capped overflow is pruned.
+// ---------------------------------------------------------------------------
+public class SearchActivity
+{
+    public int Id { get; set; }
+    [Required] public string UserId { get; set; } = "";
+    public DateTime TimestampUtc { get; set; }
+    [Required] public string ObjectKind { get; set; } = ""; // Record | Container | Location | User
+    [Required] public string Logic { get; set; } = "";      // AND | OR
+    [Required] public string CriteriaSummary { get; set; } = "";
+    public int ResultCount { get; set; }
+    public double DurationMs { get; set; }
+}

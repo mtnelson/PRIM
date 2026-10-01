@@ -1,12 +1,24 @@
+@* Advanced Search: boolean builder across multiple fields, runnable against
+   records, containers, locations, or users (radio buttons at top).
+   All matching rows are fetched server-side in pages, not just grid chunks. *@
 @page "/advanced"
 <PageTitle>PRIM — Advanced Search</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-3">Advanced Search — Records</MudText>
+<MudText Typo="Typo.h5" Class="mb-3">Advanced Search — @_kindLabel</MudText>
 
 <SearchTabs Tabs="_tabs" ActiveId="_activeTab?.Id ?? 0"
             OnActivate="ActivateTab" OnClose="CloseTab" OnAdd="NewTab" />
 
 <MudPaper Elevation="1" Class="pa-4 mb-4">
+    <div class="d-flex align-center gap-3 mb-2">
+        <MudText Typo="Typo.body2">Search</MudText>
+        <MudRadioGroup T="string" Value="_kind" ValueChanged="OnKindChanged" Class="d-flex gap-4">
+            <MudRadio Value="@("Record")">Records</MudRadio>
+            <MudRadio Value="@("Container")">Containers</MudRadio>
+            <MudRadio Value="@("Location")">Locations</MudRadio>
+            <MudRadio Value="@("User")">Users</MudRadio>
+        </MudRadioGroup>
+    </div>
     <div class="d-flex align-center gap-3 mb-2">
         <MudText Typo="Typo.body2">Match</MudText>
         <MudRadioGroup T="string" @bind-Value="_logic" Class="d-flex gap-4">
@@ -28,13 +40,13 @@
                 <MudSelectItem Value="@("StartsWith")">starts with</MudSelectItem>
                 <MudSelectItem Value="@("EndsWith")">ends with</MudSelectItem>
             </MudSelect>
-            <MudTextField T="string" @bind-Value="r.Value" Label="Value (* ? wildcards)" Margin="Margin.Dense" Style="flex:1" />
+            <MudTextField T="string" @bind-Value="r.Value" Label="Value" Margin="Margin.Dense" Style="flex:1" />
             <MudIconButton Icon="@Icons.Material.Filled.RemoveCircle" Color="Color.Error" OnClick="() => _rows.Remove(r)" Disabled="_rows.Count == 1" />
         </div>
     }
 
     <div class="d-flex gap-2 mt-2">
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => _rows.Add(new AdvRow())">Add criterion</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="() => _rows.Add(NewRow())">Add criterion</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search" Disabled="_searching" OnClick="RunSearch">@(_searching ? "Searching…" : "Search")</MudButton>
     </div>
 </MudPaper>
@@ -44,12 +56,100 @@
 }
 @if (_searched)
 {
-    <MudText Typo="Typo.subtitle1" Class="mb-2">@_resultsTitle</MudText>
-    <RecordGrid @ref="_grid" ItemsProvider="ProvideSearchResults" GridId="advanced" Scope="advanced"
-                CountProvider="() => Prim.AdvancedSearchRecordsCountAsync(_criteria, _logic)" AllIdsProvider="() => Prim.AdvancedSearchRecordIdsAsync(_criteria, _logic)"
-                EditItem="EditRecord" DeleteItems="DeleteRecords"
-                OnChanged="RunSearch" TabState="_tabState" TabStateChanged="OnTabStateChanged">
-    </RecordGrid>
+    <MudTabs Rounded="true" ActivePanelIndex="_resultTab" ActivePanelIndexChanged="OnResultTabChanged">
+        <MudTabPanel Text="Results">
+            <MudText Typo="Typo.subtitle1" Class="mb-2 mt-2">@_resultsTitle</MudText>
+            @if (_kind == "Record")
+    {
+        <RecordGrid @ref="_recordGrid" ItemsProvider="ProvideRecordResults" GridId="advanced" Scope="advanced"
+                    CountProvider="CountResults" AllIdsProvider="AllResultIds"
+                    EditItem="EditRecord" DeleteItems="DeleteRecords"
+                    OnChanged="RunSearch" TabState="_tabState" TabStateChanged="OnTabStateChanged">
+        </RecordGrid>
+    }
+    else if (_kind == "Container")
+    {
+        <ContainerGrid @ref="_containerGrid" ItemsProvider="ProvideContainerResults" GridId="advanced-containers" Scope="advanced"
+                       CountProvider="CountResults" AllIdsProvider="AllResultIds"
+                       EditItem="EditContainer" DeleteItems="DeleteContainers"
+                       OnChanged="RunSearch" TabState="_tabState" TabStateChanged="OnTabStateChanged">
+        </ContainerGrid>
+    }
+    else if (_kind == "Location")
+    {
+        <LocationGrid @ref="_locationGrid" ItemsProvider="ProvideLocationResults" GridId="advanced-locations" Scope="advanced"
+                      CountProvider="CountResults" AllIdsProvider="AllResultIds"
+                      EditItem="EditLocation"
+                      OnChanged="RunSearch" TabState="_tabState" TabStateChanged="OnTabStateChanged">
+        </LocationGrid>
+    }
+    else
+    {
+        <UserGrid @ref="_userGrid" ItemsProvider="ProvideUserResults" GridId="advanced-users" Scope="advanced"
+                  CountProvider="CountResults" AllIdsProvider="AllResultIds"
+                  EditItem="EditUser" CanMove="false"
+                  OnChanged="RunSearch" TabState="_tabState" TabStateChanged="OnTabStateChanged">
+        </UserGrid>
+    }
+        </MudTabPanel>
+        <MudTabPanel Text="SQL">
+            <MudText Typo="Typo.body2" Class="mt-2 mb-2" Style="opacity:0.7">
+                The exact SQL of the most recent search run, in execution order. Page queries appear as you scroll.
+            </MudText>
+            @{
+                var sqlEntries = QueryLog.GetForRun(_runId);
+            }
+            @if (sqlEntries.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info">Run a search to see its SQL.</MudAlert>
+            }
+            else
+            {
+                @foreach (var e in sqlEntries)
+                {
+                    var entry = e;
+                    <MudPaper Elevation="1" Class="pa-3 mb-2">
+                        <div class="d-flex align-center gap-2 mb-1">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">@entry.Role</MudChip>
+                            <MudText Typo="Typo.caption">@entry.TimestampUtc.ToLocalTime().ToString("HH:mm:ss") · @entry.DurationMs.ToString("N1") ms</MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                                           title="Copy SQL" OnClick="@(() => CopySql(entry.Sql))" />
+                        </div>
+                        <pre style="margin:0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto">@entry.Sql</pre>
+                    </MudPaper>
+                }
+            }
+        </MudTabPanel>
+        <MudTabPanel Text="Activity">
+            <MudText Typo="Typo.body2" Class="mt-2 mb-2" Style="opacity:0.7">
+                Every search you have run on this page, newest first.
+            </MudText>
+            @if (_activity.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info">No searches logged yet.</MudAlert>
+            }
+            else
+            {
+                <MudTable Items="_activity" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>Time</MudTh>
+                        <MudTh>Type</MudTh>
+                        <MudTh>Logic</MudTh>
+                        <MudTh>Criteria</MudTh>
+                        <MudTh>Results</MudTh>
+                        <MudTh>Duration</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Time">@context.TimestampUtc.ToLocalTime().ToString("g")</MudTd>
+                        <MudTd DataLabel="Type">@context.ObjectKind</MudTd>
+                        <MudTd DataLabel="Logic">@context.Logic</MudTd>
+                        <MudTd DataLabel="Criteria">@context.CriteriaSummary</MudTd>
+                        <MudTd DataLabel="Results">@context.ResultCount.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Duration">@context.DurationMs.ToString("N0") ms</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudTabPanel>
+    </MudTabs>
 }
-
-

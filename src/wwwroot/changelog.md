@@ -1,5 +1,19 @@
 # PRIM Changelog
 
+## v0.11.1 — 2026-10-01
+- Advanced Search results now sit in tabs: Results, SQL, and Activity.
+- The SQL tab shows the exact SQL of the most recent search run — count, ID-list, and page queries (page queries appear as you scroll) — each with its timestamp, duration in milliseconds, and a copy button.
+- The Activity tab is a persistent per-user log of every search run on the page: time, object type, AND/OR logic, criteria summary, result count, and duration (last 200 kept per user).
+
+## v0.11.0 — 2026-10-01
+- Label detail pages now show full data grids per object type (records, containers, locations, users) with all columns and the column selector, instead of single-column link tables.
+- Advanced Search now searches records, containers, locations, or users — radio buttons at the top select the object type, each with its own field list and full data grid (edit/delete work from the results, as on the object pages).
+- Search tab titles carry the full search-string logic (including the object type on Advanced Search); long titles show an ellipsis with the complete title in a hover tooltip.
+- Advanced Search "Contains" now genuinely contains — no `*` asterisks required (explicit `*`/`?` wildcards still work).
+- The Records page is removed from the left navigation (the route still works for deep links); record work moves to Advanced Search.
+- Grid scrolling performance: each row's display values are now computed once per row instead of once per cell.
+- Saved-search sessions now persist the Advanced Search object type, so tab restore re-selects the radio and re-runs the right query.
+
 ## v0.10.5 — 2026-09-30
 - Bulk-operation progress toasts now actually appear during long runs: tight loops (send-to-workspace, remove-from-workspace, CSV export, clipboard copy, select-all) periodically yield to the renderer — previously the UI thread stayed blocked until the operation finished, so the "working" toast never painted.
 - Ctrl+A reliability: the browser's hotkey list is now pushed the moment any component registers or unregisters a hotkey (previously it only synced when the main layout re-rendered), so Ctrl+A can no longer tag grid rows while the browser also performs its native select-all.

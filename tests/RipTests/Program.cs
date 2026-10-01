@@ -645,6 +645,90 @@ var allRecs = await svc.GetRecordsAsync();
     Check(allIds.Count == 3 && allIds.Distinct().Count() == 3, "adv-search OR walks 3 rows across pages");
 }
 
+// ---- advanced search: Contains genuinely contains (no asterisks needed) ----
+{
+    var contains = await svc.AdvancedSearchRecordsPageAsync(
+        new List<(string, string, string)> { ("CaseNumber", "Contains", "234") }, "AND", new GridPageRequest { Take = 500 });
+    Check(contains.Rows.Any(r => r.RecordNumber == "R-000001"),
+        "adv-search Contains 234 (no asterisks) matches R-000001 (CaseNumber 12345)");
+    var containsWild = await svc.AdvancedSearchRecordsPageAsync(
+        new List<(string, string, string)> { ("CaseNumber", "Contains", "*234*") }, "AND", new GridPageRequest { Take = 500 });
+    Check(containsWild.Rows.Any(r => r.RecordNumber == "R-000001"),
+        "adv-search Contains *234* (explicit wildcards) still matches R-000001");
+    var eq = await svc.AdvancedSearchRecordsCountAsync(
+        new List<(string, string, string)> { ("CaseNumber", "Equals", "12345") }, "AND");
+    Check(eq == 2, "adv-search Equals 12345 unwrapped -> R-000001 + R-000003", $"got {eq}");
+    var swNoAst = await svc.AdvancedSearchRecordsPageAsync(
+        new List<(string, string, string)> { ("CaseNumber", "StartsWith", "123") }, "AND", new GridPageRequest { Take = 500 });
+    Check(swNoAst.Rows.Count == 2, "adv-search StartsWith 123 unchanged -> 2", $"got {swNoAst.Rows.Count}");
+    var ewNoAst = await svc.AdvancedSearchRecordsCountAsync(
+        new List<(string, string, string)> { ("CaseNumber", "EndsWith", "88710") }, "AND");
+    Check(ewNoAst == 1, "adv-search EndsWith 88710 unchanged -> 1", $"got {ewNoAst}");
+}
+
+// ---- advanced search: containers / locations / users ----
+{
+    var ccnt = await svc.AdvancedSearchContainersCountAsync(
+        new List<(string, string, string)> { ("ContainerName", "Contains", "SHIP") }, "AND");
+    Check(ccnt == 2, "adv-search containers Contains SHIP -> 2", $"got {ccnt}");
+    var cIds = await svc.AdvancedSearchContainerIdsAsync(
+        new List<(string, string, string)> { ("ContainerName", "Contains", "SHIP") }, "AND");
+    Check(cIds.Count == ccnt && cIds.SequenceEqual(cIds.OrderBy(x => x)),
+        "adv-search container ids match count, ordered ascending");
+    var cp = await svc.AdvancedSearchContainersPageAsync(
+        new List<(string, string, string)> { ("ContainerName", "Contains", "SHIP") }, "AND", new GridPageRequest { Take = 500 });
+    Check(cp.Rows.Count == 2 && cp.Rows.All(c => c.ContainerName.Contains("SHIP")) && !cp.HasMore,
+        "adv-search containers page -> both SHIP rows, no more");
+    var cOr = await svc.AdvancedSearchContainersCountAsync(
+        new List<(string, string, string)> { ("ContainerName", "Equals", "BIN464611"), ("ContainerName", "Equals", "TOTE02015") }, "OR");
+    Check(cOr == 2, "adv-search containers OR -> 2", $"got {cOr}");
+    var cUnk = await svc.AdvancedSearchContainersCountAsync(
+        new List<(string, string, string)> { ("Nope", "=", "x") }, "AND");
+    Check(cUnk == (await svc.GetContainersAsync()).Count, "adv-search containers unknown field ignored");
+
+    var lc = await svc.AdvancedSearchLocationsCountAsync(
+        new List<(string, string, string)> { ("LocationName", "Contains", "Harness") }, "AND");
+    Check(lc == 2, "adv-search locations Contains Harness -> 2", $"got {lc}");
+    var lIds = await svc.AdvancedSearchLocationIdsAsync(
+        new List<(string, string, string)> { ("LocationName", "Contains", "Harness") }, "AND");
+    Check(lIds.Count == lc && lIds.SequenceEqual(lIds.OrderBy(x => x)),
+        "adv-search location ids match count, ordered ascending");
+    var lp = await svc.AdvancedSearchLocationsPageAsync(
+        new List<(string, string, string)> { ("LocationName", "Contains", "Harness") }, "AND", new GridPageRequest { Take = 500 });
+    Check(lp.Rows.Count == 2 && lp.Rows.All(l => l.LocationName.Contains("Harness", StringComparison.OrdinalIgnoreCase)) && !lp.HasMore,
+        "adv-search locations page -> both Harness Shelf rows, no more");
+
+    var uc = await svc.AdvancedSearchUsersCountAsync(
+        new List<(string, string, string)> { ("DisplayName", "Contains", "Manager") }, "AND");
+    Check(uc == 1, "adv-search users Contains Manager -> 1", $"got {uc}");
+    var uIds = await svc.AdvancedSearchUserIdsAsync(
+        new List<(string, string, string)> { ("DisplayName", "Contains", "Manager") }, "AND");
+    Check(uIds.Count == uc && uIds.SequenceEqual(uIds.OrderBy(x => x)),
+        "adv-search user ids match count, ordered ascending");
+    var upg = await svc.AdvancedSearchUsersPageAsync(
+        new List<(string, string, string)> { ("UserId", "StartsWith", "admin") }, "AND", new GridPageRequest { Take = 500 });
+    Check(upg.Rows.Count == 1 && upg.Rows[0].UserId == "admin01" && !upg.HasMore,
+        "adv-search users StartsWith admin -> admin01, no more");
+    var uUnk = await svc.AdvancedSearchUsersCountAsync(
+        new List<(string, string, string)> { ("Nope", "=", "x") }, "AND");
+    Check(uUnk == (await svc.GetUsersAsync()).Count, "adv-search users unknown field ignored");
+}
+
+// ---- label members as full entities (backs the label detail grids) ----
+{
+    var hlab = await svc.GetOrCreateLabelAsync("HarnessLabel", "harness");
+    var hrec = (await svc.GetRecordsAsync()).First(r => (r.Subject ?? "").StartsWith("[TEST]"));
+    var hcont = (await svc.GetContainersAsync()).First(c => c.ContainerName == "HQ-SHIP-LD263S");
+    await svc.SetObjectLabelsAsync("Record", hrec.Id, new[] { "HarnessLabel" }, "harness");
+    await svc.SetObjectLabelsAsync("Container", hcont.Id, new[] { "HarnessLabel" }, "harness");
+    var hrecs = await svc.GetLabelRecordsAsync(hlab.Id);
+    Check(hrecs.Count == 1 && hrecs[0].Id == hrec.Id, "GetLabelRecordsAsync -> the labeled record");
+    var hconts = await svc.GetLabelContainersAsync(hlab.Id);
+    Check(hconts.Count == 1 && hconts[0].Id == hcont.Id, "GetLabelContainersAsync -> the labeled container");
+    Check((await svc.GetLabelLocationsAsync(hlab.Id)).Count == 0, "GetLabelLocationsAsync empty when none labeled");
+    Check((await svc.GetLabelUsersAsync(hlab.Id)).Count == 0, "GetLabelUsersAsync empty when none labeled");
+}
+
 // ---- full 1500-record seed: chunked reads, no dupes/omissions ----
 {
     int maxIdBefore = 0;
@@ -835,6 +919,92 @@ await svc3.MoveItemsAsync("Record", Array.Empty<int>(), null, null, null, null, 
 using (var db = factory.CreateDbContext())
     Check(await db.AuditEvents.LongCountAsync() == 5, "bulk op triggers archival to configured cap");
 try { Directory.Delete(tmpAudit2, true); } catch { }
+
+// ---- advanced search: SQL tab query log ----
+{
+    var log = new SearchQueryLog();
+    var svcLog = new PrimService(factory, queryLog: log);
+    var crit = new List<(string, string, string)> { ("CaseNumber", "Contains", "123") };
+    var runId = Guid.NewGuid();
+    var n = await svcLog.AdvancedSearchRecordsCountAsync(crit, "AND", $"AdvancedSearch:Record:{runId:N}:count");
+    Check(n > 0, "tagged count executes normally", $"got {n}");
+    var entries = log.GetForRun(runId);
+    Check(entries.Count == 1 && entries[0].Role == "count" && entries[0].Kind == "Record",
+        "query log records one entry for tagged count", $"got {entries.Count}");
+    Check(entries.Count == 1 && entries[0].Sql.Contains("LIKE", StringComparison.OrdinalIgnoreCase),
+        "logged SQL contains LIKE for Contains op", entries.Count == 1 ? entries[0].Sql : "none");
+    Check(entries.Count == 1 && entries[0].DurationMs >= 0, "logged entry carries a duration");
+
+    var before = log.Count;
+    await svcLog.AdvancedSearchRecordsCountAsync(crit, "AND");
+    Check(log.Count == before, "untagged query records nothing");
+
+    var run2 = Guid.NewGuid();
+    await svcLog.AdvancedSearchRecordsCountAsync(crit, "AND", $"AdvancedSearch:Record:{run2:N}:count");
+    Check(log.GetForRun(runId).Count == 1 && log.GetForRun(run2).Count == 1,
+        "run-id filtering returns only that run's entries");
+
+    await svcLog.AdvancedSearchRecordsPageAsync(crit, "AND",
+        new GridPageRequest { Take = 10 }, $"AdvancedSearch:Record:{runId:N}:page");
+    var pageEntries = log.GetForRun(runId).Where(e => e.Role == "page").ToList();
+    Check(pageEntries.Count == 1 && pageEntries[0].Sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase),
+        "page query logs composed SQL with LIMIT", pageEntries.Count == 1 ? pageEntries[0].Sql : "none");
+
+    await svcLog.AdvancedSearchRecordIdsAsync(crit, "AND", $"AdvancedSearch:Record:{runId:N}:ids");
+    Check(log.GetForRun(runId).Any(e => e.Role == "ids"), "ids query logged with role=ids");
+
+    Check(SearchQueryLog.TryParseTag($"AdvancedSearch:User:{Guid.NewGuid():N}:page", out var r, out var k, out var role)
+        && k == "User" && role == "page" && r != Guid.Empty, "TryParseTag accepts well-formed tag");
+    Check(!SearchQueryLog.TryParseTag("AdvancedSearch:User:notaguid:page", out _, out _, out _),
+        "TryParseTag rejects bad guid");
+    Check(!SearchQueryLog.TryParseTag(null, out _, out _, out _), "TryParseTag rejects null");
+    Check(!SearchQueryLog.TryParseTag("SELECT 1", out _, out _, out _), "TryParseTag rejects non-tag");
+
+    var log2 = new SearchQueryLog();
+    var rid = Guid.NewGuid();
+    for (int i = 0; i < 210; i++) log2.Record(rid, "Record", "count", "SELECT 1", 0.1);
+    Check(log2.Count == 200, "query log caps at 200 entries", $"got {log2.Count}");
+    Check(log2.GetForRun(Guid.NewGuid()).Count == 0, "GetForRun unknown run -> empty");
+}
+
+// ---- search activity log ----
+{
+    var before = await svc.GetSearchActivityAsync("tester");
+    await svc.LogSearchActivityAsync(new SearchActivity
+    {
+        UserId = "tester", TimestampUtc = DateTime.UtcNow, ObjectKind = "Record",
+        Logic = "AND", CriteriaSummary = "CaseNumber Contains '123'", ResultCount = 2, DurationMs = 3.5
+    });
+    var after = await svc.GetSearchActivityAsync("tester");
+    Check(after.Count == before.Count + 1 && after[0].ObjectKind == "Record" && after[0].ResultCount == 2,
+        "search activity row written and read newest-first");
+
+    for (int i = 0; i < 205; i++)
+        await svc.LogSearchActivityAsync(new SearchActivity
+        {
+            UserId = "capuser", TimestampUtc = DateTime.UtcNow, ObjectKind = "Record",
+            Logic = "AND", CriteriaSummary = "x", ResultCount = i, DurationMs = 0
+        });
+    var capped = await svc.GetSearchActivityAsync("capuser", 500);
+    Check(capped.Count == 200, "search activity pruned at 200/user cap", $"got {capped.Count}");
+}
+
+// ---- upgrade: SearchActivities created on table-less DB ----
+{
+    var dbPath2 = Path.Combine(Path.GetTempPath(), $"riptest-upg-{Guid.NewGuid():N}.db");
+    var opts = new DbContextOptionsBuilder<PrimDbContext>().UseSqlite($"Data Source={dbPath2}").Options;
+    await using (var db = new PrimDbContext(opts))
+    {
+        await db.Database.EnsureCreatedAsync();
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE SearchActivities");
+    }
+    await using (var db = new PrimDbContext(opts))
+    {
+        SeedData.UpgradeSchema(db);
+        Check(await db.SearchActivities.CountAsync() == 0, "UpgradeSchema recreates missing SearchActivities table");
+    }
+    try { File.Delete(dbPath2); } catch { }
+}
 
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }

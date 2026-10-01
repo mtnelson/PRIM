@@ -13,10 +13,11 @@ using Prim.Services;
 
 namespace Prim.Components.Pages;
 
-public partial class Labels : ComponentBase
+public partial class Labels : ComponentBase, IDisposable
 {
     [Inject] public PrimService Prim { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
+    [Inject] public HotkeyManager Hotkeys { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
     [Inject] public NavigationManager Nav { get; set; } = default!;
@@ -28,12 +29,21 @@ public partial class Labels : ComponentBase
     private string _filter = "";
     private string _newName = "";
     private Label? _label;
-    private List<(string Kind, int Id, string Label)> _members = new();
+    // Label members as full entities, one list per kind (backing the grids).
+    private List<RecordItem> _records = new();
+    private List<Container> _containers = new();
+    private List<Location> _locations = new();
+    private List<AppUser> _users = new();
+    private int _totalMembers => _records.Count + _containers.Count + _locations.Count + _users.Count;
 
     private IEnumerable<Label> Filtered => string.IsNullOrWhiteSpace(_filter) ? _labels
         : _labels.Where(l => l.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase));
 
+    protected override void OnInitialized() => Hotkeys.PushScope("labels");
+
     protected override async Task OnParametersSetAsync() => await Load();
+
+    public void Dispose() => Hotkeys.UnregisterScope("labels");
 
     private async Task Load()
     {
@@ -45,9 +55,21 @@ public partial class Labels : ComponentBase
         else
         {
             _label = await Prim.GetLabelAsync(LabelId.Value);
-            _members = _label == null ? new() : await Prim.GetLabelMembersAsync(LabelId.Value);
+            if (_label == null)
+            {
+                _records = new(); _containers = new(); _locations = new(); _users = new();
+            }
+            else
+            {
+                _records = await Prim.GetLabelRecordsAsync(LabelId.Value);
+                _containers = await Prim.GetLabelContainersAsync(LabelId.Value);
+                _locations = await Prim.GetLabelLocationsAsync(LabelId.Value);
+                _users = await Prim.GetLabelUsersAsync(LabelId.Value);
+            }
         }
     }
+
+    private Task ReloadMembers() => Load();
 
     private async Task NewLabelKey(KeyboardEventArgs e)
     {
@@ -106,8 +128,70 @@ public partial class Labels : ComponentBase
         App.RequestFocus(kind, id, false);
         Nav.NavigateTo(kind switch
         {
-            "Record" => "/records", "Container" => "/containers",
+            "Record" => "/advanced", "Container" => "/containers",
             "Location" => "/locations", "User" => "/users", _ => "/"
         });
+    }
+
+    // Per-kind edit/delete handlers, mirroring the corresponding object pages.
+    private async Task<bool> EditRecord(RecordItem r)
+    {
+        var d = await DialogService.ShowAsync<RecordDialog>("Edit Record",
+            new DialogParameters { ["Model"] = r },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+
+    private async Task<bool> DeleteRecords(List<int> ids)
+    {
+        var d = await DialogService.ShowAsync<DeleteDialog>("Delete Records",
+            new DialogParameters { ["Ids"] = ids }, new DialogOptions { MaxWidth = MaxWidth.Medium });
+        return (await d.Result) is { Canceled: false };
+    }
+
+    private async Task<bool> EditContainer(Container c)
+    {
+        var d = await DialogService.ShowAsync<ContainerDialog>("Edit Container",
+            new DialogParameters { ["Model"] = c },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+
+    private async Task<bool> DeleteContainers(List<int> ids)
+    {
+        bool? ok = await DialogService.ShowMessageBox("Delete containers?",
+            $"Delete {ids.Count} container(s)? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return false;
+        await using var busy = BusyToast.Show(Snackbar, $"Deleting {ids.Count:N0} container(s)…");
+        try
+        {
+            var n = await Prim.DeleteContainersAsync(ids, App.CurrentUserId);
+            busy.Complete($"Deleted {n:N0} container(s).");
+            var names = new List<string>();
+            foreach (var id in ids) names.Add(await Prim.GetObjectLabelAsync("Container", id));
+            App.LogItems("Deleted containers", names);
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            return false;
+        }
+    }
+
+    private async Task<bool> EditLocation(Location l)
+    {
+        var d = await DialogService.ShowAsync<LocationDialog>("Edit Location",
+            new DialogParameters { ["Model"] = l },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
+    }
+
+    private async Task<bool> EditUser(AppUser u)
+    {
+        var d = await DialogService.ShowAsync<UserDialog>("Edit User",
+            new DialogParameters { ["Model"] = u },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        return (await d.Result) is { Canceled: false };
     }
 }

@@ -550,8 +550,23 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
         return cls;
     }
 
+    // CellVal is called once per cell; RowToDict builds the whole row's
+    // dictionary, so memoize the last row's dict — a row's cells render
+    // consecutively, turning N dict builds per row into one. RowToDict is a
+    // pure function of the item, so the cached value is identical.
+    private T? _cellDictItem;
+    private Dictionary<string, string>? _cellDict;
+
     private string CellVal(T x, string key)
-        => RowToDict is null ? "" : RowToDict(x).GetValueOrDefault(key, "");
+    {
+        if (RowToDict is null) return "";
+        if (!ReferenceEquals(x, _cellDictItem))
+        {
+            _cellDictItem = x;
+            _cellDict = RowToDict(x);
+        }
+        return _cellDict!.GetValueOrDefault(key, "");
+    }
 
     private async Task OnRowClick(DataGridRowClickEventArgs<T> e)
     {

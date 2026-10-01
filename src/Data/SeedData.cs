@@ -88,6 +88,24 @@ public static class SeedData
             CREATE INDEX IF NOT EXISTS IX_ObjectLabels_Object
             ON ObjectLabels (ObjectKind, ObjectId)
             """);
+        // Search activity log (Advanced Search page, Activity tab). Fresh DBs
+        // get the table from EnsureCreated; existing DBs are backfilled here.
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS SearchActivities (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                UserId TEXT NOT NULL,
+                TimestampUtc TEXT NOT NULL,
+                ObjectKind TEXT NOT NULL,
+                Logic TEXT NOT NULL,
+                CriteriaSummary TEXT NOT NULL,
+                ResultCount INTEGER NOT NULL,
+                DurationMs REAL NOT NULL
+            )
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS IX_SearchActivities_User_Timestamp
+            ON SearchActivities (UserId, TimestampUtc)
+            """);
         // Search-session tabs (per-page open search descriptors). Fresh DBs
         // get the table from EnsureCreated; existing DBs are backfilled here.
         db.Database.ExecuteSqlRaw("""

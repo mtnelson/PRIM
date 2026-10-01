@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.JSInterop;
 using MudBlazor;
 using Rim.Components.Dialogs;
@@ -46,14 +47,28 @@ public partial class UserDialog : ComponentBase
         _error = null;
         await _form.Validate();
         if (!_form.IsValid) return;
+        // H6: minimum password length 8 (UI-side; the service-side check in
+        // RimService.SetUserPasswordAsync still enforces its own minimum).
+        if (!string.IsNullOrEmpty(_password) && _password.Length < 8)
+        { _error = "Password must be at least 8 characters."; return; }
         var isNew = _model.Id == 0;
-        var (ok, err) = await Rim.SaveUserAsync(_model, App.CurrentUserId);
-        if (!ok) { _error = err; return; }
-        await Rim.SetObjectLabelsAsync("User", _model.Id, _labels, App.CurrentUserId);
-        if (!string.IsNullOrEmpty(_password))
+        try
         {
-            var (pok, perr) = await Rim.SetUserPasswordAsync(_model.UserId, _password, App.CurrentUserId);
-            if (!pok) { _error = perr; return; }
+            var (ok, err) = await Rim.SaveUserAsync(_model, App.CurrentUserId, App.CurrentRole);
+            if (!ok) { _error = err; return; }
+            await Rim.SetObjectLabelsAsync("User", _model.Id, _labels, App.CurrentUserId);
+            if (!string.IsNullOrEmpty(_password))
+            {
+                var (pok, perr) = await Rim.SetUserPasswordAsync(_model.UserId, _password, App.CurrentUserId, App.CurrentRole);
+                if (!pok) { _error = perr; return; }
+            }
+        }
+        catch (DbUpdateException ex)
+        {
+            // M8: surface persistence failures in the dialog instead of
+            // tearing the circuit.
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+            return;
         }
         Snackbar.Add(isNew ? "User created." : "User updated.", Severity.Success);
         App.Log(isNew ? "Created user" : "Updated user", _model.UserId);

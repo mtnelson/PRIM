@@ -199,7 +199,8 @@ public partial class Dashboard : ComponentBase, IDisposable
             $"Delete {ids.Count} container(s)? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return false;
         await using var busy = BusyToast.Show(Snackbar, $"Deleting {ids.Count:N0} container(s)…");
-        var n = await Rim.DeleteContainersAsync(ids, App.CurrentUserId);
+        var (delOk, delErr, n) = await Rim.DeleteContainersAsync(ids, App.CurrentUserId);
+        if (!delOk) { busy.Complete($"Delete failed: {delErr}"); return false; }
         busy.Complete($"Deleted {n:N0} container(s).");
         var names = new List<string>();
         foreach (var id in ids) names.Add(await Rim.GetObjectLabelAsync("Container", id));

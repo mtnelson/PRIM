@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.JSInterop;
 using MudBlazor;
 using Rim.Components.Dialogs;
@@ -70,8 +71,9 @@ public partial class MoveDialog : ComponentBase
         }
         // v0.12.0: MoveItemsAsync throws for filed records (parent invariant)
         // and for invalid home/assignee kinds — show the message, keep the
-        // dialog open, never tear down the circuit.
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        // dialog open, never tear down the circuit. M8: DbUpdateException
+        // (e.g. concurrency conflicts) is surfaced the same way.
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or DbUpdateException)
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }

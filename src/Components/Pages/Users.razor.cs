@@ -23,6 +23,7 @@ public partial class Users : ComponentBase, IDisposable
 
     private UserGrid? _grid;
     private bool _showInactive;
+    private bool _notAuthorized;
     // Search-session tabs: one persisted descriptor per open tab (see Records.razor).
     private List<SearchSession> _tabs = new();
     private SearchSession? _activeTab;
@@ -47,6 +48,9 @@ public partial class Users : ComponentBase, IDisposable
 
     protected override async Task OnInitializedAsync()
     {
+        // H1: user management is Administrator-only. Non-admins get a
+        // "not authorized" message instead of the page — never the data.
+        if (!App.IsAdmin) { _notAuthorized = true; return; }
         _tabs = await Rim.GetOpenSessionsAsync(App.CurrentUserId, "users");
         if (_tabs.Count == 0)
         {

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.JSInterop;
 using MudBlazor;
 using Rim.Components.Dialogs;
@@ -38,12 +39,19 @@ public partial class DeleteDialog : ComponentBase
         _busy = true;
         try
         {
-            var n = await Rim.DeleteRecordsAsync(Ids, _reason, _mergedInto, _otherText, App.CurrentUserId);
+            var (delOk, delErr, n) = await Rim.DeleteRecordsAsync(Ids, _reason, _mergedInto, _otherText, App.CurrentUserId);
+            if (!delOk) { Snackbar.Add($"Delete failed: {delErr}", Severity.Error); return; }
             Snackbar.Add($"Deleted {n} record(s).", Severity.Success);
             var labels = new List<string>();
             foreach (var id in Ids) labels.Add(await Rim.GetObjectLabelAsync("Record", id));
             App.LogItems($"Deleted records ({_reason})", labels);
             MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (DbUpdateException ex)
+        {
+            // M8: surface persistence failures in the dialog instead of
+            // tearing the circuit.
+            Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }
     }

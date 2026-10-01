@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.JSInterop;
 using MudBlazor;
 using Rim.Components.Dialogs;
@@ -48,9 +49,19 @@ public partial class LocationDialog : ComponentBase
         await _form.Validate();
         if (!_form.IsValid) return;
         var isNew = _model.Id == 0;
-        var (ok, err) = await Rim.SaveLocationAsync(_model, App.CurrentUserId);
-        if (!ok) { _error = err; return; }
-        await Rim.SetObjectLabelsAsync("Location", _model.Id, _labels, App.CurrentUserId);
+        try
+        {
+            var (ok, err) = await Rim.SaveLocationAsync(_model, App.CurrentUserId);
+            if (!ok) { _error = err; return; }
+            await Rim.SetObjectLabelsAsync("Location", _model.Id, _labels, App.CurrentUserId);
+        }
+        catch (DbUpdateException ex)
+        {
+            // M8: surface persistence failures in the dialog instead of
+            // tearing the circuit.
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+            return;
+        }
         Snackbar.Add(isNew ? "Location created." : "Location updated.", Severity.Success);
         App.Log(isNew ? "Created location" : "Updated location", _model.LocationName);
         MudDialog.Close(DialogResult.Ok(true));

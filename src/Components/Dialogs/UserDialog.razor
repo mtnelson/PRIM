@@ -33,7 +33,7 @@
                 </MudItem>
                 <MudItem xs="12" md="6">
                     <MudTextField T="string" Label="New password" @bind-Value="_password" InputType="InputType.Password"
-                                  HelperText="Dev only — production uses OAuth/SSO. Leave blank to keep the current password." />
+                                  HelperText="Dev only — production uses OAuth/SSO. Leave blank to keep the current password. Minimum 8 characters." />
                 </MudItem>
                 <MudItem xs="12">
                     <MudCheckBox T="bool" Label="Active" @bind-Value="_model.Active" />

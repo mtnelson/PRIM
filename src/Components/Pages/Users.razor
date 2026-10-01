@@ -1,6 +1,14 @@
 @page "/users"
 <PageTitle>RIM — Users</PageTitle>
 
+@if (_notAuthorized)
+{
+    <MudAlert Severity="Severity.Error" Class="ma-4">
+        Not authorized — the Users page requires the Administrator role.
+    </MudAlert>
+}
+else
+{
 <div class="d-flex align-center mb-3">
     <MudText Typo="Typo.h5">Users</MudText>
     <MudSpacer />
@@ -19,5 +27,6 @@
 <UserGrid @ref="_grid" ItemsProvider="ProvideUsers" GridId="users" Scope="users"
           CountProvider="() => Rim.CountUsersAsync(_showInactive)" AllIdsProvider="() => Rim.GetAllUserIdsAsync(_showInactive)"
           EditItem="EditUser" OnChanged="OnGridChanged" CanMove="false" TabState="_tabState" TabStateChanged="OnTabStateChanged" />
+}
 
 

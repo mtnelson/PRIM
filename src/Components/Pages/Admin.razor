@@ -1,6 +1,14 @@
 @page "/admin"
 <PageTitle>RIM — Admin</PageTitle>
 
+@if (_notAuthorized)
+{
+    <MudAlert Severity="Severity.Error" Class="ma-4">
+        Not authorized — the Administration page requires the Administrator role.
+    </MudAlert>
+}
+else
+{
 <MudText Typo="Typo.h5" Class="mb-3">Administration</MudText>
 
 <MudTabs Rounded="true">
@@ -8,8 +16,17 @@
         <div class="d-flex align-center mt-2 mb-2">
             <MudText Typo="Typo.subtitle1"><b>Deleted record review</b></MudText>
             <MudSpacer />
+            <MudTextField T="string" Label="Search deleted" Value="_deletedSearch" ValueChanged="OnDeletedSearchChanged"
+                          Immediate="true" DebounceInterval="400" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:280px" Class="mr-2" />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Load">Refresh</MudButton>
         </div>
+        @if (_deletedHasMore)
+        {
+            <MudText Typo="Typo.caption" Class="mb-2" Style="opacity:0.7">
+                Showing the first @DeletedCap matches — refine the search to narrow results.
+            </MudText>
+        }
         <MudDataGrid Items="_deletedRows" Dense="true" Hover="true" HorizontalScrollbar="true" Class="rim-grid">
             <Columns>
                 @foreach (var col in _deletedCols)
@@ -129,5 +146,5 @@
         </MudPaper>
     </MudTabPanel>
 </MudTabs>
-
+}
 

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Virtualization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.JSInterop;
 using MudBlazor;
 using Rim.Components.Dialogs;
@@ -25,6 +26,9 @@ public partial class RecordDialog : ComponentBase
     private MudForm _form = null!;
     private RecordItem _model = new();
     private List<RecordItem> _compressedParents = new();
+    private string _parentSearch = "";
+    private bool _parentsHasMore;
+    private const int ParentPageCap = 500;
     private List<string> _labels = new();
     private string? _error;
     private string _originalType = "";
@@ -32,16 +36,38 @@ public partial class RecordDialog : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        // v0.12.0: only Compressed Parents can accept filed children (no
-        // nesting); a record can never be its own parent.
-        _compressedParents = (await Rim.GetRecordsAsync())
-            .Where(r => r.RecordType == "Compressed" && r.CompressedRole == "Parent" && r.Id != Model.Id)
-            .ToList();
         _model = Model.Id == 0
             ? new RecordItem { Home = App.CurrentDisplayName, HomeKind = "User", Assignee = App.CurrentDisplayName, AssigneeKind = "User" }
             : Clone(Model);
         _originalType = _model.RecordType;
+        await LoadCompressedParents();
         if (_model.Id != 0) _labels = await Rim.GetObjectLabelNamesAsync("Record", _model.Id);
+    }
+
+    // H4: the compressed-parent dropdown used to load ALL records. It now
+    // pages server-side (filter + take cap) instead of materializing the table.
+    private async Task LoadCompressedParents()
+    {
+        var page = await Rim.GetRecordsPageAsync(new GridPageRequest { Take = ParentPageCap, Filter = _parentSearch });
+        _compressedParents = page.Rows
+            // v0.12.0: only Compressed Parents can accept filed children (no
+            // nesting); a record can never be its own parent.
+            .Where(r => r.RecordType == "Compressed" && r.CompressedRole == "Parent" && r.Id != Model.Id)
+            .ToList();
+        _parentsHasMore = page.HasMore;
+        // Keep the currently selected parent visible even when it falls
+        // outside the filtered page.
+        if (_model.ParentRecordId is int pid && _compressedParents.All(p => p.Id != pid))
+        {
+            var cur = await Rim.GetRecordAsync(pid);
+            if (cur != null) _compressedParents.Insert(0, cur);
+        }
+    }
+
+    private async Task OnParentSearchChanged(string v)
+    {
+        _parentSearch = v;
+        await LoadCompressedParents();
     }
 
     private static RecordItem Clone(RecordItem r) => new()
@@ -113,9 +139,19 @@ public partial class RecordDialog : ComponentBase
         }
 
         var isNew = _model.Id == 0;
-        var (ok2, err) = await Rim.SaveRecordAsync(_model, App.CurrentUserId);
-        if (!ok2) { _error = err; return; }
-        await Rim.SetObjectLabelsAsync("Record", _model.Id, _labels, App.CurrentUserId);
+        try
+        {
+            var (ok2, err) = await Rim.SaveRecordAsync(_model, App.CurrentUserId, App.CurrentRole);
+            if (!ok2) { _error = err; return; }
+            await Rim.SetObjectLabelsAsync("Record", _model.Id, _labels, App.CurrentUserId);
+        }
+        catch (DbUpdateException ex)
+        {
+            // M8: surface persistence failures in the dialog instead of
+            // tearing the circuit.
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+            return;
+        }
         Snackbar.Add(isNew ? "Record created." : "Record updated.", Severity.Success);
         App.Log(isNew ? "Created record" : "Updated record", _model.RecordNumber);
         MudDialog.Close(DialogResult.Ok(true));

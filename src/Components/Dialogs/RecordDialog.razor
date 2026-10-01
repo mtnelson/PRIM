@@ -80,6 +80,10 @@
                 {
                     @* Filed under a compressed parent: Home and Assignee ARE the parent record itself. *@
                     <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Search parents" Value="_parentSearch" ValueChanged="OnParentSearchChanged"
+                                      Immediate="true" DebounceInterval="400" Adornment="Adornment.Start"
+                                      AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-2"
+                                      HelperText="@(_parentsHasMore ? "More than 500 matches — refine the search." : "Parent list is server-filtered (first 500 matches).")" />
                         <MudSelect T="int?" Label="Compressed Parent *" @bind-Value="_model.ParentRecordId"
                                    Required="true" RequiredError="Select the compressed parent." Clearable="true"
                                    HelperText="Home and Assignee are the parent record itself — the child moves with its parent automatically. Clear to un-file.">
@@ -106,6 +110,10 @@
                         <MudText Typo="Typo.caption">@_model.AssigneeKind</MudText>
                     </MudItem>
                     <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Search parents" Value="_parentSearch" ValueChanged="OnParentSearchChanged"
+                                      Immediate="true" DebounceInterval="400" Adornment="Adornment.Start"
+                                      AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-2"
+                                      HelperText="@(_parentsHasMore ? "More than 500 matches — refine the search." : "Parent list is server-filtered (first 500 matches).")" />
                         <MudSelect T="int?" Label="Parent Record (compressed children)" @bind-Value="_model.ParentRecordId"
                                    Clearable="true" HelperText="File this record under a compressed parent — any record type keeps its type.">
                             @foreach (var p in _compressedParents) { <MudSelectItem Value="@((int?)p.Id)">@p.RecordNumber</MudSelectItem> }

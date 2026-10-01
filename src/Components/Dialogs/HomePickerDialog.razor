@@ -1,7 +1,8 @@
 @* Home / Assignee picker. Lists every object type that can serve as a Home:
    containers, locations, and users (HomeRules.EligibleHomeKinds). Compressed
    records are never offered — nothing may be homed or assigned to them.
-   Trees are expandable: location hierarchy, container nesting, users by member location. *@
+   Trees load server-side: roots come from filtered, take-capped page queries
+   and children load lazily only when a node expands. *@
 <MudDialog>
     <TitleContent><MudText Typo="Typo.h6">@Title</MudText></TitleContent>
     <DialogContent>
@@ -9,28 +10,37 @@
         <MudText Typo="Typo.caption" Class="mb-2" Style="opacity:0.7">
             Homes and assignees can be containers, locations, or users. Compressed records cannot be homes.
         </MudText>
-        <MudTextField T="string" Label="Search" Value="_q" ValueChanged="OnSearchChanged" Immediate="true" Adornment="Adornment.Start"
+        <MudTextField T="string" Label="Search" Value="_q" ValueChanged="OnSearchChanged" Immediate="true"
+                      DebounceInterval="400" Adornment="Adornment.Start"
                       AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-2" />
         <MudTabs Rounded="true">
             <MudTabPanel Text="Locations">
-                <MudTreeView T="Location" Items="_locRoots" Dense="true" Hover="true" ExpandOnClick="true"
-                             Style="max-height:300px;overflow-y:auto">
+                <MudTreeView T="Location" Items="_locRoots" ServerData="LoadLocationChildren" Dense="true" Hover="true"
+                             ExpandOnClick="true" Style="max-height:300px;overflow-y:auto" @key="@("locs-" + _q)">
                     <ItemTemplate>
-                        <MudTreeViewItem T="Location" Value="@context.Value" Items="@context.Children"
-                                         Text="@context.Value!.LocationName" EndText="@context.Value.LocationType"
+                        <MudTreeViewItem T="Location" Value="@context.Value" Text="@context.Value!.LocationName"
+                                         EndText="@context.Value.LocationType" CanExpand="@context.Expandable"
                                          OnClick="() => ChooseLocation(context.Value)" />
                     </ItemTemplate>
                 </MudTreeView>
+                @if (_locHasMore)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7">Showing the first 500 matches — refine the search.</MudText>
+                }
             </MudTabPanel>
             <MudTabPanel Text="Containers">
-                <MudTreeView T="Container" Items="_conRoots" Dense="true" Hover="true" ExpandOnClick="true"
-                             Style="max-height:300px;overflow-y:auto">
+                <MudTreeView T="Container" Items="_conRoots" ServerData="LoadContainerChildren" Dense="true" Hover="true"
+                             ExpandOnClick="true" Style="max-height:300px;overflow-y:auto" @key="@("cons-" + _q)">
                     <ItemTemplate>
-                        <MudTreeViewItem T="Container" Value="@context.Value" Items="@context.Children"
-                                         Text="@context.Value!.ContainerName" EndText="@context.Value.ContainerType"
+                        <MudTreeViewItem T="Container" Value="@context.Value" Text="@context.Value!.ContainerName"
+                                         EndText="@context.Value.ContainerType" CanExpand="@context.Expandable"
                                          OnClick="() => ChooseContainer(context.Value)" />
                     </ItemTemplate>
                 </MudTreeView>
+                @if (_conHasMore)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7">Showing the first 500 matches — refine the search.</MudText>
+                }
             </MudTabPanel>
             <MudTabPanel Text="Users">
                 @foreach (var g in _userGroups)
@@ -44,10 +54,12 @@
                         </MudList>
                     </MudExpansionPanel>
                 }
+                @if (_usersHasMore)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7">Showing the first 500 matches — refine the search.</MudText>
+                }
             </MudTabPanel>
         </MudTabs>
     </DialogContent>
     <DialogActions><MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton></DialogActions>
 </MudDialog>
-
-

@@ -2,7 +2,11 @@
     <TitleContent><MudText Typo="Typo.h6">Audit Log — @Label</MudText></TitleContent>
     <DialogContent>
         <DialogHotkeys OnCancel="() => MudDialog.Cancel()" />
-        @if (_events.Count == 0)
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-2">Could not load the audit log: @_error</MudAlert>
+        }
+        else if (_events.Count == 0)
         {
             <MudText Typo="Typo.body2">No audit events for this item.</MudText>
         }

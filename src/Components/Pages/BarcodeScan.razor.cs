@@ -14,7 +14,6 @@ public partial class BarcodeScan : ComponentBase
     [Inject] public AppState App { get; set; } = default!;
     [Inject] public IDialogService DialogService { get; set; } = default!;
     [Inject] public ISnackbar Snackbar { get; set; } = default!;
-    [Inject] public BarcodeImageService BarcodeImages { get; set; } = default!;
 
     private const string ActWorkspace = "Workspace";
     private const string ActHome = "Home";
@@ -31,7 +30,6 @@ public partial class BarcodeScan : ComponentBase
     private string _homeBarcode = "";
     private string _objects = "";
     private bool _running;
-    private bool _decoding;
 
     private MudTextField<string>? _destField;
     private MudTextField<string>? _objectsField;
@@ -68,46 +66,6 @@ public partial class BarcodeScan : ComponentBase
             .Where(s => s.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-    // ZXing image decode: photograph a barcode, get its text into the scan
-    // field. Decoded codes are appended without duplicating existing lines.
-    private async Task DecodeImageFiles(InputFileChangeEventArgs e)
-    {
-        if (_decoding) return;
-        _decoding = true;
-        try
-        {
-            var existing = new HashSet<string>(
-                ParseBarcodes(_objects), StringComparer.OrdinalIgnoreCase);
-            int added = 0, files = 0;
-            foreach (var file in e.GetMultipleFiles(5))
-            {
-                files++;
-                await using var ms = new MemoryStream();
-                await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
-                foreach (var code in BarcodeImages.DecodeBarcodes(ms.ToArray()))
-                    if (existing.Add(code)) added++;
-            }
-            if (added > 0)
-            {
-                _objects = string.Join("\n", existing);
-                App.Log("Decoded barcodes from image", $"{added} new code(s) from {files} file(s)");
-                Snackbar.Add($"Decoded {added} barcode(s) from {files} image(s).", Severity.Success);
-            }
-            else
-            {
-                Snackbar.Add("No barcodes found in the uploaded image(s).", Severity.Warning);
-            }
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Image decode failed: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _decoding = false;
-        }
-    }
 
     private async Task Execute()
     {

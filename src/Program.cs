@@ -5,6 +5,11 @@ using Rim.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// PDFsharp 6.x ships with no default font resolver (GlobalFontSettings.FontResolver
+// is null): without this, new XFont(...) throws InvalidOperationException on every
+// machine, Windows included (v0.14.0 label-PDF crash). Resolve faces from OS fonts.
+PdfSharp.Fonts.GlobalFontSettings.FontResolver = new PdfSharpFontResolver();
+
 // Blazor Server (interactive) + MudBlazor (TIS-2459 target stack)
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddMudServices();
@@ -33,10 +38,8 @@ builder.Services.AddScoped<AppState>();
 builder.Services.AddScoped<HotkeyManager>();
 // Content Manager 24.3 third-party integrations:
 // LabelPdfService (PDFsharp — the same PDF library CM bundles) renders
-// inventory labels as PDF; BarcodeImageService (ZXing + SkiaSharp) decodes
-// barcodes from uploaded images on the scanning page.
+// inventory labels as PDF.
 builder.Services.AddSingleton<LabelPdfService>();
-builder.Services.AddSingleton<BarcodeImageService>();
 
 // NLog (also from CM's third-party set): persistent server log at
 // <exe-dir>/logs/rim-YYYY-MM-DD.log plus console. The in-app activity feed

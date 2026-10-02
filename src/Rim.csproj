@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Rim</RootNamespace>
-    <Version>0.14.0</Version>
+    <Version>0.14.1</Version>
     <!-- Self-contained win-x64 publish: dotnet publish -c Release -r win-x64 (self-contained) -->
   </PropertyGroup>
 
@@ -15,16 +15,10 @@
     <!-- MSSQL target (TIS-2456..2458 direction). Reference only: switch the provider in Program.cs. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.31" />
     <!-- Content Manager 24.3 third-party set: PDFsharp (PDF creation, same library CM uses),
-         ZXing.Net (barcode encode/decode), NLog (persistent server log). SkiaSharp decodes
-         uploaded barcode images into pixels for ZXing (supporting role). -->
+         ZXing.Net (barcode encoding for labels), NLog (persistent server log). -->
     <PackageReference Include="PDFsharp" Version="6.2.4" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
     <PackageReference Include="NLog" Version="6.2.1" />
-    <PackageReference Include="SkiaSharp" Version="4.153.1" />
-    <!-- SkiaSharp 4.x ships native binaries separately: Win32 for the
-         win-x64 portable build (production). The test project adds the
-         Linux variant for sandbox runs. -->
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.153.1" />
   </ItemGroup>
 
 </Project>

@@ -2,8 +2,14 @@
 // global MUST stay named `rim` and the two sides must be renamed together
 // (a past one-sided rename broke Copy/Export/Print).
 window.rim = {
-    download: function (filename, content, mime) {
-        const blob = new Blob([content], { type: mime || 'text/plain' });
+    download: function (filename, content, mime, isBase64) {
+        // Blazor marshals byte[] as a base64 string; decode it back to bytes
+        // for binary downloads (label PDFs). Plain-text callers (CSV exports)
+        // pass a string and leave isBase64 unset.
+        const data = isBase64
+            ? Uint8Array.from(atob(content), c => c.charCodeAt(0))
+            : content;
+        const blob = new Blob([data], { type: mime || 'application/octet-stream' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = filename;

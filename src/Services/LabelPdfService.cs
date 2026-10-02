@@ -151,13 +151,15 @@ public sealed class LabelPdfService
     }
 
     // Same ZXing encoding as the PDF, as inline SVG for the on-screen
-    // preview in LabelDialog. No image encoding involved.
+    // preview in LabelDialog. No image encoding involved. The SVG scales to
+    // its container (width 100%) instead of a fixed 600px, which overflowed
+    // the 4in label preview box.
     public static string BarcodeSvg(string text, int barHeightPx = 44)
     {
         var matrix = EncodeBarcode(text);
         if (matrix is not { Width: > 0 }) return "";
         var sb = new System.Text.StringBuilder();
-        sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{matrix.Width}\" height=\"{barHeightPx}\" viewBox=\"0 0 {matrix.Width} {barHeightPx}\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"barcode\">");
+        sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"{barHeightPx}\" viewBox=\"0 0 {matrix.Width} {barHeightPx}\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"barcode\">");
         int h = matrix.Height;
         for (int x = 0; x < matrix.Width; x++)
         {

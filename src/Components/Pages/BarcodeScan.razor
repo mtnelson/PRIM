@@ -5,18 +5,7 @@
 <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:0.7">
     Pick an action, scan barcodes with a keyboard-wedge scanner (Enter advances to the next field),
     then run the action. Barcodes that fail stay in the scan field; successful ones are cleared.
-    No wedge scanner handy? Photograph a barcode and decode it into the scan field instead.
 </MudText>
-
-<MudFileUpload T="IBrowserFile" Accept="image/*" MaximumFileCount="5"
-               OnFilesChanged="DecodeImageFiles" Class="mb-4">
-    <ActivatorContent>
-        <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_decoding"
-                   StartIcon="@Icons.Material.Filled.AddAPhoto">
-            @(_decoding ? "Decoding…" : "Decode barcodes from image")
-        </MudButton>
-    </ActivatorContent>
-</MudFileUpload>
 
 <MudGrid>
     <MudItem xs="12" md="6">

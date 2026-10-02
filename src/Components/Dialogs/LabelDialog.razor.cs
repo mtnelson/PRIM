@@ -43,6 +43,6 @@ public partial class LabelDialog : ComponentBase
         var pdf = PdfLabels.RenderLabels(labels, App.CurrentDisplayName);
         App.Log("Downloaded label PDF", $"{labels.Count} label(s)");
         await RimJs.TryInvokeVoidAsync(JS, "rim.download",
-            $"RIM-labels-{DateTime.Now:yyyyMMdd-HHmm}.pdf", pdf, "application/pdf");
+            $"RIM-labels-{DateTime.Now:yyyyMMdd-HHmm}.pdf", pdf, "application/pdf", true);
     }
 }

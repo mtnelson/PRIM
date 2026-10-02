@@ -1,5 +1,12 @@
 # RIM Changelog
 
+## v0.14.1 — 2026-10-02 — label PDF fixes, grid range-select
+- Fixed the label PDF button crashing the app: PDFsharp 6.x ships with no font resolver, so every label PDF threw on click (the v0.14.0 test masked it with a test-only resolver). The app now resolves fonts from the OS font directories (Arial on Windows), so the PDF renders on any machine.
+- Fixed the label PDF download producing a corrupt file: the browser helper now decodes the base64 payload back to bytes before saving (CSV text downloads are unchanged).
+- The barcode preview in the Label dialog now scales to fit the label instead of rendering at a fixed 600px width that overflowed the label box.
+- Removed the "Decode barcodes from image" upload from the Barcode Scanning page (and the SkiaSharp dependency that powered it) — keyboard-wedge scanning remains.
+- All data grids: Shift+click now selects the contiguous range of rows from the last clicked row (the anchor) to the clicked row. The anchor is set by plain click and Ctrl+click and does not move on Shift+click, so repeated Shift+clicks re-extend from one point. In virtualized grids the range covers loaded rows; if the anchor has scrolled out of the loaded window it falls back to a single-select.
+
 ## v0.14.0 — 2026-10-02 — Content Manager third-party integrations
 - Label printing now downloads a real PDF: the Label dialog gained a PDF button that renders each selected label as a 4"x2" page via PDFsharp — the same PDF library Content Manager 24.3 uses. Barcodes on the PDF are real, scannable Code 128 symbols drawn as vector graphics (sharp at any print DPI), not images.
 - The label preview in the dialog now shows the actual barcode symbol (ZXing-encoded SVG) instead of placeholder glyphs.

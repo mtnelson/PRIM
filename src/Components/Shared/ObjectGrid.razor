@@ -2,7 +2,7 @@
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.caption" Style="opacity:0.7">
         @(ItemsProvider != null ? $"{(_totalValid ? _totalItems.ToString("N0") : "…")} total · " : "")
-        @(_selected.Count == 0 ? "Click a row to select · Ctrl+click toggles · double-click edits" : $"{_selected.Count} row(s) selected")
+        @(_selected.Count == 0 ? "Click a row to select · Ctrl+click toggles · Shift+click selects a range · double-click edits" : $"{_selected.Count} row(s) selected")
     </MudText>
     <MudSpacer />
     <MudTooltip Text="Customize columns (add, remove, reorder — saved to your profile)">

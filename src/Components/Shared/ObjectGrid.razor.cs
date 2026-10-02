@@ -86,6 +86,13 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
     // overrides whatever set the grid reports.
     private bool _singleSelectPending;
     private T? _singleSelectItem;
+    // Shift+click range: same override, but for a computed row range.
+    private HashSet<T>? _pendingSelection;
+    // Anchor row for Shift+click range selection. Set by plain and Ctrl+click;
+    // Shift+click selects the loaded-row range from the anchor to the click
+    // without moving it, so repeated Shift+clicks re-extend from one point.
+    private T? _anchor;
+    private bool _hasAnchor;
     private string _menuHeader = "No selection";
     private List<(string Key, string Label)> _effective = new();
     private string _scope => string.IsNullOrEmpty(Scope) ? GridId : Scope;
@@ -138,6 +145,15 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
     private readonly Dictionary<string, Func<T, object>> _sortFuncs = new();
 
     private IEnumerable<T> _gridItems => ItemsProvider != null ? _chunks.Values.SelectMany(c => c) : Items;
+    // Rows currently loaded, in display order: the Items list, or the fetched
+    // chunks in chunk order (virtualized provider mode). Shift+click range
+    // selection operates on this window — rows scrolled out of the chunk
+    // cache are not range-selectable, and the anchor falling outside it
+    // degrades to a plain single-select.
+    private List<T> OrderedLoadedRows() =>
+        ItemsProvider != null
+            ? _chunks.OrderBy(kv => kv.Key).SelectMany(kv => kv.Value).ToList()
+            : Items.ToList();
     // MudDataGrid forbids supplying both Items and ServerData: in provider
     // mode the Items parameter must be null (the grid reads via the
     // VirtualizeServerData delegate).
@@ -223,6 +239,7 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
         _restoreSelectIds.Clear();
         if (ts.SelectedIds.Count > 0) _restoreSelectIds.UnionWith(ts.SelectedIds);
         _active = default; _hasActive = false;
+        _anchor = default; _hasAnchor = false; _pendingSelection = null;
         OnReset?.Invoke();
         UpdateMenuHeader();
         StateHasChanged();
@@ -509,13 +526,21 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
     public void ClearSelection()
     {
         _selected.Clear(); _active = default; _hasActive = false;
+        _anchor = default; _hasAnchor = false; _pendingSelection = null;
         TabState?.SelectedIds.Clear();
         UpdateMenuHeader(); StateHasChanged();
     }
 
     private async Task OnSelChanged(HashSet<T> v)
     {
-        if (_singleSelectPending && _singleSelectItem is not null)
+        if (_pendingSelection != null)
+        {
+            // Shift+click range computed in OnRowClick wins over the grid's
+            // own row toggle (firing order is not guaranteed).
+            _selected = _pendingSelection;
+            _pendingSelection = null;
+        }
+        else if (_singleSelectPending && _singleSelectItem is not null)
         {
             _singleSelectPending = false;
             _selected = new HashSet<T>(Comparer) { _singleSelectItem };
@@ -571,14 +596,44 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
     private async Task OnRowClick(DataGridRowClickEventArgs<T> e)
     {
         var toggle = e.MouseEventArgs?.CtrlKey == true || e.MouseEventArgs?.MetaKey == true;
+        var extend = e.MouseEventArgs?.ShiftKey == true && !toggle;
         _active = e.Item; _hasActive = true;
-        if (toggle)
+        if (extend)
+        {
+            // Shift+click: select the contiguous range of loaded rows from the
+            // anchor to the clicked row, replacing the selection. The anchor
+            // does not move, so repeated Shift+clicks re-extend from one point.
+            // When the anchor is gone (scrolled out of the chunk cache, new
+            // query), fall back to a plain single-select.
+            _singleSelectPending = false;
+            var range = _hasAnchor
+                ? GridSelection.Range(OrderedLoadedRows(), _anchor, e.Item, Comparer)
+                : null;
+            if (range != null)
+            {
+                _pendingSelection = range;
+                _selected = range;
+            }
+            else
+            {
+                _pendingSelection = null;
+                _singleSelectPending = true;
+                _singleSelectItem = e.Item;
+                _selected = new HashSet<T> { e.Item };
+                _anchor = e.Item; _hasAnchor = true;
+            }
+            UpdateMenuHeader();
+            StateHasChanged();
+        }
+        else if (toggle)
         {
             // Ctrl+click (Cmd+click on Mac): toggle without clearing the rest.
             _singleSelectPending = false;
+            _pendingSelection = null;
             var next = new HashSet<T>(_selected);
             if (!next.Add(e.Item)) next.Remove(e.Item);
             _selected = next;
+            _anchor = e.Item; _hasAnchor = true;
             UpdateMenuHeader();
             StateHasChanged();
         }
@@ -586,8 +641,10 @@ public partial class ObjectGrid<T> : ComponentBase, IDisposable
         {
             // Plain click: single-select (overrides the grid's own toggle).
             _singleSelectPending = true;
+            _pendingSelection = null;
             _singleSelectItem = e.Item;
             _selected = new HashSet<T> { e.Item };
+            _anchor = e.Item; _hasAnchor = true;
             UpdateMenuHeader();
             StateHasChanged();
         }

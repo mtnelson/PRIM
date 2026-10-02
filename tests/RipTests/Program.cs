@@ -1691,16 +1691,41 @@ Check(!hcFile.Ok && hcFile.Error != null && hcFile.Error.Contains("compressed pa
     Check(tsql.Contains("NVARCHAR"), "B3 T-SQL uses NVARCHAR types");
 }
 
+// Shift+click range selection (v0.14.1): pure helper, all data grids.
+{
+    var gridRows = new List<string> { "a", "b", "c", "d", "e" };
+    var cmp = StringComparer.Ordinal;
+    var fwd = Rim.Components.Shared.GridSelection.Range(gridRows, "b", "d", cmp);
+    Check(fwd != null && fwd.SetEquals(new[] { "b", "c", "d" }),
+        "shift+click selects anchor..target range", $"got [{string.Join(",", fwd ?? new HashSet<string>())}]");
+    var rev = Rim.Components.Shared.GridSelection.Range(gridRows, "d", "b", cmp);
+    Check(rev != null && rev.SetEquals(new[] { "b", "c", "d" }),
+        "range works when the click precedes the anchor");
+    var single = Rim.Components.Shared.GridSelection.Range(gridRows, "c", "c", cmp);
+    Check(single != null && single.SetEquals(new[] { "c" }),
+        "anchor == target selects one row");
+    Check(Rim.Components.Shared.GridSelection.Range(gridRows, null, "d", cmp) is null,
+        "no anchor -> null (caller falls back to single-select)");
+    Check(Rim.Components.Shared.GridSelection.Range(gridRows, "zzz", "d", cmp) is null,
+        "anchor scrolled out -> null (caller falls back to single-select)");
+    Check(Rim.Components.Shared.GridSelection.Range(new List<string>(), "a", "b", cmp) is null,
+        "empty row window -> null");
+}
+
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 
 // ---- CM 24.3 third-party integrations (v0.14.0) ----
 // LabelPdfService: PDFsharp (the same PDF library Content Manager bundles)
 // renders inventory labels with real ZXing Code 128 barcodes.
+//
+// v0.14.1 regression: PDFsharp 6.x ships with NO default font resolver, so
+// new XFont(...) throws InvalidOperationException on every machine unless
+// the host installs one. v0.14.0 only worked in this harness because of a
+// test-only resolver; production crashed on the first PDF click. The tests
+// below therefore use the PRODUCTION resolver (PdfSharpFontResolver), which
+// finds DejaVu/Liberation/Noto on Linux and Arial on Windows.
 {
-    // Sandbox Linux has no Arial and PDFsharp's default resolver finds no
-    // fonts here; map every family to Noto Sans for the test run.
-    // Production Windows resolves Arial from installed system fonts.
-    PdfSharp.Fonts.GlobalFontSettings.FontResolver = new TestFontResolver();
+    PdfSharp.Fonts.GlobalFontSettings.FontResolver = new PdfSharpFontResolver();
     var labelSvc = new LabelPdfService { FontFamily = "Noto Sans" };
     var labels = new List<LabelItem>
     {
@@ -1717,8 +1742,20 @@ Console.WriteLine($"--- {pass} passed, {fail} failed ---");
           Math.Abs(reopened.Pages[0].Height.Point - LabelPdfService.LabelHeightPt) < 0.5,
         "label page is 4x2in (288x144pt)");
 
+    // Production configuration: default FontFamily "Arial" through the
+    // production resolver. Must not throw (v0.14.0 crash).
+    var prodSvc = new LabelPdfService();
+    byte[] prodPdf = Array.Empty<byte>();
+    Exception? prodEx = null;
+    try { prodPdf = prodSvc.RenderLabels(labels, "harness", new DateTime(2026, 10, 2, 12, 0, 0)); }
+    catch (Exception ex) { prodEx = ex; }
+    Check(prodEx is null && prodPdf.Length > 1000,
+        "production resolver renders labels with default Arial (no throw)",
+        prodEx is null ? $"len={prodPdf.Length}" : prodEx.GetType().Name + ": " + prodEx.Message.Split('\n')[0]);
+
     var svg = LabelPdfService.BarcodeSvg("REC000001");
     Check(svg.Contains("<svg") && svg.Contains("<rect"), "barcode SVG preview renders vector bars");
+    Check(svg.Contains("width=\"100%\""), "barcode SVG scales to its container (no 600px overflow)");
     Check(LabelPdfService.BarcodeSvg("") == "", "empty barcode -> empty SVG, no exception");
     var pdfEmpty = labelSvc.RenderLabels(new List<LabelItem> { new("T", "L", "") }, "harness");
     Check(pdfEmpty.Length > 500, "label PDF renders with empty barcode (text fallback)");
@@ -1745,36 +1782,6 @@ Console.WriteLine($"--- {pass} passed, {fail} failed ---");
         ZXing.RGBLuminanceSource.BitmapFormat.RGB24);
     var decoded = new ZXing.BarcodeReaderGeneric().Decode(lum);
     Check(decoded?.Text == "REC000042", "ZXing decode round-trips encoded barcode", $"got '{decoded?.Text}'");
-}
-
-// BarcodeImageService: SkiaSharp decodes a PNG photo of a barcode, ZXing reads it.
-{
-    var writer = new ZXing.BarcodeWriterPixelData
-    {
-        Format = ZXing.BarcodeFormat.CODE_128,
-        Options = new ZXing.Common.EncodingOptions { Width = 600, Height = 120, Margin = 0, PureBarcode = true }
-    };
-    var pd = writer.Write("REC000077");
-    const int quiet = 24; // quiet zone so the decoder finds the symbol
-    using var bmp = new SkiaSharp.SKBitmap(pd.Width + quiet * 2, pd.Height + quiet * 2);
-    using (var canvas = new SkiaSharp.SKCanvas(bmp))
-    {
-        canvas.Clear(SkiaSharp.SKColors.White);
-        for (int y = 0; y < pd.Height; y++)
-            for (int x = 0; x < pd.Width; x++)
-            {
-                int o = (y * pd.Width + x) * 4;
-                if (pd.Pixels[o] < 128)
-                    bmp.SetPixel(x + quiet, y + quiet, SkiaSharp.SKColors.Black);
-            }
-    }
-    using var skImg = SkiaSharp.SKImage.FromBitmap(bmp);
-    using var png = skImg.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
-    var imgSvc = new BarcodeImageService();
-    var found = imgSvc.DecodeBarcodes(png.ToArray());
-    Check(found.Contains("REC000077"), "image decode finds barcode in PNG photo", $"got [{string.Join(",", found)}]");
-    Check(imgSvc.DecodeBarcodes(new byte[] { 1, 2, 3 }).Count == 0, "garbage bytes -> no barcodes, no exception");
-    Check(imgSvc.DecodeBarcodes(Array.Empty<byte>()).Count == 0, "empty input -> no barcodes");
 }
 
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
@@ -1830,15 +1837,4 @@ sealed class TestConfig(Dictionary<string, string?> values) : IConfiguration
         public IChangeToken GetReloadToken() => NullToken.Instance;
         public IConfigurationSection GetSection(string k) => new TestSection(values, key + ":" + k);
     }
-}
-
-// Test-only PDFsharp font resolver: the sandbox has no Arial and PDFsharp's
-// default resolver finds no fonts on this Linux. Maps every family to Noto
-// Sans so label-PDF tests exercise the real rendering path.
-sealed class TestFontResolver : PdfSharp.Fonts.IFontResolver
-{
-    public PdfSharp.Fonts.FontResolverInfo ResolveTypeface(string familyName, bool isBold, bool isItalic)
-        => new PdfSharp.Fonts.FontResolverInfo("NotoSans");
-    public byte[] GetFont(string faceName)
-        => File.ReadAllBytes("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
 }

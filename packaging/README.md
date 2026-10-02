@@ -1,6 +1,6 @@
 # RIM — Setup and Run Guide
 
-**RIM — Physical Records Inventory Manager.** A Content Manager–style
+**RIM — Records Inventory Manager.** A Content Manager–style
 records-management prototype: Blazor Server on .NET 8 with a MudBlazor
 desktop interface. It tracks **metadata and physical locations only** —
 no electronic documents are attached or stored.

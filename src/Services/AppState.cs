@@ -40,11 +40,14 @@ public class AppState
     public bool IsRecordsManager => CurrentRole is "Admin" or "Records Manager";
 
     // Activity log panel (TIS-349): real-time actions with timestamps, clearable,
-    // not persisted across sessions.
+    // not persisted across sessions. Also mirrored to the NLog server log so
+    // the on-disk trail survives the session.
     public List<(DateTime At, string Action, string Detail)> ActivityLog { get; } = new();
+    private static readonly NLog.Logger _nlog = NLog.LogManager.GetCurrentClassLogger();
     public void Log(string action, string detail = "")
     {
         ActivityLog.Add((DateTime.Now, action, detail));
+        _nlog.Info("[{0}] {1}: {2}", CurrentDisplayName, action, detail);
         Notify();
     }
     // Item-specific log entries: names the affected items instead of a bare

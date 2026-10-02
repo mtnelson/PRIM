@@ -17,6 +17,7 @@ public partial class LabelDialog : ComponentBase
 {
     [Inject] public IJSRuntime JS { get; set; } = default!;
     [Inject] public AppState App { get; set; } = default!;
+    [Inject] public LabelPdfService PdfLabels { get; set; } = default!;
 
     [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
     // Preferred: pass Labels. Single-label callers may still pass Title/Line2/Barcode.
@@ -32,5 +33,16 @@ public partial class LabelDialog : ComponentBase
     {
         App.LogItems("Printed label(s)", Items.Select(i => i.Title));
         await RimJs.TryInvokeVoidAsync(JS, "rim.print");
+    }
+
+    // PDF label sheet via PDFsharp (the same PDF library Content Manager
+    // uses): one 4"x2" page per label with a real vector Code 128 barcode.
+    private async Task DownloadPdf()
+    {
+        var labels = Items.Select(i => new LabelItem(i.Title, i.Line2, i.Barcode)).ToList();
+        var pdf = PdfLabels.RenderLabels(labels, App.CurrentDisplayName);
+        App.Log("Downloaded label PDF", $"{labels.Count} label(s)");
+        await RimJs.TryInvokeVoidAsync(JS, "rim.download",
+            $"RIM-labels-{DateTime.Now:yyyyMMdd-HHmm}.pdf", pdf, "application/pdf");
     }
 }

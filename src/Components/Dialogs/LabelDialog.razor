@@ -7,15 +7,16 @@
             <div class="label-sheet mb-3">
                 <div style="font-size:18px;font-weight:bold">@item.Title</div>
                 <div>@item.Line2</div>
-                <div style="margin-top:8px">BARCODE: @item.Barcode</div>
-                <div style="font-size:20px;letter-spacing:4px">||||| |||| |||||</div>
+                <div class="mt-2" style="max-width:320px">@((MarkupString)LabelPdfService.BarcodeSvg(item.Barcode))</div>
+                <div style="font-size:11px;letter-spacing:2px">@item.Barcode</div>
                 <div style="font-size:11px;margin-top:8px">Printed @DateTime.Now.ToString("yyyy-MM-dd HH:mm") by @App.CurrentDisplayName</div>
             </div>
         }
-        <MudText Typo="Typo.caption" Class="mt-2">Label format mirrors the ASRS inventory label style. One label per selected row.</MudText>
+        <MudText Typo="Typo.caption" Class="mt-2">Label format mirrors the ASRS inventory label style. One label per selected row. Barcodes are real Code 128 symbols (ZXing); the PDF download renders them as vector graphics via PDFsharp.</MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => MudDialog.Close()">Close</MudButton>
+        <MudButton OnClick="DownloadPdf" StartIcon="@Icons.Material.Filled.PictureAsPdf">PDF</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Print"
                    OnClick="Print">Print</MudButton>
     </DialogActions>

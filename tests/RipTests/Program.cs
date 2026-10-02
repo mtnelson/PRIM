@@ -1692,6 +1692,92 @@ Check(!hcFile.Ok && hcFile.Error != null && hcFile.Error.Contains("compressed pa
 }
 
 Console.WriteLine($"--- {pass} passed, {fail} failed ---");
+
+// ---- CM 24.3 third-party integrations (v0.14.0) ----
+// LabelPdfService: PDFsharp (the same PDF library Content Manager bundles)
+// renders inventory labels with real ZXing Code 128 barcodes.
+{
+    // Sandbox Linux has no Arial and PDFsharp's default resolver finds no
+    // fonts here; map every family to Noto Sans for the test run.
+    // Production Windows resolves Arial from installed system fonts.
+    PdfSharp.Fonts.GlobalFontSettings.FontResolver = new TestFontResolver();
+    var labelSvc = new LabelPdfService { FontFamily = "Noto Sans" };
+    var labels = new List<LabelItem>
+    {
+        new("R-000001", "Case File / 149", "REC000001"),
+        new("R-000002", "Case File / 149", "REC000002"),
+    };
+    var pdf = labelSvc.RenderLabels(labels, "harness", new DateTime(2026, 10, 2, 12, 0, 0));
+    Check(pdf.Length > 1000 && pdf[0] == '%' && pdf[1] == 'P' && pdf[2] == 'D' && pdf[3] == 'F',
+        "label PDF has %PDF magic bytes", $"len={pdf.Length}");
+    using var ms = new MemoryStream(pdf);
+    using var reopened = PdfSharp.Pdf.IO.PdfReader.Open(ms, PdfSharp.Pdf.IO.PdfDocumentOpenMode.ReadOnly);
+    Check(reopened.PageCount == 2, "label PDF has one page per label", $"pages={reopened.PageCount}");
+    Check(Math.Abs(reopened.Pages[0].Width.Point - LabelPdfService.LabelWidthPt) < 0.5 &&
+          Math.Abs(reopened.Pages[0].Height.Point - LabelPdfService.LabelHeightPt) < 0.5,
+        "label page is 4x2in (288x144pt)");
+
+    var svg = LabelPdfService.BarcodeSvg("REC000001");
+    Check(svg.Contains("<svg") && svg.Contains("<rect"), "barcode SVG preview renders vector bars");
+    Check(LabelPdfService.BarcodeSvg("") == "", "empty barcode -> empty SVG, no exception");
+    var pdfEmpty = labelSvc.RenderLabels(new List<LabelItem> { new("T", "L", "") }, "harness");
+    Check(pdfEmpty.Length > 500, "label PDF renders with empty barcode (text fallback)");
+}
+
+// ZXing encode -> decode round-trip through raw pixel data (no image files).
+{
+    var writer = new ZXing.BarcodeWriterPixelData
+    {
+        Format = ZXing.BarcodeFormat.CODE_128,
+        Options = new ZXing.Common.EncodingOptions { Width = 600, Height = 120, Margin = 0, PureBarcode = true }
+    };
+    var pd = writer.Write("REC000042");
+    Check(pd is { Width: 600, Height: 120 }, "ZXing encodes Code 128 pixel data");
+    var rgb = new byte[pd.Width * pd.Height * 3];
+    for (int p = 0; p < pd.Width * pd.Height; p++)
+    {
+        // Bars are pure black/white; channel order is irrelevant here.
+        rgb[p * 3] = pd.Pixels[p * 4];
+        rgb[p * 3 + 1] = pd.Pixels[p * 4 + 1];
+        rgb[p * 3 + 2] = pd.Pixels[p * 4 + 2];
+    }
+    var lum = new ZXing.RGBLuminanceSource(rgb, pd.Width, pd.Height,
+        ZXing.RGBLuminanceSource.BitmapFormat.RGB24);
+    var decoded = new ZXing.BarcodeReaderGeneric().Decode(lum);
+    Check(decoded?.Text == "REC000042", "ZXing decode round-trips encoded barcode", $"got '{decoded?.Text}'");
+}
+
+// BarcodeImageService: SkiaSharp decodes a PNG photo of a barcode, ZXing reads it.
+{
+    var writer = new ZXing.BarcodeWriterPixelData
+    {
+        Format = ZXing.BarcodeFormat.CODE_128,
+        Options = new ZXing.Common.EncodingOptions { Width = 600, Height = 120, Margin = 0, PureBarcode = true }
+    };
+    var pd = writer.Write("REC000077");
+    const int quiet = 24; // quiet zone so the decoder finds the symbol
+    using var bmp = new SkiaSharp.SKBitmap(pd.Width + quiet * 2, pd.Height + quiet * 2);
+    using (var canvas = new SkiaSharp.SKCanvas(bmp))
+    {
+        canvas.Clear(SkiaSharp.SKColors.White);
+        for (int y = 0; y < pd.Height; y++)
+            for (int x = 0; x < pd.Width; x++)
+            {
+                int o = (y * pd.Width + x) * 4;
+                if (pd.Pixels[o] < 128)
+                    bmp.SetPixel(x + quiet, y + quiet, SkiaSharp.SKColors.Black);
+            }
+    }
+    using var skImg = SkiaSharp.SKImage.FromBitmap(bmp);
+    using var png = skImg.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+    var imgSvc = new BarcodeImageService();
+    var found = imgSvc.DecodeBarcodes(png.ToArray());
+    Check(found.Contains("REC000077"), "image decode finds barcode in PNG photo", $"got [{string.Join(",", found)}]");
+    Check(imgSvc.DecodeBarcodes(new byte[] { 1, 2, 3 }).Count == 0, "garbage bytes -> no barcodes, no exception");
+    Check(imgSvc.DecodeBarcodes(Array.Empty<byte>()).Count == 0, "empty input -> no barcodes");
+}
+
+Console.WriteLine($"--- {pass} passed, {fail} failed ---");
 try { File.Delete(dbPath); File.Delete(dbPath + "-shm"); File.Delete(dbPath + "-wal"); } catch { }
 return fail == 0 ? 0 : 1;
 
@@ -1744,4 +1830,15 @@ sealed class TestConfig(Dictionary<string, string?> values) : IConfiguration
         public IChangeToken GetReloadToken() => NullToken.Instance;
         public IConfigurationSection GetSection(string k) => new TestSection(values, key + ":" + k);
     }
+}
+
+// Test-only PDFsharp font resolver: the sandbox has no Arial and PDFsharp's
+// default resolver finds no fonts on this Linux. Maps every family to Noto
+// Sans so label-PDF tests exercise the real rendering path.
+sealed class TestFontResolver : PdfSharp.Fonts.IFontResolver
+{
+    public PdfSharp.Fonts.FontResolverInfo ResolveTypeface(string familyName, bool isBold, bool isItalic)
+        => new PdfSharp.Fonts.FontResolverInfo("NotoSans");
+    public byte[] GetFont(string faceName)
+        => File.ReadAllBytes("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
 }

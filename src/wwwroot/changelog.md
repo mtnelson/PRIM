@@ -1,5 +1,16 @@
 # RIM Changelog
 
+## v0.14.0 — 2026-10-02 — Content Manager third-party integrations
+- Label printing now downloads a real PDF: the Label dialog gained a PDF button that renders each selected label as a 4"x2" page via PDFsharp — the same PDF library Content Manager 24.3 uses. Barcodes on the PDF are real, scannable Code 128 symbols drawn as vector graphics (sharp at any print DPI), not images.
+- The label preview in the dialog now shows the actual barcode symbol (ZXing-encoded SVG) instead of placeholder glyphs.
+- Barcode Scanning page: new "Decode barcodes from image" upload — photograph a barcode (or screenshot one) and ZXing decodes it into the scan field, as an alternative to keyboard-wedge scanners. Decoded codes append without duplicating existing lines.
+- Persistent server log: NLog now writes `logs/rim-YYYY-MM-DD.log` next to the executable (14-day rotation) plus console output, and the in-app activity feed is mirrored there — so there is an on-disk trail for support and diagnosis on the Windows host. Startup, shutdown, and the dev-password security warning are all logged.
+- Libraries added (all free/open source, from Content Manager 24.3's own third-party list): PDFsharp 6.2.4 (MIT), ZXing.Net 0.16.11 (Apache-2.0), NLog 6.2.1 (BSD-3-Clause), SkiaSharp 4.153.1 (MIT, decodes uploaded images into pixels for ZXing).
+- Note: CM lists PDFsharp 1.5; v6.2.4 is the current release of the same library and the one compatible with .NET 8.
+
+## v0.13.2 — 2026-10-02
+- Branding text updated throughout the app (login screen, header, README): "Physical Records Inventory Manager" is now "Records Inventory Manager".
+
 ## v0.13.1 — 2026-10-01 — code-review hardening
 - Fixed a startup crash when upgrading from an older database: schema columns are now all added before any backfill runs.
 - The automatic schema upgrade now works on SQL Server as well as SQLite (provider-specific upgrade steps); previously it used SQLite-only statements and SQL Server could not start.

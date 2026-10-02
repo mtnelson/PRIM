@@ -18,7 +18,7 @@ Preconditions: RIM installed per `README.md`, server started via
 ## 1. Startup
 
 - [ ] Page loads with no "couldn't connect" / error banner.
-- [ ] Top bar shows **RIM — Physical Records Inventory Manager**.
+- [ ] Top bar shows **RIM — Records Inventory Manager**.
 - [ ] Left shortcut pane lists: Dashboard, Records, Containers,
       Locations, Users, Advanced Search, Workspaces, Reports, Administration.
 - [ ] Announcement banner is visible (seeded welcome message).

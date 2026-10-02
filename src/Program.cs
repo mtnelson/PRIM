@@ -31,6 +31,33 @@ builder.Services.AddDbContextFactory<RimDbContext>(opt =>
 builder.Services.AddScoped<RimService>();
 builder.Services.AddScoped<AppState>();
 builder.Services.AddScoped<HotkeyManager>();
+// Content Manager 24.3 third-party integrations:
+// LabelPdfService (PDFsharp — the same PDF library CM bundles) renders
+// inventory labels as PDF; BarcodeImageService (ZXing + SkiaSharp) decodes
+// barcodes from uploaded images on the scanning page.
+builder.Services.AddSingleton<LabelPdfService>();
+builder.Services.AddSingleton<BarcodeImageService>();
+
+// NLog (also from CM's third-party set): persistent server log at
+// <exe-dir>/logs/rim-YYYY-MM-DD.log plus console. The in-app activity feed
+// stays in AppState; this is the on-disk trail for support and diagnosis.
+var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+Directory.CreateDirectory(logDir);
+var logLayout = "${longdate}|${level:uppercase=true}|${logger}|${message}${onexception:${newline}${exception:format=tostring}}";
+var nlogConfig = new NLog.Config.LoggingConfiguration();
+nlogConfig.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal,
+    new NLog.Targets.FileTarget("rimfile")
+    {
+        FileName = Path.Combine(logDir, "rim-${shortdate}.log"),
+        Layout = logLayout,
+        ArchiveAboveSize = 10 * 1024 * 1024,
+        MaxArchiveFiles = 14,
+    });
+nlogConfig.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal,
+    new NLog.Targets.ConsoleTarget("rimconsole") { Layout = logLayout });
+NLog.LogManager.Configuration = nlogConfig;
+var bootLog = NLog.LogManager.GetCurrentClassLogger();
+bootLog.Info("RIM starting.");
 // Authentication is always behind IAuthProvider. Development password logins
 // are opt-in and fail closed: DevPasswordAuthProvider registers ONLY when
 // Auth:AllowDevPasswords is explicitly true; otherwise a disabled provider is
@@ -56,9 +83,12 @@ var app = builder.Build();
 // H6: loud startup warning when development password auth is active —
 // this must never run in production.
 if (allowDevPasswords)
+{
     app.Logger.LogWarning("SECURITY WARNING: development password authentication is ENABLED " +
         "(Auth:AllowDevPasswords=true). Do not use in production — register an OAuth/SSO " +
         "IAuthProvider and remove the flag.");
+    bootLog.Warn("SECURITY WARNING: development password authentication is ENABLED.");
+}
 
 // Seed on startup. EnsureCreated does NOT add new columns/tables to an
 // existing database, so SchemaUpgrader backfills anything the old file lacks
@@ -77,4 +107,17 @@ app.UseStaticFiles();
 app.UseAntiforgery();
 app.MapRazorComponents<Rim.Components.App>().AddInteractiveServerRenderMode();
 
-app.Run();
+bootLog.Info("RIM started.");
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    bootLog.Fatal(ex, "RIM terminated unexpectedly.");
+    throw;
+}
+finally
+{
+    NLog.LogManager.Shutdown();
+}

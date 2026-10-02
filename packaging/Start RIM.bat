@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  RIM launcher — Physical Records Inventory Manager
+REM  RIM launcher — Records Inventory Manager
 REM  Starts the RIM server and opens it in your browser.
 REM ============================================================
 cd /d "%~dp0"

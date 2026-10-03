@@ -1,0 +1,198 @@
+is_global = true
+build_property.MudDebugAnalyzer = 
+build_property.MudAllowedAttributePattern = 
+build_property.MudAllowedAttributeList = 
+build_property.TargetFramework = net8.0
+build_property.TargetPlatformMinVersion = 
+build_property.UsingMicrosoftNETSdkWeb = true
+build_property.ProjectTypeGuids = 
+build_property.InvariantGlobalization = 
+build_property.PlatformNeutralAssembly = 
+build_property.EnforceExtendedAnalyzerRules = 
+build_property._SupportedPlatformList = Linux,macOS,Windows
+build_property.RootNamespace = Rim
+build_property.RootNamespace = Rim
+build_property.ProjectDir = /tmp/prim-push/src/
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.RazorLangVersion = 8.0
+build_property.SupportLocalizedComponentNames = 
+build_property.GenerateRazorMetadataSourceChecksumAttributes = 
+build_property.MSBuildProjectDirectory = /tmp/prim-push/src
+build_property._RazorSourceGeneratorDebug = 
+
+[/tmp/prim-push/src/Components/App.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9BcHAucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/ArchiveFileDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0FyY2hpdmVGaWxlRGlhbG9nLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/AuditDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0F1ZGl0RGlhbG9nLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/BarcodeResultDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0JhcmNvZGVSZXN1bHREaWFsb2cucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/ChangelogDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0NoYW5nZWxvZ0RpYWxvZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/ColumnPickerDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0NvbHVtblBpY2tlckRpYWxvZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/ContainerDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0NvbnRhaW5lckRpYWxvZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/DeleteDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0RlbGV0ZURpYWxvZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/ExportDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0V4cG9ydERpYWxvZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/HelpDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0hlbHBEaWFsb2cucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/HomePickerDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0hvbWVQaWNrZXJEaWFsb2cucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/LabelDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0xhYmVsRGlhbG9nLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/LocationDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL0xvY2F0aW9uRGlhbG9nLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/MoveDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL01vdmVEaWFsb2cucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/RecordDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL1JlY29yZERpYWxvZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/TextInputDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL1RleHRJbnB1dERpYWxvZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Dialogs/UserDialog.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9EaWFsb2dzL1VzZXJEaWFsb2cucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Layout/MainLayout.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9MYXlvdXQvTWFpbkxheW91dC5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Admin.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9BZG1pbi5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/AdvancedSearch.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9BZHZhbmNlZFNlYXJjaC5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/BarcodeScan.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9CYXJjb2RlU2Nhbi5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Containers.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9Db250YWluZXJzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Dashboard.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9EYXNoYm9hcmQucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Labels.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9MYWJlbHMucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Locations.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9Mb2NhdGlvbnMucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Records.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9SZWNvcmRzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Reports.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9SZXBvcnRzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Users.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9Vc2Vycy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Pages/Workspaces.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9QYWdlcy9Xb3Jrc3BhY2VzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Routes.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9Sb3V0ZXMucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/ChildRows.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvQ2hpbGRSb3dzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/ContainerGrid.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvQ29udGFpbmVyR3JpZC5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/DialogHotkeys.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvRGlhbG9nSG90a2V5cy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/GridContextMenu.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvR3JpZENvbnRleHRNZW51LnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/LabelPicker.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvTGFiZWxQaWNrZXIucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/LocationGrid.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvTG9jYXRpb25HcmlkLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/LoginScreen.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvTG9naW5TY3JlZW4ucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/ObjectGrid.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvT2JqZWN0R3JpZC5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/RecordGrid.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvUmVjb3JkR3JpZC5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/SearchTabs.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvU2VhcmNoVGFicy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/UserGrid.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvVXNlckdyaWQucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/VersionTag.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvVmVyc2lvblRhZy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/Shared/ViewPane.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9TaGFyZWQvVmlld1BhbmUucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[/tmp/prim-push/src/Components/_Imports.razor]
+build_metadata.AdditionalFiles.TargetPath = Q29tcG9uZW50cy9fSW1wb3J0cy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 

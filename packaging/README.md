@@ -43,6 +43,29 @@ right-click menus, dialogs, search, and exports — works in your browser.
 Edit `appsettings.json` and set `Prim:HttpPort` (default `5000`),
 then restart. Update the URL in `Start RIM.bat` to match.
 
+## Customizing label templates
+
+Labels are defined by a FastReport template, not by code:
+`Reports\Label4x2.frx` next to `Rim.exe`. To change the layout
+(positions, fonts, which fields print), edit the template — no rebuild
+needed; the app picks it up on the next label print.
+
+1. **Install FastReport Designer Community Edition** (Windows only,
+   free): download it from the FastReport GitHub releases page —
+   <https://github.com/FastReports/FastReport/releases> — look for the
+   "FastReport Designer Community Edition" asset. (The report engine is
+   MIT-licensed; the designer app itself is a free closed-source binary
+   from the FastReport team.)
+2. **Open** `C:\RIM\Reports\Label4x2.frx` in the designer (use your real
+   install folder).
+3. Edit the layout and **save**. Keep the page size at 4"x2" unless you
+   are making a new stock size, and keep the barcode object's symbology
+   on Code 128.
+4. Print a test label from RIM to verify.
+
+Back up the `.frx` before experimenting — a fresh copy ships in every
+release zip.
+
 ## Switching to SQL Server (optional)
 
 1. In `appsettings.json`, set

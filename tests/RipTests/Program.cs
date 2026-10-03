@@ -1736,7 +1736,7 @@ Console.WriteLine($"--- {pass} passed, {fail} failed ---");
     Check(pdf.Length > 1000 && pdf[0] == '%' && pdf[1] == 'P' && pdf[2] == 'D' && pdf[3] == 'F',
         "label PDF has %PDF magic bytes", $"len={pdf.Length}");
     using var ms = new MemoryStream(pdf);
-    using var reopened = PdfSharp.Pdf.IO.PdfReader.Open(ms, PdfSharp.Pdf.IO.PdfDocumentOpenMode.ReadOnly);
+    using var reopened = PdfSharp.Pdf.IO.PdfReader.Open(ms, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
     Check(reopened.PageCount == 2, "label PDF has one page per label", $"pages={reopened.PageCount}");
     Check(Math.Abs(reopened.Pages[0].Width.Point - LabelPdfService.LabelWidthPt) < 0.5 &&
           Math.Abs(reopened.Pages[0].Height.Point - LabelPdfService.LabelHeightPt) < 0.5,
@@ -1759,6 +1759,78 @@ Console.WriteLine($"--- {pass} passed, {fail} failed ---");
     Check(LabelPdfService.BarcodeSvg("") == "", "empty barcode -> empty SVG, no exception");
     var pdfEmpty = labelSvc.RenderLabels(new List<LabelItem> { new("T", "L", "") }, "harness");
     Check(pdfEmpty.Length > 500, "label PDF renders with empty barcode (text fallback)");
+}
+
+// ---- FastReport template-driven labels (v0.15.0) ----
+// Layout lives in Reports/Label4x2.frx (editable in FastReport Designer
+// Community Edition); the engine binds data and computes geometry, and
+// FastReportLabelService redraws the prepared pages as vector PDF via
+// PDFsharp so barcodes stay sharp. (The open-source FastReport PDF export
+// rasterizes pages to bitmaps, which would soften thermal-printer output.)
+{
+    var frxPath = Path.Combine(AppContext.BaseDirectory, "Reports", "Label4x2.frx");
+    Check(File.Exists(frxPath), "label template ships next to the app", frxPath);
+
+    // Template structure: 4x2in page, Code 128 barcode object, bound fields.
+    using var tpl = new FastReport.Report();
+    tpl.Load(frxPath);
+    var tplPage = (FastReport.ReportPage)tpl.Pages[0];
+    Check(Math.Abs(tplPage.PaperWidth - 384) < 0.5 && Math.Abs(tplPage.PaperHeight - 192) < 0.5,
+        "template page is 4x2in (384x192 units)", $"{tplPage.PaperWidth}x{tplPage.PaperHeight}");
+    var tplBarcode = tplPage.AllObjects.OfType<FastReport.Barcode.BarcodeObject>().FirstOrDefault();
+    Check(tplBarcode != null, "template contains a barcode object");
+    Check(tplBarcode != null && tplBarcode.Expression == "[Labels.Barcode]",
+        "barcode object bound to Labels.Barcode", tplBarcode?.Expression);
+    Check(tplBarcode != null && tplBarcode.Barcode.GetType().Name.Contains("128"),
+        "barcode symbology is Code 128", tplBarcode?.Barcode.GetType().Name);
+    Check(tplBarcode != null && !tplBarcode.ShowText,
+        "barcode object hides built-in text (separate text object renders it)");
+
+    // End-to-end through the real engine: data binding, expression
+    // evaluation, vector PDF output.
+    var frSvc = new FastReportLabelService();
+    var frLabels = new List<LabelItem>
+    {
+        new("R-000001", "Case File / 149", "REC000001"),
+        new("R-000002", "Case File / 149", "REC000002"),
+    };
+    var frPdf = frSvc.RenderLabels(frLabels, "harness", new DateTime(2026, 10, 2, 12, 0, 0));
+    Check(frPdf.Length > 1000 && frPdf[0] == '%' && frPdf[1] == 'P' && frPdf[2] == 'D' && frPdf[3] == 'F',
+        "template-driven label PDF has %PDF magic bytes", $"len={frPdf.Length}");
+    using var frMs = new MemoryStream(frPdf);
+    using var frReopened = PdfSharp.Pdf.IO.PdfReader.Open(frMs, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import);
+    Check(frReopened.PageCount == 2, "template PDF has one page per label", $"pages={frReopened.PageCount}");
+    Check(Math.Abs(frReopened.Pages[0].Width.Point - 288) < 0.5 &&
+          Math.Abs(frReopened.Pages[0].Height.Point - 144) < 0.5,
+        "template PDF page is 4x2in (288x144pt)");
+
+    // Data actually reaches the page: prepare directly and inspect the
+    // evaluated objects (title text, footer parameters, barcode value).
+    using var rep2 = new FastReport.Report();
+    rep2.Load(frxPath);
+    var dt = new System.Data.DataTable("Labels");
+    dt.Columns.Add("Title", typeof(string));
+    dt.Columns.Add("Line2", typeof(string));
+    dt.Columns.Add("Barcode", typeof(string));
+    dt.Rows.Add("R-000001", "Case File / 149", "REC000001");
+    rep2.RegisterData(dt, "Labels");
+    rep2.SetParameterValue("PrintedBy", "harness");
+    rep2.SetParameterValue("PrintedAt", "2026-10-02 12:00");
+    Check(rep2.Prepare(), "report prepares against bound data");
+    var pg0 = rep2.PreparedPages.GetPage(0);
+    var texts = pg0.AllObjects.OfType<FastReport.TextObject>().Select(t => t.Text).ToList();
+    Check(texts.Any(t => t.Contains("R-000001")), "template binds Labels.Title");
+    Check(texts.Any(t => t.Contains("Printed 2026-10-02 12:00 by harness")),
+        "footer parameters evaluated", string.Join(" | ", texts));
+    var bc0 = pg0.AllObjects.OfType<FastReport.Barcode.BarcodeObject>().FirstOrDefault();
+    Check(bc0 != null && bc0.Text == "REC000001", "barcode object evaluated to row value", bc0?.Text);
+
+    // Missing template -> clear FileNotFoundException, not a null-ref.
+    var missingSvc = new FastReportLabelService(Path.Combine(Path.GetTempPath(), "no-such-template.frx"));
+    Exception? missingEx = null;
+    try { missingSvc.RenderLabels(frLabels, "harness"); } catch (Exception ex) { missingEx = ex; }
+    Check(missingEx is FileNotFoundException, "missing template throws FileNotFoundException",
+        missingEx?.GetType().Name ?? "no exception");
 }
 
 // ZXing encode -> decode round-trip through raw pixel data (no image files).

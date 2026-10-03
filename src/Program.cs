@@ -40,6 +40,9 @@ builder.Services.AddScoped<HotkeyManager>();
 // LabelPdfService (PDFsharp — the same PDF library CM bundles) renders
 // inventory labels as PDF.
 builder.Services.AddSingleton<LabelPdfService>();
+// FastReportLabelService: template-driven labels (Reports/Label4x2.frx).
+// FastReport owns layout and data binding; PDF output stays vector.
+builder.Services.AddSingleton<FastReportLabelService>();
 
 // NLog (also from CM's third-party set): persistent server log at
 // <exe-dir>/logs/rim-YYYY-MM-DD.log plus console. The in-app activity feed

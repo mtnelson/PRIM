@@ -10,4 +10,18 @@
     <PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
     <ProjectReference Include="../../src/Rim.csproj" />
   </ItemGroup>
+  <!-- The label template ships with the app; link it into the test output so
+       the harness exercises the real default template-path resolution. -->
+  <ItemGroup>
+    <Content Include="..\..\src\Reports\Label4x2.frx">
+      <Link>Reports\Label4x2.frx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <!-- FastReport uses System.Drawing, which .NET 6+ blocks on non-Windows
+       unless this switch is set. Production is win-x64 (no-op there); the
+       Linux test run needs it for libgdiplus. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.Drawing.EnableUnixSupport" Value="true" />
+  </ItemGroup>
 </Project>

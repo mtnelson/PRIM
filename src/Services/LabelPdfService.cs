@@ -66,24 +66,10 @@ public sealed class LabelPdfService
         y += 18;
 
         // Barcode symbol: ZXing-encoded, drawn as vector bars.
-        var matrix = EncodeBarcode(item.Barcode);
         const double barHeight = 52;
-        if (matrix is { Width: > 0 })
+        if (EncodeBarcode(item.Barcode) is { } matrix && matrix.Width > 0)
         {
-            double scale = usable / matrix.Width;
-            double barW = matrix.Width * scale;
-            double x0 = margin + (usable - barW) / 2;
-            double y0 = y;
-            int h = matrix.Height;
-            for (int x = 0; x < matrix.Width; x++)
-            {
-                if (!IsDark(matrix, x, h / 2)) continue;
-                int xEnd = x;
-                while (xEnd + 1 < matrix.Width && IsDark(matrix, xEnd + 1, h / 2)) xEnd++;
-                gfx.DrawRectangle(XBrushes.Black,
-                    x0 + x * scale, y0, (xEnd - x + 1) * scale, barHeight);
-                x = xEnd;
-            }
+            DrawBarcodeBars(gfx, item.Barcode, margin, y, usable, barHeight);
             y += barHeight + 3;
         }
 
@@ -120,6 +106,28 @@ public sealed class LabelPdfService
     {
         int o = (y * pd.Width + x) * 4;
         return pd.Pixels[o] < 128 && pd.Pixels[o + 1] < 128 && pd.Pixels[o + 2] < 128;
+    }
+
+    // Draws a ZXing-encoded Code 128 symbol as vector bars scaled into the
+    // given rectangle (points). Shared with FastReportLabelService so the
+    // template-driven labels keep the same sharp vector output as the
+    // original renderer — never rasterized.
+    internal static void DrawBarcodeBars(XGraphics gfx, string text,
+        double xPt, double yPt, double widthPt, double heightPt)
+    {
+        var matrix = EncodeBarcode(text);
+        if (matrix is not { Width: > 0 }) return;
+        double scale = widthPt / matrix.Width;
+        int h = matrix.Height;
+        for (int x = 0; x < matrix.Width; x++)
+        {
+            if (!IsDark(matrix, x, h / 2)) continue;
+            int xEnd = x;
+            while (xEnd + 1 < matrix.Width && IsDark(matrix, xEnd + 1, h / 2)) xEnd++;
+            gfx.DrawRectangle(XBrushes.Black,
+                xPt + x * scale, yPt, (xEnd - x + 1) * scale, heightPt);
+            x = xEnd;
+        }
     }
 
     // Encode to Code 128 (full ASCII). Falls back to Code 39 for restricted

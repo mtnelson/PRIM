@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RIM 4"x2" inventory label template (FastReport Open Source, MIT).
+     Units are 96-dpi pixels: 4in = 384, 2in = 192. One label per page
+     (DataBand StartNewPage). Edit with FastReport Designer Community Edition;
+     the report engine binds the "Labels" table and the PrintedBy/PrintedAt
+     parameters at print time. Barcodes are Code 128 with auto-encoding. -->
+<Report ScriptLanguage="CSharp" ReportInfo.Created="10/02/2026 20:00:00" ReportInfo.Modified="10/02/2026 20:00:00" ReportInfo.CreatorVersion="2026.2.8">
+  <Dictionary>
+    <TableDataSource Name="Labels" ReferenceName="Labels" DataType="System.Int32" Enabled="true">
+      <Column Name="Title" DataType="System.String"/>
+      <Column Name="Line2" DataType="System.String"/>
+      <Column Name="Barcode" DataType="System.String"/>
+    </TableDataSource>
+    <Parameter Name="PrintedBy" DataType="System.String"/>
+    <Parameter Name="PrintedAt" DataType="System.String"/>
+  </Dictionary>
+  <ReportPage Name="LabelPage" PaperWidth="384" PaperHeight="192" LeftMargin="0" TopMargin="0" RightMargin="0" BottomMargin="0">
+    <DataBand Name="LabelBand" Width="384" Height="192" DataSource="Labels" StartNewPage="true">
+      <TextObject Name="TitleText" Left="13" Top="10" Width="358" Height="26" Text="[Labels.Title]" HorzAlign="Left" VertAlign="Center" WordWrap="false" Font="Arial, 13pt, style=Bold"/>
+      <TextObject Name="Line2Text" Left="13" Top="38" Width="358" Height="20" Text="[Labels.Line2]" HorzAlign="Left" VertAlign="Center" WordWrap="false" Font="Arial, 10pt"/>
+      <BarcodeObject Name="LabelBarcode" Left="13" Top="62" Width="358" Height="62" Expression="[Labels.Barcode]" Barcode="Code128" Barcode.AutoEncode="true" ShowText="false"/>
+      <TextObject Name="BarcodeText" Left="13" Top="127" Width="358" Height="17" Text="[Labels.Barcode]" HorzAlign="Center" VertAlign="Center" WordWrap="false" Font="Arial, 9pt"/>
+      <TextObject Name="FooterText" Left="13" Top="166" Width="358" Height="16" Text="Printed [PrintedAt] by [PrintedBy]" HorzAlign="Left" VertAlign="Center" WordWrap="false" Font="Arial, 7pt" TextFill.Color="Gray"/>
+    </DataBand>
+  </ReportPage>
+</Report>

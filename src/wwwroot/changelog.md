@@ -1,5 +1,11 @@
 # RIM Changelog
 
+## v0.15.0 — 2026-10-02 — FastReport template-driven labels
+- Labels are now template-driven: the 4"x2" label layout lives in `Reports/Label4x2.frx` (shipped next to the executable), designed in FastReport Open Source (MIT). Layout tweaks — positions, fonts, which fields print — are now template edits in FastReport Designer Community Edition, no code changes.
+- FastReport owns layout and data binding (the Labels table plus PrintedBy/PrintedAt parameters); the new FastReportLabelService redraws the prepared pages as vector PDF via PDFsharp, so barcodes stay sharp vector rectangles on thermal printers. (The open-source FastReport PDF export rasterizes pages to bitmaps, which would have softened them — verified the output stream: 31 vector bar rectangles, all four text fields present.)
+- The Label dialog's PDF button now uses the template pipeline; the on-screen SVG barcode preview is unchanged.
+- Note: QuestPDF was evaluated and rejected — its community license excludes government agencies regardless of size.
+
 ## v0.14.1 — 2026-10-02 — label PDF fixes, grid range-select
 - Fixed the label PDF button crashing the app: PDFsharp 6.x ships with no font resolver, so every label PDF threw on click (the v0.14.0 test masked it with a test-only resolver). The app now resolves fonts from the OS font directories (Arial on Windows), so the PDF renders on any machine.
 - Fixed the label PDF download producing a corrupt file: the browser helper now decodes the base64 payload back to bytes before saving (CSV text downloads are unchanged).

@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Rim</RootNamespace>
-    <Version>0.14.1</Version>
+    <Version>0.15.0</Version>
     <!-- Self-contained win-x64 publish: dotnet publish -c Release -r win-x64 (self-contained) -->
   </PropertyGroup>
 
@@ -19,6 +19,27 @@
     <PackageReference Include="PDFsharp" Version="6.2.4" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
     <PackageReference Include="NLog" Version="6.2.1" />
+    <!-- FastReport Open Source (MIT): template-driven reports and labels.
+         The .frx template defines layout; the engine binds data and computes
+         geometry. PDF output stays vector via PDFsharp (see
+         FastReportLabelService) because the open-source PDF export rasterizes
+         pages, which would soften barcodes on thermal printers. -->
+    <PackageReference Include="FastReport.OpenSource" Version="2026.2.8" />
+  </ItemGroup>
+
+  <!-- Report templates ship next to the executable so they can be edited
+       with FastReport Designer Community Edition without rebuilding. -->
+  <ItemGroup>
+    <Content Include="Reports\Label4x2.frx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Test harness needs the internal template-path constructor. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>RipTests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>
